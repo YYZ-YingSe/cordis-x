@@ -1,0 +1,53 @@
+syntax = "proto3";
+package fixtures.calculator_logging;
+import "cordis/options.proto";
+import "cordis/types.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/wrappers.proto";
+
+message AddArgs {
+  optional sint64 left = 1 [(cordis.schema.required) = true];
+  optional sint64 right = 2 [(cordis.schema.required) = true];
+}
+message MetadataResult {
+  optional string revision = 1 [(cordis.schema.required) = true];
+  repeated google.protobuf.Value layers = 2;
+}
+message MetadataForArgs {
+  optional string name = 1 [(cordis.schema.required) = true];
+  optional string revision = 2 [(cordis.schema.required) = true];
+}
+message MetadataForResult {
+  optional string revision = 1 [(cordis.schema.required) = true];
+  repeated google.protobuf.Value layers = 2;
+}
+message CounterArgs {
+  optional sint64 initial = 1;
+}
+message CounterMetadataResult {
+  optional string revision = 1 [(cordis.schema.required) = true];
+  repeated google.protobuf.Value layers = 2;
+}
+service CounterResource {
+  option (cordis.schema.resource) = true;
+  rpc Get(google.protobuf.Empty) returns (google.protobuf.Int64Value) { option (cordis.schema.wire_name) = "get"; }
+  rpc Add(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) { option (cordis.schema.wire_name) = "add"; option (cordis.schema.errors) = "overflow"; }
+  rpc CodeVersion(google.protobuf.Empty) returns (google.protobuf.StringValue) { option (cordis.schema.wire_name) = "code-version"; }
+  rpc Metadata(google.protobuf.Empty) returns (CounterMetadataResult) { option (cordis.schema.wire_name) = "metadata"; }
+}
+service Service {
+  option (cordis.schema.contract) = { name: "example.calculator" revision: "1" config: "cordis.data.Unit" dependencies: { alias: "logger" service: "fixtures.calculator_logging.VersionLog" }  };
+  rpc CodeVersion(google.protobuf.Empty) returns (google.protobuf.StringValue) { option (cordis.schema.wire_name) = "code-version"; }
+  rpc Echo(google.protobuf.Value) returns (google.protobuf.Value) { option (cordis.schema.wire_name) = "echo"; }
+  rpc Add(AddArgs) returns (google.protobuf.Int64Value) { option (cordis.schema.wire_name) = "add"; option (cordis.schema.errors) = "overflow"; }
+  rpc Metadata(google.protobuf.Empty) returns (MetadataResult) { option (cordis.schema.wire_name) = "metadata"; }
+  rpc MetadataFor(MetadataForArgs) returns (MetadataForResult) { option (cordis.schema.wire_name) = "metadata-for"; }
+  rpc LogVersion(google.protobuf.Empty) returns (google.protobuf.StringValue) { option (cordis.schema.wire_name) = "log-version"; }
+  rpc Counter(CounterArgs) returns (cordis.data.Lease) { option (cordis.schema.wire_name) = "counter"; option (cordis.schema.acquires) = "fixtures.calculator_logging.CounterResource";  }
+}
+
+service VersionLog {
+  option (cordis.schema.contract) = { name: "example.version-log" revision: "1" config: "cordis.data.Unit" };
+  rpc Write(google.protobuf.StringValue) returns (google.protobuf.StringValue);
+}

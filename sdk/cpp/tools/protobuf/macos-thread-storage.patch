@@ -1,0 +1,162 @@
+--- a/src/google/protobuf/port.h
++++ b/src/google/protobuf/port.h
+@@ -12,6 +12,10 @@
+ 
+ #ifndef GOOGLE_PROTOBUF_PORT_H__
+ #define GOOGLE_PROTOBUF_PORT_H__
++
++#if defined(__APPLE__)
++#include "google/protobuf/cordis_thread_storage.h"
++#endif
+ 
+ #include <atomic>
+ #include <cassert>
+@@ -117,13 +121,29 @@
+ 
+ // Hook data for current thread. These vars must not be accessed directly, use
+ // the 'HaveAllocateAtLeastHook()` and `SetAllocateAtLeastHook()` API instead.
++#if defined(__APPLE__)
++inline AllocateAtLeastHookFn& CordisAllocateHook() {
++  static const CordisThreadLocal<AllocateAtLeastHookFn> slot;
++  return slot.get();
++}
++inline void*& CordisAllocateHookContext() {
++  static const CordisThreadLocal<void*> slot;
++  return slot.get();
++}
++#else
+ inline thread_local AllocateAtLeastHookFn allocate_at_least_hook = nullptr;
+ inline thread_local void* allocate_at_least_hook_context = nullptr;
++#endif
+ 
+ constexpr bool HaveAllocateAtLeastHook() { return true; }
+ inline void SetAllocateAtLeastHook(AllocateAtLeastHookFn fn, void* context) {
++#if defined(__APPLE__)
++  CordisAllocateHook() = fn;
++  CordisAllocateHookContext() = context;
++#else
+   allocate_at_least_hook = fn;
+   allocate_at_least_hook_context = context;
++#endif
+ }
+ 
+ #else  // !NDEBUG && ABSL_HAVE_THREAD_LOCAL && __cpp_inline_variables
+@@ -152,9 +172,15 @@
+ inline SizedPtr AllocateAtLeast(size_t size) {
+ #if !defined(NDEBUG) && defined(ABSL_HAVE_THREAD_LOCAL) && \
+     defined(__cpp_inline_variables)
++#if defined(__APPLE__)
++  if (auto hook = CordisAllocateHook()) {
++    return hook(size, CordisAllocateHookContext());
++  }
++#else
+   if (allocate_at_least_hook != nullptr) {
+     return allocate_at_least_hook(size, allocate_at_least_hook_context);
+   }
++#endif
+ #endif  // !NDEBUG && ABSL_HAVE_THREAD_LOCAL && __cpp_inline_variables
+   return {Allocate(size), size};
+ }
+--- a/src/google/protobuf/thread_safe_arena.h
++++ b/src/google/protobuf/thread_safe_arena.h
+@@ -248,7 +248,9 @@
+   using LifecycleId = uint64_t;
+   alignas(kCacheAlignment) ABSL_CONST_INIT
+       static std::atomic<LifecycleId> lifecycle_id_;
+-#if defined(PROTOBUF_NO_THREADLOCAL)
++#if defined(__APPLE__)
++  static ThreadCache& thread_cache();
++#elif defined(PROTOBUF_NO_THREADLOCAL)
+   // iOS does not support __thread keyword so we use a custom thread local
+   // storage class we implemented.
+   static ThreadCache& thread_cache();
+--- a/src/google/protobuf/arena.cc
++++ b/src/google/protobuf/arena.cc
+@@ -541,7 +541,12 @@
+ 
+ alignas(kCacheAlignment) ABSL_CONST_INIT
+     std::atomic<ThreadSafeArena::LifecycleId> ThreadSafeArena::lifecycle_id_{0};
+-#if defined(PROTOBUF_NO_THREADLOCAL)
++#if defined(__APPLE__)
++ThreadSafeArena::ThreadCache& ThreadSafeArena::thread_cache() {
++  static const CordisThreadLocal<ThreadCache> slot;
++  return slot.get();
++}
++#elif defined(PROTOBUF_NO_THREADLOCAL)
+ ThreadSafeArena::ThreadCache& ThreadSafeArena::thread_cache() {
+   static internal::ThreadLocalStorage<ThreadCache>* thread_cache_ =
+       new internal::ThreadLocalStorage<ThreadCache>();
+--- a/src/google/protobuf/reflection_mode.h
++++ b/src/google/protobuf/reflection_mode.h
+@@ -22,6 +22,9 @@
+ #define GOOGLE_PROTOBUF_REFLECTION_MODE_H__
+ 
+ #include <cstddef>
++#if defined(__APPLE__)
++#include "google/protobuf/cordis_thread_storage.h"
++#endif
+ 
+ // Must be included last.
+ #include "google/protobuf/port_def.inc"
+@@ -72,7 +75,7 @@
+  private:
+ #if !defined(PROTOBUF_NO_THREADLOCAL)
+   const ReflectionMode previous_mode_;
+-#if defined(PROTOBUF_USE_DLLS) && defined(_WIN32)
++#if defined(__APPLE__) || (defined(PROTOBUF_USE_DLLS) && defined(_WIN32))
+   // Thread local variables cannot be exposed through MSVC DLL interface but we
+   // can wrap them in static functions.
+   static ReflectionMode& reflection_mode();
+@@ -85,7 +88,7 @@
+ 
+ #if !defined(PROTOBUF_NO_THREADLOCAL)
+ 
+-#if defined(PROTOBUF_USE_DLLS) && defined(_WIN32)
++#if defined(__APPLE__) || (defined(PROTOBUF_USE_DLLS) && defined(_WIN32))
+ 
+ inline ScopedReflectionMode::ScopedReflectionMode(ReflectionMode mode)
+     : previous_mode_(reflection_mode()) {
+--- a/src/google/protobuf/reflection_mode.cc
++++ b/src/google/protobuf/reflection_mode.cc
+@@ -16,7 +16,12 @@
+ 
+ #if !defined(PROTOBUF_NO_THREADLOCAL)
+ 
+-#if defined(PROTOBUF_USE_DLLS) && defined(_WIN32)
++#if defined(__APPLE__)
++ReflectionMode& ScopedReflectionMode::reflection_mode() {
++  static const CordisThreadLocal<ReflectionMode> slot(ReflectionMode::kDefault);
++  return slot.get();
++}
++#elif defined(PROTOBUF_USE_DLLS) && defined(_WIN32)
+ ReflectionMode& ScopedReflectionMode::reflection_mode() {
+   static PROTOBUF_THREAD_LOCAL ReflectionMode reflection_mode =
+       ReflectionMode::kDefault;
+--- a/src/google/protobuf/descriptor.h
++++ b/src/google/protobuf/descriptor.h
+@@ -3342,8 +3342,13 @@
+ // resolution, where a MergeFrom call can wind up in a deadlock.
+ PROTOBUF_FUTURE_ADD_EARLY_NODISCARD
+ PROTOBUF_EXPORT inline bool& IsTrackingEnabledVar() {
++#if defined(__APPLE__)
++  static const internal::CordisThreadLocal<bool> slot(true);
++  return slot.get();
++#else
+   static PROTOBUF_THREAD_LOCAL bool is_tracking_enabled = true;
+   return is_tracking_enabled;
++#endif
+ }
+ PROTOBUF_FUTURE_ADD_EARLY_NODISCARD
+ PROTOBUF_EXPORT inline bool IsTrackingEnabled() {
+--- a/src/google/protobuf/message_lite.cc
++++ b/src/google/protobuf/message_lite.cc
+@@ -795,6 +795,9 @@
+   static bool is_shutdown = false;
+   if (!is_shutdown) {
+     delete internal::ShutdownData::get();
++#if defined(__APPLE__)
++    internal::CordisShutdownThreadStorage();
++#endif
+     is_shutdown = true;
+   }
+ }

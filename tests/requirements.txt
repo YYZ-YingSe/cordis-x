@@ -1,0 +1,2 @@
+# Standard protobuf runtime for process test fault peers.
+protobuf==7.35.1

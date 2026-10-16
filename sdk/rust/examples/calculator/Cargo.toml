@@ -1,0 +1,27 @@
+[package]
+name = "cordis-wasm-calculator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+test-fixture = ["dep:cordis-test-contracts"]
+structural-fixture = ["dep:cordis-test-contracts"]
+version-v2 = []
+
+[dependencies]
+cordis-test-contracts = { workspace = true, optional = true }
+cordis-example-contracts.workspace = true
+cordis-component.workspace = true
+cordis-contract.workspace = true
+cordis-sdk-core.workspace = true
+prost.workspace = true
+wit-bindgen = { version = "=0.61.1", default-features = false, features = ["macros", "realloc"] }
+
+[lints.rust]
+unsafe_code = "deny"

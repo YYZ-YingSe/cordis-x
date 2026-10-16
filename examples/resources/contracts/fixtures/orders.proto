@@ -1,0 +1,30 @@
+syntax = "proto3";
+package fixtures.orders;
+import "fixtures/pricing.proto";
+import "cordis/options.proto";
+import "cordis/types.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/wrappers.proto";
+
+message SubmitArgs {
+  optional sint64 quantity = 1 [(cordis.schema.required) = true];
+  optional sint64 unit_price = 2 [(cordis.schema.required) = true];
+}
+message SubmitResultQuoteReceipt {
+  optional sint64 generation = 1 [(cordis.schema.required) = true];
+  optional sint64 owner = 2 [(cordis.schema.required) = true];
+  optional sint64 caller = 3 [(cordis.schema.required) = true];
+}
+message SubmitResultQuote {
+  optional sint64 total = 1 [(cordis.schema.required) = true];
+  SubmitResultQuoteReceipt receipt = 2 [(cordis.schema.required) = true];
+}
+message SubmitResult {
+  optional string status = 1 [(cordis.schema.required) = true];
+  SubmitResultQuote quote = 2 [(cordis.schema.required) = true];
+}
+service Orders {
+  option (cordis.schema.contract) = { name: "example.orders" revision: "1" config: "cordis.data.Unit" dependencies: { alias: "pricing" service: "fixtures.pricing.Pricing" } };
+  rpc Submit(SubmitArgs) returns (SubmitResult) { option (cordis.schema.wire_name) = "submit"; option (cordis.schema.errors) = "invalid_argument"; }
+}

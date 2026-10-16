@@ -1,0 +1,2 @@
+# Standard descriptor implementation for framework resource generation.
+protobuf==7.35.1

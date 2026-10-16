@@ -1,0 +1,21 @@
+[
+  "cpp/module.hpp",
+  "cpp/proto/cordis/options.pb.cc",
+  "cpp/proto/cordis/options.pb.h",
+  "cpp/proto/cordis/types.pb.cc",
+  "cpp/proto/cordis/types.pb.h",
+  "cpp/proto/fixtures/calculator_process.pb.cc",
+  "cpp/proto/fixtures/calculator_process.pb.h",
+  "resources/descriptor.json",
+  "resources/interfaces/Service.json",
+  "resources/schema.base64",
+  "rust/mod.rs",
+  "rust/proto/_messages.rs",
+  "rust/proto/cordis.data.rs",
+  "rust/proto/fixtures.calculator_process.rs",
+  "rust/proto/google.protobuf.rs",
+  "typescript/module.ts",
+  "typescript/proto/cordis/options_pb.ts",
+  "typescript/proto/cordis/types_pb.ts",
+  "typescript/proto/fixtures/calculator_process_pb.ts"
+]

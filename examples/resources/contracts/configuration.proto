@@ -1,0 +1,11 @@
+syntax = "proto3";
+package configuration;
+import "cordis/options.proto";
+
+message Config {
+  optional uint32 limit = 1 [(cordis.schema.required) = true, (cordis.schema.minimum) = 1, (cordis.schema.maximum) = 100];
+}
+
+service Profile {
+  option (cordis.schema.contract) = { name: "example.profile" revision: "1" config: "configuration.Config" };
+}

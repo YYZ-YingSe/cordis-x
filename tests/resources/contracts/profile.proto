@@ -1,0 +1,66 @@
+syntax = "proto3";
+package profile;
+import "cordis/options.proto";
+import "cordis/types.proto";
+message OptionBool {
+  option (cordis.schema.semantics) = OPTION;
+  oneof state { cordis.data.Null none = 1; bool some = 2; }
+}
+message OptionOptionBool {
+  option (cordis.schema.semantics) = OPTION;
+  oneof state { cordis.data.Null none = 1; OptionBool some = 2; }
+}
+message NullableBool {
+  option (cordis.schema.semantics) = NULLABLE;
+  oneof state { cordis.data.Null null = 1; bool value = 2; }
+}
+message Fixed3 { repeated double values = 1 [(cordis.schema.exact_size) = 3]; }
+message Row { repeated sint64 values = 1; }
+message Rows { repeated Row values = 1; }
+message Users { repeated User values = 1; }
+message User { optional uint64 id = 1 [(cordis.schema.required) = true]; string name = 2; }
+message UserMap { map<string,User> values = 1; }
+message MapOfMaps { map<string,UserMap> values = 1; }
+message Event {
+  option (cordis.schema.semantics) = VARIANT;
+  oneof body { User created = 1; uint64 removed = 2; Users batch = 3; }
+}
+message Tree { string label = 1; repeated Tree children = 2; }
+message LinkA { LinkB next = 1; }
+message LinkB { LinkA next = 1; }
+enum Status { STATUS_UNKNOWN = 0; STATUS_ACTIVE = 1; STATUS_DISABLED = 2; }
+message Config { optional uint32 limit = 1 [(cordis.schema.required) = true, (cordis.schema.minimum) = 1, (cordis.schema.maximum) = 100]; }
+message Data {
+  optional int32 int32_value = 1 [(cordis.schema.required) = true];
+  uint32 uint32_value = 2;
+  int64 int64_value = 3;
+  uint64 uint64_value = 4;
+  float float32_value = 5;
+  double float64_value = 6;
+  bool boolean = 7;
+  string text = 8;
+  bytes binary = 9;
+  Status status = 10;
+  repeated bool flags = 11;
+  repeated User users = 12;
+  map<string,Users> groups = 13;
+  map<int64, string> indexed = 14;
+  map<bool, uint64> toggles = 15;
+  Rows matrix = 16;
+  MapOfMaps nested = 17;
+  Fixed3 position = 18;
+  OptionOptionBool option = 19 [(cordis.schema.required) = true];
+  NullableBool nullable = 20;
+  repeated OptionBool optional_items = 21;
+  repeated Event events = 22;
+  Tree tree = 23;
+  LinkA links = 24;
+  cordis.data.DynamicValue dynamic = 25;
+  cordis.data.Unit unit = 26;
+}
+service Probe {
+  option (cordis.schema.contract) = {name:"example.profile" revision:"1" config:"profile.Config"};
+  rpc Echo(Data) returns(Data);
+  rpc Number(cordis.data.Int64) returns(cordis.data.Int64);
+  rpc Fail(cordis.data.Text) returns(cordis.data.Unit) {option (cordis.schema.errors)="expected";}
+}

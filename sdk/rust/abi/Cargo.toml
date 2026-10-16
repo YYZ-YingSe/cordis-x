@@ -1,0 +1,70 @@
+[package]
+publish = false
+description = "Cordis framework: cordis-sdk-abi"
+name = "cordis-sdk-abi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cordis-sdk-core.workspace = true
+cordis-wire.workspace = true
+tokio.workspace = true
+futures-util.workspace = true
+
+[build-dependencies]
+bindgen = "0.72.1"
+
+[dev-dependencies]
+cordis-example-contracts.workspace = true
+cordis-runtime.workspace = true
+cordis-abi = { path = "../../../crates/cordis-abi", features = ["loader"] }
+cordis-loader.workspace = true
+cordis-sdk-runtime.workspace = true
+cordis-kernel.workspace = true
+cordis-portable-example = { path = "../examples/portable" }
+
+[[example]]
+name = "abi_forward"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "abi_echo"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "resource_counter"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "resource_client"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "abi_resource_probe"
+path = "tests/fixtures/resource_probe.rs"
+crate-type = ["cdylib"]
+
+[lints.rust]
+unsafe_code = "deny"
+[lints.clippy]
+await_holding_lock = "deny"
+
+[[example]]
+name = "abi_resource_probe_client"
+path = "tests/fixtures/resource_probe_client.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "abi_structural_probe"
+path = "tests/fixtures/structural_probe.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "abi_workflows"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "abi_adder"
+crate-type = ["cdylib"]

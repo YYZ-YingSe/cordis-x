@@ -1,0 +1,42 @@
+syntax = "proto3";
+package cordis.schema;
+import "google/protobuf/descriptor.proto";
+
+// Metadata for Cordis binding. Protoc and language plugins own the data model.
+message Dependency { string alias = 1; string service = 2; }
+// Routing identity of a host-selected event, middleware or published value.
+// This declaration never grants access to an unbound runtime capability.
+message Endpoint { string name = 1; string revision = 2; }
+message Contract {
+  string name = 1;
+  string revision = 2;
+  string config = 3;
+  repeated Dependency dependencies = 4;
+  repeated string capabilities = 5;
+}
+enum Semantics { RECORD = 0; OPTION = 1; NULLABLE = 2; VARIANT = 3; }
+extend google.protobuf.ServiceOptions {
+  Contract contract = 51000;
+  bool resource = 51001;
+}
+extend google.protobuf.MethodOptions {
+  repeated string errors = 51002;
+  string acquires = 51003;
+  string wire_name = 51010;
+  // Event output is the Break payload; Continue has no payload.
+  Endpoint event = 51011;
+  // Middleware output is the result of the continuation or short circuit.
+  Endpoint middleware = 51012;
+  // A child-plugin factory: input is its config, output must be data.Child.
+  bool installs = 51013;
+  // Publish the input value; output must be data.Unit.
+  Endpoint provision = 51014;
+}
+extend google.protobuf.MessageOptions { Semantics semantics = 51004; }
+extend google.protobuf.FieldOptions {
+  bool required = 51005;
+  optional uint32 exact_size = 51006;
+  optional sint64 minimum = 51007;
+  optional sint64 maximum = 51008;
+}
+extend google.protobuf.OneofOptions { bool selected = 51009; }

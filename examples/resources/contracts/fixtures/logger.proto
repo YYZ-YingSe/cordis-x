@@ -1,0 +1,17 @@
+syntax = "proto3";
+package fixtures.logger;
+import "cordis/options.proto";
+import "cordis/types.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/wrappers.proto";
+
+message WriteResult {
+  optional sint64 generation = 1 [(cordis.schema.required) = true];
+  optional sint64 owner = 2 [(cordis.schema.required) = true];
+  optional sint64 caller = 3 [(cordis.schema.required) = true];
+}
+service Logger {
+  option (cordis.schema.contract) = { name: "example.logger" revision: "1" config: "cordis.data.Unit"  };
+  rpc Write(google.protobuf.StringValue) returns (WriteResult) { option (cordis.schema.wire_name) = "write"; }
+}

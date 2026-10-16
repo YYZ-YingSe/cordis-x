@@ -1,0 +1,20 @@
+[
+  "cpp/module.hpp",
+  "cpp/proto/cordis/options.pb.cc",
+  "cpp/proto/cordis/options.pb.h",
+  "cpp/proto/cordis/types.pb.cc",
+  "cpp/proto/cordis/types.pb.h",
+  "cpp/proto/workflows.pb.cc",
+  "cpp/proto/workflows.pb.h",
+  "resources/descriptor.json",
+  "resources/interfaces/Workflow.json",
+  "resources/schema.base64",
+  "rust/mod.rs",
+  "rust/proto/_messages.rs",
+  "rust/proto/cordis.data.rs",
+  "rust/proto/workflows.rs",
+  "typescript/module.ts",
+  "typescript/proto/cordis/options_pb.ts",
+  "typescript/proto/cordis/types_pb.ts",
+  "typescript/proto/workflows_pb.ts"
+]

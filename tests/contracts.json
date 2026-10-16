@@ -1,0 +1,14 @@
+{
+  "profile": {
+    "source": "profile.proto",
+    "languages": "cpp,rust,typescript"
+  },
+  "rust_fixture": {
+    "source": "fixtures/rust_fixture.proto",
+    "languages": ""
+  },
+  "remote_fixture": {
+    "source": "fixtures/remote_fixture.proto",
+    "languages": "cpp,rust,typescript"
+  }
+}

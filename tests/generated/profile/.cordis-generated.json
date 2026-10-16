@@ -1,0 +1,20 @@
+[
+  "cpp/module.hpp",
+  "cpp/proto/cordis/options.pb.cc",
+  "cpp/proto/cordis/options.pb.h",
+  "cpp/proto/cordis/types.pb.cc",
+  "cpp/proto/cordis/types.pb.h",
+  "cpp/proto/profile.pb.cc",
+  "cpp/proto/profile.pb.h",
+  "resources/descriptor.json",
+  "resources/interfaces/Probe.json",
+  "resources/schema.base64",
+  "rust/mod.rs",
+  "rust/proto/_messages.rs",
+  "rust/proto/cordis.data.rs",
+  "rust/proto/profile.rs",
+  "typescript/module.ts",
+  "typescript/proto/cordis/options_pb.ts",
+  "typescript/proto/cordis/types_pb.ts",
+  "typescript/proto/profile_pb.ts"
+]

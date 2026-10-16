@@ -1,0 +1,32 @@
+[package]
+publish = false
+description = "Cordis framework: cordis-loader"
+name = "cordis-loader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+watch = ["dep:notify"]
+
+[dependencies]
+cordis-contract.workspace = true
+cordis-kernel.workspace = true
+cordis-runtime.workspace = true
+cordis-wire.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+futures-util.workspace = true
+sha2 = "0.10"
+tempfile = "3"
+goblin = "0.10"
+notify = { version = "8.2", optional = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+cordis-test-contracts.workspace = true
+cordis-example-contracts.workspace = true

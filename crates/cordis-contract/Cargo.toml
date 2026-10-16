@@ -1,0 +1,19 @@
+[package]
+publish = false
+description = "Cordis framework: cordis-contract"
+name = "cordis-contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+prost.workspace = true
+prost-reflect.workspace = true
+base64.workspace = true
+
+[lints]
+workspace = true

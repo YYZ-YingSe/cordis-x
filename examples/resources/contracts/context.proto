@@ -1,0 +1,94 @@
+syntax = "proto3";
+package component_example;
+import "cordis/options.proto";
+import "cordis/types.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/wrappers.proto";
+
+message ContextInfo {
+  optional string definition = 1 [(cordis.schema.required) = true];
+  optional string owner = 2 [(cordis.schema.required) = true];
+  optional string caller = 3;
+  optional bool cleanup = 4 [(cordis.schema.required) = true];
+}
+message ContractIdentity {
+  optional string name = 1 [(cordis.schema.required) = true];
+  optional string revision = 2 [(cordis.schema.required) = true];
+}
+message Metadata {
+  // No intercept snapshot is represented by absence.
+  optional string revision = 1;
+  repeated google.protobuf.Value layers = 2;
+}
+message Decision {
+  option (cordis.schema.semantics) = VARIANT;
+  oneof state { google.protobuf.Empty continued = 1; google.protobuf.Int64Value stopped = 2; }
+}
+message EnvironmentEntry {
+  optional string name = 1 [(cordis.schema.required) = true];
+  optional string value = 2 [(cordis.schema.required) = true];
+}
+message Environment { repeated EnvironmentEntry entries = 1; }
+message FilePath { optional string path = 1 [(cordis.schema.required) = true]; }
+message FileWrite {
+  optional string path = 1 [(cordis.schema.required) = true];
+  optional bytes data = 2 [(cordis.schema.required) = true];
+}
+message Port {
+  optional uint32 port = 1 [(cordis.schema.required) = true, (cordis.schema.minimum) = 1, (cordis.schema.maximum) = 65535];
+}
+service ContextLog {
+  option (cordis.schema.contract) = { name: "example.context-log" revision: "1" config: "cordis.data.Unit" };
+  rpc Write(google.protobuf.Value) returns (google.protobuf.Value);
+  rpc Wait(google.protobuf.Empty) returns (google.protobuf.Empty);
+}
+service Context {
+  option (cordis.schema.contract) = {
+    name: "example.context" revision: "1" config: "cordis.data.Unit"
+    dependencies: { alias: "logger" service: "component_example.ContextLog" }
+  };
+  rpc Messages(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) { option (cordis.schema.event) = { name: "messages" revision: "1" }; }
+  rpc Pipeline(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) { option (cordis.schema.middleware) = { name: "pipeline" revision: "1" }; option (cordis.schema.errors) = "overflow"; }
+  rpc Worker(cordis.data.Unit) returns (cordis.data.Child) { option (cordis.schema.installs) = true; }
+  rpc CodeVersion(google.protobuf.Empty) returns (google.protobuf.StringValue) { option (cordis.schema.wire_name) = "code-version"; }
+  rpc Echo(google.protobuf.Value) returns (google.protobuf.Value);
+  rpc Info(google.protobuf.Empty) returns (ContextInfo);
+  rpc MetadataFor(ContractIdentity) returns (.component_example.Metadata) { option (cordis.schema.wire_name) = "metadata-for"; }
+  rpc Metadata(google.protobuf.Empty) returns (.component_example.Metadata);
+  rpc MetadataDefer(google.protobuf.Empty) returns (.component_example.Metadata) { option (cordis.schema.wire_name) = "metadata-defer"; }
+  rpc Subscribe(google.protobuf.StringValue) returns (google.protobuf.UInt64Value);
+  rpc Release(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.errors) = "empty"; }
+  rpc Scope(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Task(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Events(google.protobuf.Empty) returns (Decision);
+  rpc Middleware(google.protobuf.Empty) returns (google.protobuf.Int64Value) { option (cordis.schema.errors) = "overflow"; }
+  rpc Sequence(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Install(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc WasiEnv(google.protobuf.Empty) returns (Environment) { option (cordis.schema.wire_name) = "wasi-env"; }
+  rpc WasiRandom(google.protobuf.Empty) returns (google.protobuf.BytesValue) { option (cordis.schema.wire_name) = "wasi-random"; }
+  rpc WasiClock(google.protobuf.Empty) returns (google.protobuf.UInt64Value) { option (cordis.schema.wire_name) = "wasi-clock"; }
+  // Read a binary preview: offset zero, at most 4096 bytes.
+  rpc WasiRead(FilePath) returns (google.protobuf.BytesValue) { option (cordis.schema.wire_name) = "wasi-read"; option (cordis.schema.errors) = "wasi"; option (cordis.schema.errors) = "no_directory"; }
+  rpc WasiWrite(FileWrite) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "wasi-write"; option (cordis.schema.errors) = "wasi"; option (cordis.schema.errors) = "no_directory"; }
+  rpc WasiListen(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "wasi-listen"; option (cordis.schema.errors) = "wasi"; }
+  rpc WasiConnect(Port) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "wasi-connect"; option (cordis.schema.errors) = "wasi"; }
+  rpc WasiExchange(Port) returns (google.protobuf.BytesValue) { option (cordis.schema.wire_name) = "wasi-exchange"; option (cordis.schema.errors) = "wasi"; }
+}
+// Only the explicitly built test artifact exposes these failure/authority probes.
+message ProbeConfig { google.protobuf.Value provide = 1; }
+service ContextProbe {
+  option (cordis.schema.contract) = { name: "example.context-probe" revision: "1" config: "component_example.ProbeConfig" dependencies: { alias: "logger" service: "component_example.ContextLog" } };
+  rpc Stale(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc SequenceFailure(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "sequence-failure"; }
+  rpc Provide(google.protobuf.Value) returns (google.protobuf.Empty);
+  rpc InstallDenied(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "install-denied"; }
+  rpc DelayedDefer(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "delayed-defer"; }
+  rpc FailedDefer(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "failed-defer"; }
+  rpc InvalidRegistration(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "invalid-registration"; }
+  rpc Spin(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Pending(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Trap(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc TrapAfterRequest(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "trap-after-request"; }
+  rpc WasiBlock(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "wasi-block"; }
+}

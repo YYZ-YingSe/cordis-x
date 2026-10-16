@@ -1,0 +1,10 @@
+{
+  "entries": [
+    {
+      "id": "profile-main",
+      "source": "example.profile",
+      "enabled": true,
+      "config": { "limit": 10 }
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+syntax = "proto3";
+package lifecycle;
+import "cordis/options.proto";
+import "cordis/types.proto";
+import "lifecycle/common.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+// Two explicit dependency contracts share one implementation. A quiet service
+// does not gain a logger capability merely by selecting a configuration flag.
+service Subscriptions {
+  option (cordis.schema.contract) = {
+    name: "example.subscriptions" revision: "1" config: "cordis.data.Unit"
+    
+  };
+  rpc Subscribe(google.protobuf.StringValue) returns (google.protobuf.StringValue) {
+    option (cordis.schema.errors) = "duplicate_subscription";
+    
+  }
+  rpc Unsubscribe(google.protobuf.StringValue) returns (google.protobuf.Empty) {  }
+  rpc Publish(google.protobuf.StringValue) returns (google.protobuf.UInt64Value);
+  rpc Count(google.protobuf.Empty) returns (google.protobuf.UInt64Value);
+}
+
+service AuditedSubscriptions {
+  option (cordis.schema.contract) = {
+    name: "example.audited-subscriptions" revision: "1" config: "cordis.data.Unit"
+    dependencies: { alias: "logger" service: "lifecycle.LifecycleLog" }
+  };
+  rpc Subscribe(google.protobuf.StringValue) returns (google.protobuf.StringValue) {
+    option (cordis.schema.errors) = "duplicate_subscription";
+    option (cordis.schema.errors) = "cleanup_failed";
+  }
+  rpc Unsubscribe(google.protobuf.StringValue) returns (google.protobuf.Empty) { option (cordis.schema.errors) = "cleanup_failed"; }
+  rpc Publish(google.protobuf.StringValue) returns (google.protobuf.UInt64Value);
+  rpc Count(google.protobuf.Empty) returns (google.protobuf.UInt64Value);
+}

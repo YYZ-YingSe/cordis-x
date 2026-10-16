@@ -1,0 +1,69 @@
+syntax = "proto3";
+package portable;
+import "cordis/options.proto";
+import "cordis/types.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/struct.proto";
+message Metadata { optional string revision = 1 [(cordis.schema.required) = true]; repeated google.protobuf.Value layers = 2; }
+message Wrapped { optional sint64 wrapped = 1 [(cordis.schema.required) = true]; }
+message Decision {
+  option (cordis.schema.semantics) = VARIANT;
+  oneof state { google.protobuf.Empty continued = 1; google.protobuf.Int64Value stopped = 2; }
+}
+message Decisions { repeated Decision values = 1; }
+message CounterArgs { optional sint64 initial = 1; }
+service PortableLog {
+  option (cordis.schema.contract) = { name: "example.portable-log" revision: "1" config: "cordis.data.Unit" };
+  // This logger intentionally records arbitrary JSON payloads.
+  rpc Write(google.protobuf.Value) returns (google.protobuf.Value) { option (cordis.schema.errors) = "logger_rejected"; }
+}
+service PortableCounter {
+  option (cordis.schema.resource) = true;
+  rpc Get(google.protobuf.Empty) returns (google.protobuf.Int64Value);
+  rpc Add(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) { option (cordis.schema.errors) = "overflow"; }
+  rpc Metadata(google.protobuf.Empty) returns (portable.Metadata);
+}
+service PortableRust {
+  option (cordis.schema.contract) = { name: "example.portable-rust" revision: "1" config: "cordis.data.Unit"
+    dependencies: { alias: "logger" service: "portable.PortableLog" } };
+  rpc Message(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) { option (cordis.schema.event) = { name: "example.message" revision: "1" }; option (cordis.schema.errors) = "logger_rejected"; }
+  rpc Chain(google.protobuf.Int64Value) returns (Wrapped) { option (cordis.schema.middleware) = { name: "example.chain" revision: "1" }; }
+  rpc Worker(cordis.data.Unit) returns (cordis.data.Child) { option (cordis.schema.installs) = true; }
+  rpc Echo(google.protobuf.Value) returns (google.protobuf.Value) { option (cordis.schema.errors) = "logger_rejected"; }
+  rpc Count(google.protobuf.Empty) returns (google.protobuf.UInt64Value) { option (cordis.schema.errors) = "overflow"; }
+  rpc Metadata(google.protobuf.Empty) returns (portable.Metadata);
+  rpc SaveContext(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "save-context"; }
+  rpc Expired(google.protobuf.Empty) returns (google.protobuf.BoolValue) { option (cordis.schema.errors) = "empty"; }
+  rpc Defer(google.protobuf.Value) returns (google.protobuf.Empty);
+  rpc Scope(google.protobuf.Empty) returns (google.protobuf.Int64Value) { option (cordis.schema.errors) = "logger_rejected"; }
+  rpc Sequence(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Task(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Event(google.protobuf.Empty) returns (Decisions) { option (cordis.schema.errors) = "logger_rejected"; }
+  rpc Middleware(google.protobuf.Empty) returns (Wrapped);
+  rpc Child(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc ResourceSupport(google.protobuf.Empty) returns (google.protobuf.StringValue) { option (cordis.schema.wire_name) = "resource-support"; }
+  rpc FailedCleanup(google.protobuf.Value) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "failed-cleanup"; }
+  rpc Release(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.errors) = "empty"; option (cordis.schema.errors) = "cleanup_failed"; }
+}
+service PortableCpp {
+  option (cordis.schema.contract) = { name: "example.portable" revision: "1" config: "cordis.data.Unit"
+    dependencies: { alias: "logger" service: "portable.PortableLog" } };
+  rpc Message(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) { option (cordis.schema.event) = { name: "example.message" revision: "1" }; option (cordis.schema.errors) = "logger_rejected"; }
+  rpc Chain(google.protobuf.Int64Value) returns (Wrapped) { option (cordis.schema.middleware) = { name: "example.chain" revision: "1" }; }
+  rpc Worker(cordis.data.Unit) returns (cordis.data.Child) { option (cordis.schema.installs) = true; }
+  rpc Echo(google.protobuf.Value) returns (google.protobuf.Value) { option (cordis.schema.errors) = "logger_rejected"; }
+  rpc Count(google.protobuf.Empty) returns (google.protobuf.UInt64Value) { option (cordis.schema.errors) = "overflow"; }
+  rpc Metadata(google.protobuf.Empty) returns (portable.Metadata);
+  rpc SaveContext(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "save-context"; }
+  rpc Expired(google.protobuf.Empty) returns (google.protobuf.BoolValue) { option (cordis.schema.errors) = "empty"; }
+  rpc Defer(google.protobuf.Value) returns (google.protobuf.Empty);
+  rpc Scope(google.protobuf.Empty) returns (google.protobuf.Int64Value) { option (cordis.schema.errors) = "logger_rejected"; }
+  rpc Sequence(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Task(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Event(google.protobuf.Empty) returns (Decisions) { option (cordis.schema.errors) = "logger_rejected"; }
+  rpc Middleware(google.protobuf.Empty) returns (Wrapped);
+  rpc Child(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Log(google.protobuf.Value) returns (google.protobuf.Value) { option (cordis.schema.errors) = "logger_rejected"; }
+  rpc Counter(CounterArgs) returns (cordis.data.Lease) { option (cordis.schema.acquires) = "portable.PortableCounter"; }
+}

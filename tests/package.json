@@ -1,0 +1,17 @@
+{
+  "name": "@cordis-x/test-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./profile": "./generated/profile/typescript/module.ts",
+    "./profile/messages/*": "./generated/profile/typescript/proto/*_pb.ts",
+    "./remote_fixture": "./generated/remote_fixture/typescript/module.ts",
+    "./remote_fixture/messages/*": "./generated/remote_fixture/typescript/proto/*_pb.ts"
+  },
+  "dependencies": {
+    "@cordis-x/sdk": "0.1.0",
+    "@bufbuild/protobuf": "2.16.0"
+  },
+  "license": "Apache-2.0"
+}

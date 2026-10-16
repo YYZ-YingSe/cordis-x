@@ -1,0 +1,49 @@
+syntax = "proto3";
+package cordis.transport;
+
+import "google/protobuf/struct.proto";
+
+// Control data (configuration, names, handles, flow tags) is separate from
+// business messages. Each message is the original protobuf body for the
+// contract selected by the operation; never JSON, base64 or a Value tree.
+message Payload {
+  google.protobuf.Value control = 1;
+  repeated bytes messages = 2;
+}
+
+message Identity {
+  string incarnation = 1;
+  string fiber = 2;
+  string epoch = 3;
+}
+
+message Request {
+  string command = 1;
+  Payload payload = 2;
+}
+
+message Error {
+  string code = 1;
+  string message = 2;
+}
+
+message Response {
+  oneof outcome {
+    Payload success = 1;
+    Error rejected = 2;
+    Error refused = 3;
+    Error unknown = 4;
+  }
+}
+
+// IPC adds only a big-endian u32 byte length. HTTP carries exactly these
+// protobuf bytes as application/protobuf. Neither negotiates a codec.
+message Frame {
+  string session = 1;
+  Identity activation = 2;
+  string operation = 3;
+  oneof direction {
+    Request request = 4;
+    Response response = 5;
+  }
+}

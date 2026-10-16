@@ -1,0 +1,9 @@
+[
+  "resources/descriptor.json",
+  "resources/interfaces/Adder.json",
+  "resources/interfaces/Consumer.json",
+  "resources/interfaces/Counter.json",
+  "resources/schema.base64",
+  "rust/mod.rs",
+  "rust/proto/_messages.rs"
+]

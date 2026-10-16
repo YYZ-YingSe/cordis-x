@@ -1,0 +1,11 @@
+syntax = "proto3";
+package lifecycle;
+// Compilation root: each definition retains its own file/import identity.
+import "lifecycle/events.proto";
+import "lifecycle/middleware.proto";
+import "lifecycle/composition.proto";
+import "lifecycle/reactive.proto";
+import "lifecycle/subscriptions.proto";
+import "lifecycle/sequence.proto";
+import "lifecycle/scopes.proto";
+import "lifecycle/tasks.proto";

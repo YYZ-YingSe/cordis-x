@@ -1,0 +1,32 @@
+syntax = "proto3";
+package example;
+import "cordis/options.proto";
+import "cordis/types.proto";
+
+message AddArgs {
+  optional sint64 left = 1 [(cordis.schema.required) = true];
+  optional sint64 right = 2 [(cordis.schema.required) = true];
+}
+message CounterArgs { optional sint64 initial = 1 [(cordis.schema.required) = true]; }
+
+service Adder {
+  option (cordis.schema.contract) = { name: "example.adder" revision: "1" config: "cordis.data.Unit" };
+  rpc Add(AddArgs) returns (cordis.data.Int64) { option (cordis.schema.errors) = "overflow"; }
+}
+service Counter {
+  option (cordis.schema.contract) = { name: "example.counter" revision: "1" config: "cordis.data.Unit" };
+  rpc Counter(CounterArgs) returns (cordis.data.Lease) { option (cordis.schema.acquires) = "example.CounterResource"; }
+}
+service CounterResource {
+  option (cordis.schema.resource) = true;
+  rpc Get(cordis.data.Unit) returns (cordis.data.Int64);
+  rpc Add(cordis.data.Int64) returns (cordis.data.Int64) { option (cordis.schema.errors) = "overflow"; }
+}
+service Consumer {
+  option (cordis.schema.contract) = {
+    name: "example.consumer" revision: "1" config: "cordis.data.Unit"
+    dependencies: { alias: "adder" service: "example.Adder" }
+    dependencies: { alias: "counters" service: "example.Counter" }
+  };
+  rpc Run(AddArgs) returns (cordis.data.Int64);
+}

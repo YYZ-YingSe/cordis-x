@@ -1,0 +1,29 @@
+syntax = "proto3";
+package lifecycle;
+import "cordis/options.proto";
+import "cordis/types.proto";
+import "lifecycle/common.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+service Reactive {
+  option (cordis.schema.contract) = {
+    name: "example.reactive" revision: "1" config: "cordis.data.Unit"
+    dependencies: { alias: "logger" service: "lifecycle.LifecycleLog" }
+  };
+  rpc Notice(google.protobuf.Int64Value) returns (google.protobuf.Empty) {
+    option (cordis.schema.event) = { name: "example.reactive.notice" revision: "1" };
+    option (cordis.schema.errors) = "cleanup_failed";
+    option (cordis.schema.errors) = "event_failed";
+  }
+  rpc Calculate(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) {
+    option (cordis.schema.middleware) = { name: "example.reactive.calculate" revision: "1" };
+    option (cordis.schema.errors) = "overflow";
+    option (cordis.schema.errors) = "cleanup_failed";
+  }
+  rpc Subscribe(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Process(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) {
+    option (cordis.schema.errors) = "overflow";
+    option (cordis.schema.errors) = "cleanup_failed";
+    option (cordis.schema.errors) = "event_failed";
+  }
+}

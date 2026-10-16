@@ -1,0 +1,6 @@
+control {
+  struct_value {
+    fields { key: "config" value { struct_value {} } }
+    fields { key: "validation" value { string_value: "checked" } }
+  }
+}

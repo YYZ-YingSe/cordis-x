@@ -1,0 +1,55 @@
+syntax = "proto3";
+package lifecycle;
+import "cordis/options.proto";
+import "lifecycle/common.proto";
+import "google/protobuf/empty.proto";
+// Read-only diagnostic projections. None of these messages grants authority.
+message ManagedError {
+  optional string code = 1 [(cordis.schema.required) = true];
+  optional string message = 2 [(cordis.schema.required) = true];
+}
+message Completion {
+  enum State { completed = 0; stopped = 1; }
+  optional State completion = 1 [(cordis.schema.required) = true];
+}
+message ForwardStatus {
+  option (cordis.schema.semantics) = VARIANT;
+  oneof outcome { google.protobuf.Empty pending = 1; Completion succeeded = 2; ManagedError failed = 3; ManagedError refused = 4; }
+}
+message WorkOutcome {
+  option (cordis.schema.semantics) = VARIANT;
+  oneof outcome { google.protobuf.Empty pending = 1; google.protobuf.Empty succeeded = 2; ManagedError failed = 3; ManagedError refused = 4; }
+}
+message EffectDiagnostic {
+  enum State { owned = 0; releasing = 1; released = 2; failed = 3; }
+  optional string label = 1 [(cordis.schema.required) = true];
+  optional State state = 2 [(cordis.schema.required) = true];
+}
+message StepDiagnostic {
+  enum State { pending = 0; owned = 1; no_effect = 2; not_executed = 3; unknown = 4; released = 5; failed = 6; }
+  optional uint64 step = 1 [(cordis.schema.required) = true];
+  optional State state = 2 [(cordis.schema.required) = true];
+  optional string error = 3;
+}
+message SequenceStatus {
+  optional EffectDiagnostic.State state = 1 [(cordis.schema.required) = true];
+  repeated StepDiagnostic steps = 2;
+  ForwardStatus forward = 3 [(cordis.schema.required) = true];
+}
+message RunDiagnostic {
+  enum State { pending = 0; completed = 1; not_executed = 2; unknown = 3; }
+  optional string run = 1 [(cordis.schema.required) = true];
+  optional State state = 2 [(cordis.schema.required) = true];
+}
+message ScopeStatus {
+  optional ChildStatus.State state = 1 [(cordis.schema.required) = true];
+  bool retired = 2;
+  optional string error = 3;
+  repeated EffectDiagnostic effects = 4;
+  repeated RunDiagnostic runs = 5;
+}
+message TaskStatus {
+  enum State { running = 0; completed = 1; not_executed = 2; unknown = 3; }
+  optional State state = 1 [(cordis.schema.required) = true];
+  WorkOutcome outcome = 2 [(cordis.schema.required) = true];
+}

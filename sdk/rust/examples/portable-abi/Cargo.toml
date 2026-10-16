@@ -1,0 +1,12 @@
+[package]
+publish = false
+name = "cordis-portable-abi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+[lib]
+crate-type = ["cdylib"]
+[dependencies]
+cordis-sdk-abi = { path = "../../abi" }
+cordis-portable-example = { path = "../portable" }

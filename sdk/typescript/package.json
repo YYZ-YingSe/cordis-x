@@ -1,0 +1,30 @@
+{
+  "name": "@cordis-x/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./adapters/process": "./src/adapters/process.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "typescript": "5.9.3",
+    "@cordis-x/example-contracts": "0.1.0",
+    "@cordis-x/test-contracts": "0.1.0"
+  },
+  "license": "Apache-2.0",
+  "imports": {
+    "#cordis-generated/transport": "./generated/transport_pb.ts",
+    "#cordis-generated/schema": "./generated/message-schema.ts"
+  }
+}

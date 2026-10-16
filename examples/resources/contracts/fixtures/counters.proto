@@ -1,0 +1,34 @@
+syntax = "proto3";
+package fixtures.counters;
+import "cordis/options.proto";
+import "cordis/types.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+service CounterResource {
+  option (cordis.schema.resource) = true;
+  rpc Get(google.protobuf.Empty) returns (google.protobuf.Int64Value);
+  rpc Add(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) { option (cordis.schema.errors) = "overflow"; }
+}
+message CounterClosed {
+  optional sint64 counter_closed = 1 [json_name = "counter_closed", (cordis.schema.required) = true];
+}
+service CounterLog {
+  option (cordis.schema.contract) = { name: "example.counter-log" revision: "1" config: "cordis.data.Unit" };
+  rpc Write(CounterClosed) returns (google.protobuf.Empty);
+}
+service Counters {
+  option (cordis.schema.contract) = { name: "example.counters" revision: "1" config: "cordis.data.Unit" dependencies: { alias: "logger" service: "fixtures.counters.CounterLog" } };
+  rpc Counter(google.protobuf.Int64Value) returns (cordis.data.Lease) { option (cordis.schema.acquires) = "fixtures.counters.CounterResource"; }
+}
+
+service CounterHolder {
+  option (cordis.schema.contract) = {
+    name: "example.counter-client" revision: "1" config: "cordis.data.Unit"
+    dependencies: { alias: "counters" service: "fixtures.counters.Counters" }
+  };
+  rpc Acquire(google.protobuf.Int64Value) returns (google.protobuf.Empty);
+  rpc Get(google.protobuf.Empty) returns (google.protobuf.Int64Value) { option (cordis.schema.errors) = "empty"; }
+  rpc Add(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) { option (cordis.schema.errors) = "empty"; option (cordis.schema.errors) = "overflow"; }
+  rpc Release(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.errors) = "empty"; }
+  rpc Scoped(google.protobuf.Int64Value) returns (google.protobuf.Int64Value);
+}

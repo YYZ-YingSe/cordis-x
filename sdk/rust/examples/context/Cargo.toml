@@ -1,0 +1,23 @@
+[package]
+name = "cordis-wasm-context-example"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+test-fixture = []
+version-v2 = []
+
+[dependencies]
+cordis-sdk-core.workspace = true
+cordis-portable-example = { path = "../portable" }
+cordis-guest = { path = "../../component" }
+wasi = "=0.14.2"
+
+[lints.rust]
+unsafe_code = "deny"

@@ -1,0 +1,10 @@
+[
+  "resources/descriptor.json",
+  "resources/interfaces/Service.json",
+  "resources/schema.base64",
+  "rust/mod.rs",
+  "rust/proto/_messages.rs",
+  "rust/proto/cordis.data.rs",
+  "rust/proto/fixtures.calculator_wasm.rs",
+  "rust/proto/google.protobuf.rs"
+]

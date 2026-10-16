@@ -1,0 +1,38 @@
+[package]
+publish = false
+description = "Cordis framework: cordis-codegen"
+name = "cordis-codegen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cordis-contract.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+heck = "0.5"
+quote = "1"
+proc-macro2 = "1"
+syn = { version = "3", features = ["full", "parsing"] }
+prettyplease = "0.3"
+prost.workspace = true
+prost-types.workspace = true
+prost-reflect.workspace = true
+prost-build = { version = "0.14.4", default-features = false, features = ["format"] }
+base64.workspace = true
+sha2 = "0.10"
+tempfile = "3"
+
+[dev-dependencies]
+cordis-test-contracts.workspace = true
+cordis-example-contracts.workspace = true
+cordis-remote = { path = "../cordis-remote" }
+cordis-sdk-core.workspace = true
+cordis-sdk-runtime.workspace = true
+cordis-sdk.workspace = true
+cordis-portable-example = { path = "../../sdk/rust/examples/portable" }
+tokio.workspace = true
+
+[lints]
+workspace = true

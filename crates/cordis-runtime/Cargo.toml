@@ -1,0 +1,20 @@
+[package]
+publish = false
+description = "Cordis framework: cordis-runtime"
+name = "cordis-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cordis-contract.workspace = true
+cordis-kernel.workspace = true
+tokio.workspace = true
+futures-util.workspace = true
+
+[dev-dependencies]
+loom = "=0.7.2"
+
+[lints]
+workspace = true

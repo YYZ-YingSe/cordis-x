@@ -1,0 +1,64 @@
+[package]
+publish = false
+description = "Cordis framework: cordis-guest"
+name = "cordis-guest"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cordis-sdk-core.workspace = true
+cordis-component.workspace = true
+futures-util.workspace = true
+wit-bindgen = { version = "=0.61.1", default-features = false, features = ["macros", "realloc", "async", "inter-task-wakeup"] }
+
+[dev-dependencies]
+cordis-portable-example = { path = "../examples/portable" }
+
+[[example]]
+name = "wasm_forward"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "wasm_echo"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "wasm_resource_counter"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "wasm_resource_client"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "wasm_resource_probe"
+path = "tests/fixtures/resource_probe.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "wasm_resource_protocol_probe"
+path = "tests/fixtures/resource_protocol_probe.rs"
+crate-type = ["cdylib"]
+
+[lints.rust]
+unsafe_code = "deny"
+
+[[example]]
+name = "wasm_resource_probe_client"
+path = "tests/fixtures/resource_probe_client.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "wasm_structural_probe"
+path = "tests/fixtures/structural_probe.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "wasm_workflows"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "wasm_adder"
+crate-type = ["cdylib"]

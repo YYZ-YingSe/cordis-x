@@ -1,0 +1,37 @@
+syntax = "proto3";
+package fixtures.rust_fixture;
+import "cordis/options.proto";
+import "cordis/types.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/wrappers.proto";
+
+message AddArgs {
+  optional sint64 left = 1 [(cordis.schema.required) = true];
+  optional sint64 right = 2 [(cordis.schema.required) = true];
+}
+message StatsResult {
+  optional sint64 calls = 1 [(cordis.schema.required) = true];
+  optional sint64 leases = 2 [(cordis.schema.required) = true];
+  optional sint64 releases = 3 [(cordis.schema.required) = true];
+}
+message CounterArgs {
+  optional sint64 initial = 1;
+}
+service CounterResource {
+  option (cordis.schema.resource) = true;
+  rpc Get(google.protobuf.Empty) returns (google.protobuf.Int64Value) { option (cordis.schema.wire_name) = "get"; }
+  rpc Add(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) { option (cordis.schema.wire_name) = "add"; option (cordis.schema.errors) = "overflow"; }
+}
+service Service {
+  option (cordis.schema.contract) = { name: "example.calculator" revision: "1" config: "cordis.data.Unit"  };
+  rpc CodeVersion(google.protobuf.Empty) returns (google.protobuf.StringValue) { option (cordis.schema.wire_name) = "code-version"; option (cordis.schema.errors) = "fixture"; }
+  rpc Echo(google.protobuf.Value) returns (google.protobuf.Value) { option (cordis.schema.wire_name) = "echo"; option (cordis.schema.errors) = "fixture"; }
+  rpc Add(AddArgs) returns (google.protobuf.Int64Value) { option (cordis.schema.wire_name) = "add"; option (cordis.schema.errors) = "overflow"; option (cordis.schema.errors) = "fixture"; }
+  rpc Stats(google.protobuf.Empty) returns (StatsResult) { option (cordis.schema.wire_name) = "stats"; option (cordis.schema.errors) = "fixture"; }
+  rpc Trap(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "trap"; option (cordis.schema.errors) = "fixture"; }
+  rpc Spin(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "spin"; option (cordis.schema.errors) = "fixture"; }
+  rpc Invalid(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "invalid"; option (cordis.schema.errors) = "fixture"; }
+  rpc Memory(google.protobuf.Empty) returns (google.protobuf.Empty) { option (cordis.schema.wire_name) = "memory"; option (cordis.schema.errors) = "fixture"; }
+  rpc Counter(CounterArgs) returns (cordis.data.Lease) { option (cordis.schema.wire_name) = "counter"; option (cordis.schema.acquires) = "fixtures.rust_fixture.CounterResource"; option (cordis.schema.errors) = "fixture"; }
+}

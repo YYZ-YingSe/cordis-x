@@ -1,0 +1,37 @@
+{
+  "name": "@cordis-x/example-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./examples": "./generated/examples/typescript/module.ts",
+    "./examples/messages/*": "./generated/examples/typescript/proto/*_pb.ts",
+    "./workflows": "./generated/workflows/typescript/module.ts",
+    "./workflows/messages/*": "./generated/workflows/typescript/proto/*_pb.ts",
+    "./portable": "./generated/portable/typescript/module.ts",
+    "./portable/messages/*": "./generated/portable/typescript/proto/*_pb.ts",
+    "./lifecycle": "./generated/lifecycle/typescript/module.ts",
+    "./lifecycle/messages/*": "./generated/lifecycle/typescript/proto/*_pb.ts",
+    "./context": "./generated/context/typescript/module.ts",
+    "./context/messages/*": "./generated/context/typescript/proto/*_pb.ts",
+    "./calculator_process": "./generated/calculator_process/typescript/module.ts",
+    "./calculator_process/messages/*": "./generated/calculator_process/typescript/proto/*_pb.ts",
+    "./pricing": "./generated/pricing/typescript/module.ts",
+    "./pricing/messages/*": "./generated/pricing/typescript/proto/*_pb.ts",
+    "./orders": "./generated/orders/typescript/module.ts",
+    "./orders/messages/*": "./generated/orders/typescript/proto/*_pb.ts",
+    "./calculator_abi": "./generated/calculator_abi/typescript/module.ts",
+    "./calculator_abi/messages/*": "./generated/calculator_abi/typescript/proto/*_pb.ts",
+    "./logger": "./generated/logger/typescript/module.ts",
+    "./logger/messages/*": "./generated/logger/typescript/proto/*_pb.ts",
+    "./calculator_logging": "./generated/calculator_logging/typescript/module.ts",
+    "./calculator_logging/messages/*": "./generated/calculator_logging/typescript/proto/*_pb.ts",
+    "./counters": "./generated/counters/typescript/module.ts",
+    "./counters/messages/*": "./generated/counters/typescript/proto/*_pb.ts"
+  },
+  "dependencies": {
+    "@cordis-x/sdk": "0.1.0",
+    "@bufbuild/protobuf": "2.16.0"
+  },
+  "license": "Apache-2.0"
+}

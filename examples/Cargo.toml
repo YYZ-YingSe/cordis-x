@@ -1,0 +1,14 @@
+[package]
+name = "cordis-example-contracts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+cordis-sdk-core.workspace = true
+prost.workspace = true
+
+[lints]
+workspace = true

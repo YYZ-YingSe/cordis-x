@@ -1,0 +1,41 @@
+syntax = "proto3";
+package lifecycle;
+import "cordis/options.proto";
+import "lifecycle/common.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+message HandlerSpec {
+  enum Behavior { WRAP = 0; SHORT = 1; DUPLICATE = 2; FAIL = 3; }
+  optional string id = 1 [(cordis.schema.required) = true];
+  optional Behavior behavior = 2 [(cordis.schema.required) = true];
+}
+service Pipeline {
+  option (cordis.schema.contract) = {
+    name: "example.middleware" revision: "1" config: "lifecycle.ListenerConfig"
+    dependencies: { alias: "logger" service: "lifecycle.LifecycleLog" }
+  };
+  rpc Request(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) {
+    option (cordis.schema.middleware) = { name: "example.middleware.request" revision: "1" };
+    option (cordis.schema.errors) = "closed";
+    option (cordis.schema.errors) = "overflow";
+    option (cordis.schema.errors) = "cleanup_failed";
+  }
+  rpc RegisterHandler(HandlerSpec) returns (google.protobuf.Empty) { option (cordis.schema.errors) = "duplicate_handler"; }
+  rpc Release(google.protobuf.StringValue) returns (google.protobuf.Empty) { option (cordis.schema.errors) = "unknown_handler"; }
+  rpc Expired(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) {
+    option (cordis.schema.errors) = "no_next";
+    option (cordis.schema.errors) = "closed";
+    option (cordis.schema.errors) = "overflow";
+    option (cordis.schema.errors) = "cleanup_failed";
+  }
+  rpc Run(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) {
+    option (cordis.schema.errors) = "closed";
+    option (cordis.schema.errors) = "overflow";
+    option (cordis.schema.errors) = "cleanup_failed";
+  }
+  rpc Identity(google.protobuf.Int64Value) returns (google.protobuf.Int64Value) {
+    option (cordis.schema.errors) = "closed";
+    option (cordis.schema.errors) = "overflow";
+    option (cordis.schema.errors) = "cleanup_failed";
+  }
+}

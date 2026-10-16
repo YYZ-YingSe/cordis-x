@@ -1,0 +1,8 @@
+{
+  "entries": [
+    { "id": "tools", "source": "tools" },
+    { "id": "search", "source": "search" },
+    { "id": "database", "source": "database", "config": { "connection": "database-a" } },
+    { "id": "metrics", "source": "metrics" }
+  ]
+}

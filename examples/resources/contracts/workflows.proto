@@ -1,0 +1,44 @@
+syntax = "proto3";
+package workflows;
+import "cordis/options.proto";
+import "cordis/types.proto";
+
+message Tick { optional sint64 value = 1 [(cordis.schema.required) = true]; }
+message WorkerConfig { optional string label = 1 [(cordis.schema.required) = true]; }
+message Settings { optional sint64 answer = 1 [(cordis.schema.required) = true]; }
+message Decision {
+  option (cordis.schema.semantics) = VARIANT;
+  oneof state {
+    cordis.data.Unit continued = 1;
+    cordis.data.Int64 stopped = 2;
+  }
+}
+message Decisions { repeated Decision values = 1; }
+
+service Workflow {
+  option (cordis.schema.contract) = {
+    name: "example.workflow" revision: "1" config: "cordis.data.Unit"
+  };
+  // These are capability declarations. They do not become incoming RPC methods.
+  rpc TickEvent(Tick) returns (cordis.data.Int64) {
+    option (cordis.schema.wire_name) = "tick";
+    option (cordis.schema.event) = {name: "example.tick" revision: "1"};
+    option (cordis.schema.errors) = "overflow";
+  }
+  rpc Request(Tick) returns (cordis.data.Int64) {
+    option (cordis.schema.middleware) = {name: "example.request" revision: "1"};
+    option (cordis.schema.errors) = "overflow";
+  }
+  rpc Worker(WorkerConfig) returns (cordis.data.Child) {
+    option (cordis.schema.installs) = true;
+    option (cordis.schema.errors) = "invalid_worker";
+  }
+  rpc SettingsValue(Settings) returns (cordis.data.Unit) {
+    option (cordis.schema.wire_name) = "settings";
+    option (cordis.schema.provision) = {name: "example.settings" revision: "1"};
+  }
+  rpc Run(Tick) returns (cordis.data.Int64) { option (cordis.schema.errors) = "overflow"; }
+  rpc Serial(Tick) returns (Decision) { option (cordis.schema.errors) = "overflow"; }
+  rpc Parallel(Tick) returns (Decisions) { option (cordis.schema.errors) = "overflow"; }
+  rpc SpawnWorker(WorkerConfig) returns (cordis.data.Unit) { option (cordis.schema.errors) = "invalid_worker"; }
+}

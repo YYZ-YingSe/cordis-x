@@ -1,0 +1,37 @@
+syntax = "proto3";
+package lifecycle;
+import "cordis/options.proto";
+import "cordis/types.proto";
+import "lifecycle/common.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+import "lifecycle/managed_status.proto";
+message ScopeConfig { bool fail_activate = 1; }
+service Connections {
+  option (cordis.schema.contract) = {
+    name: "example.connections" revision: "1" config: "lifecycle.ScopeConfig"
+    dependencies: { alias: "logger" service: "lifecycle.LifecycleLog" }
+  };
+  rpc Open(google.protobuf.StringValue) returns (google.protobuf.Empty) {
+    option (cordis.schema.errors) = "duplicate_connection";
+    option (cordis.schema.errors) = "cleanup_failed";
+  }
+  rpc Count(google.protobuf.StringValue) returns (google.protobuf.UInt64Value) {
+    option (cordis.schema.errors) = "unknown_connection";
+  }
+  rpc Status(google.protobuf.StringValue) returns (ScopeStatus) {
+    option (cordis.schema.errors) = "unknown_connection";
+  }
+  rpc Release(google.protobuf.StringValue) returns (google.protobuf.Empty) {
+    option (cordis.schema.errors) = "unknown_connection";
+    option (cordis.schema.errors) = "cleanup_failed";
+  }
+  rpc Run(google.protobuf.StringValue) returns (google.protobuf.StringValue) {
+    option (cordis.schema.errors) = "unknown_connection";
+    option (cordis.schema.errors) = "cleanup_failed";
+  }
+  rpc Contribute(google.protobuf.StringValue) returns (google.protobuf.Empty) {
+    option (cordis.schema.errors) = "unknown_connection";
+    option (cordis.schema.errors) = "cleanup_failed";
+  }
+}

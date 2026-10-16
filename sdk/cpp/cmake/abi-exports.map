@@ -1,0 +1,4 @@
+{
+  global: cordis_abi_*;
+  local: *;
+};

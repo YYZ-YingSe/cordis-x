@@ -1,0 +1,27 @@
+syntax = "proto3";
+package lifecycle;
+import "cordis/options.proto";
+import "cordis/types.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+
+service LifecycleLog {
+  option (cordis.schema.contract) = { name: "example.lifecycle-log" revision: "1" config: "cordis.data.Unit" };
+  rpc Write(google.protobuf.StringValue) returns (google.protobuf.Empty) {
+    option (cordis.schema.errors) = "cleanup_failed";
+  }
+}
+// Lifecycle demonstrations can register during initialization and deliberately
+// fail afterward, so recovery of partially initialized effects is observable.
+message ListenerConfig { bool listen = 1; bool fail_activate = 2; }
+message WorkerConfig {
+  optional string name = 1 [(cordis.schema.required) = true];
+  bool pending = 2;
+}
+message Settings { optional int32 answer = 1 [(cordis.schema.required) = true]; }
+message ChildStatus {
+  enum State { inactive = 0; loading = 1; active = 2; unloading = 3; }
+  optional State state = 1 [(cordis.schema.required) = true];
+  bool retired = 2;
+  optional string outcome = 3;
+}

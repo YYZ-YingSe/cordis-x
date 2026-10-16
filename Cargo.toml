@@ -1,0 +1,74 @@
+[workspace]
+members = [
+  "examples",
+  "tests",
+  "crates/cordis-contract",
+  "crates/cordis-codegen",
+  "crates/cordis-component-pack",
+  "crates/cordis-kernel",
+  "crates/cordis-runtime",
+  "sdk/rust/native",
+  "sdk/rust/core",
+  "sdk/rust/runtime",
+  "sdk/rust/process",
+  "sdk/rust/abi",
+  "sdk/rust/examples/portable-abi",
+  "crates/cordis-loader",
+  "crates/cordis-wire",
+  "crates/cordis-remote",
+  "crates/cordis-abi",
+  "crates/cordis-component",
+  "crates/cordis-wasm",
+  "sdk/rust/examples/calculator",
+  "sdk/rust/component",
+  "sdk/rust/examples/context",
+  "sdk/rust/examples/portable",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+cordis-example-contracts = { path = "examples" }
+cordis-test-contracts = { path = "tests" }
+cordis-contract = { version = "0.1.0", path = "crates/cordis-contract" }
+cordis-kernel = { version = "0.1.0", path = "crates/cordis-kernel" }
+cordis-runtime = { version = "0.1.0", path = "crates/cordis-runtime" }
+cordis-wire = { version = "0.1.0", path = "crates/cordis-wire" }
+cordis-sdk = { version = "0.1.0", path = "sdk/rust/native" }
+cordis-sdk-core = { version = "0.1.0", path = "sdk/rust/core" }
+cordis-sdk-runtime = { version = "0.1.0", path = "sdk/rust/runtime" }
+cordis-loader = { version = "0.1.0", path = "crates/cordis-loader" }
+cordis-component = { version = "0.1.0", path = "crates/cordis-component" }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+tokio = { version = "1", features = [
+  "rt-multi-thread",
+  "macros",
+  "sync",
+  "time",
+] }
+futures-util = "0.3"
+prost = "0.14.4"
+prost-types = "0.14.4"
+prost-reflect = { version = "0.16", features = ["serde"] }
+base64 = "0.22"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+await_holding_lock = "deny"
+
+# Keep local development/test builds small; retain line tables for backtraces.
+[profile.dev]
+debug = 1
+incremental = false
+
+[profile.test]
+debug = 1
+incremental = false

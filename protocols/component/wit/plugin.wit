@@ -1,0 +1,84 @@
+package cordis:plugin@0.1.0;
+
+// Component profile shared by Wasmtime host and wit-bindgen guest.
+interface types {
+    record contract {
+        name: string,
+        revision: string,
+        // Complete current structural Interface; validated before business create.
+        descriptor: payload,
+    }
+
+    record error-info {
+        code: string,
+        message: string,
+    }
+
+    // Rejected is a business error; refused is a runtime refusal. Both promise
+    // no surviving acquisition responsibility. Unknown cannot be downgraded.
+    // Every cleanup error preserves the cleanup obligation.
+    variant failure {
+        rejected(error-info),
+        unknown(error-info),
+        refused(error-info),
+    }
+
+    // Serialized cordis.transport.Payload. Business messages occupy its bytes
+    // fields; control metadata never contains a JSON spelling of business data.
+    // Each receiving operation selects and validates its own business contract.
+    type payload = list<u8>;
+
+}
+
+interface service {
+    use types.{contract, payload, failure};
+
+    resource lease {
+        invoke: func(method: string, args: payload) -> result<payload, failure>;
+        // A WIT resource destructor cannot report failure. The host must call
+        // release, confirm success, and only then drop this owned WIT handle.
+        release: func() -> result<_, failure>;
+    }
+
+    resource instance {
+        activate: func() -> result<_, failure>;
+        invoke: func(method: string, args: payload) -> result<payload, failure>;
+        acquire: func(kind: string, args: payload) -> result<lease, failure>;
+        deactivate: func() -> result<_, failure>;
+        close: func() -> result<_, failure>;
+    }
+
+    describe: func() -> contract;
+    // Payload.control contains host-owned validation and business config; no bodies.
+    create: func(config: payload) -> result<instance, failure>;
+}
+
+// No implicit WASI, filesystem, network, clock or host Context imports.
+// The first host profile grants no ambient or Context capabilities.
+world plugin {
+    export service;
+}
+
+// Native Component Model asynchronous calls permit the same instance to
+// receive cleanup/event/next callbacks while another invocation is suspended.
+interface host {
+    use types.{payload, failure};
+    call: async func(context: string, command: string, args: payload) -> result<payload, failure>;
+}
+
+interface managed-service {
+    use types.{contract, payload, failure};
+    record manifest {
+        provides: contract,
+        requires: list<contract>,
+    }
+    describe: func() -> manifest;
+    // The host selects ordinary/cleanup admission; authority still comes from
+    // the live context token checked by every host request.
+    call: async func(context: string, cleanup: bool, command: string, args: payload) -> result<payload, failure>;
+}
+
+world managed-plugin {
+    import host;
+    export managed-service;
+}

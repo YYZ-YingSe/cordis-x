@@ -1,0 +1,38 @@
+syntax = "proto3";
+package lifecycle;
+import "cordis/options.proto";
+import "cordis/types.proto";
+import "lifecycle/common.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+import "lifecycle/managed_status.proto";
+message TaskConfig {
+  enum Mode { HEARTBEAT = 0; FINITE = 1; FAIL = 2; }
+  Mode mode = 1;
+  bool direct = 2;
+  bool fail_activate = 3;
+}
+service Heartbeats {
+  option (cordis.schema.contract) = {
+    name: "example.tasks" revision: "1" config: "lifecycle.TaskConfig"
+    dependencies: { alias: "logger" service: "lifecycle.LifecycleLog" }
+  };
+  rpc Open(google.protobuf.StringValue) returns (google.protobuf.Empty) {
+    option (cordis.schema.errors) = "duplicate_connection";
+    option (cordis.schema.errors) = "cleanup_failed";
+  }
+  rpc Join(google.protobuf.StringValue) returns (google.protobuf.Empty) {
+    option (cordis.schema.errors) = "unknown_connection";
+    option (cordis.schema.errors) = "task_failed";
+    option (cordis.schema.errors) = "cleanup_failed";
+  }
+  rpc Status(google.protobuf.StringValue) returns (TaskStatus) {
+    option (cordis.schema.errors) = "unknown_connection";
+  }
+  rpc Release(google.protobuf.StringValue) returns (google.protobuf.Empty) {
+    option (cordis.schema.errors) = "unknown_connection";
+    option (cordis.schema.errors) = "direct_task";
+    option (cordis.schema.errors) = "cleanup_failed";
+    option (cordis.schema.errors) = "task_failed";
+  }
+}

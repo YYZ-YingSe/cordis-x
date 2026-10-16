@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "id": "application",
+      "source": "version",
+      "config": { "version": 1, "warmup_ms": 250, "healthy": true }
+    }
+  ]
+}

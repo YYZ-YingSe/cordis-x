@@ -1,0 +1,65 @@
+syntax = "proto3";
+package lifecycle;
+import "cordis/options.proto";
+import "lifecycle/common.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+message ListenerSpec {
+  enum Behavior { CONTINUE = 0; BREAK = 1; NESTED = 2; FAIL = 3; }
+  optional string id = 1 [(cordis.schema.required) = true];
+  optional Behavior behavior = 2 [(cordis.schema.required) = true];
+}
+message TickValue {
+  optional sint64 value = 1 [(cordis.schema.required) = true];
+  bool nested = 2;
+}
+message EventResult {
+  option (cordis.schema.semantics) = VARIANT;
+  oneof state { sint64 value = 1; EventDecisions nested = 2; }
+}
+message EventDecision {
+  option (cordis.schema.semantics) = VARIANT;
+  oneof state { google.protobuf.Empty continued = 1; EventResult stopped = 2; }
+}
+message EventDecisions { repeated EventDecision values = 1; }
+message DispatchFailure {
+  optional string code = 1 [(cordis.schema.required) = true];
+  optional string message = 2 [(cordis.schema.required) = true];
+}
+message DispatchFailures { repeated DispatchFailure errors = 1; }
+message DispatchStatus {
+  option (cordis.schema.semantics) = VARIANT;
+  oneof state {
+    google.protobuf.Empty pending = 1;
+    EventDecisions succeeded = 2;
+    DispatchFailures failed = 3;
+  }
+}
+service Events {
+  option (cordis.schema.contract) = {
+    name: "example.events" revision: "1" config: "lifecycle.ListenerConfig"
+    dependencies: { alias: "logger" service: "lifecycle.LifecycleLog" }
+  };
+  rpc Tick(TickValue) returns (EventResult) {
+    option (cordis.schema.event) = { name: "example.events.tick" revision: "1" };
+    option (cordis.schema.errors) = "closed";
+    option (cordis.schema.errors) = "overflow";
+    option (cordis.schema.errors) = "cleanup_failed";
+    // A listener may perform a nested parallel dispatch.
+    option (cordis.schema.errors) = "event_failed";
+  }
+  rpc Listen(ListenerSpec) returns (google.protobuf.Empty) { option (cordis.schema.errors) = "duplicate_listener"; }
+  rpc Unsubscribe(google.protobuf.StringValue) returns (google.protobuf.Empty) { option (cordis.schema.errors) = "unknown_listener"; }
+  rpc Parallel(TickValue) returns (EventDecisions) { option (cordis.schema.errors) = "event_failed"; }
+  rpc Serial(TickValue) returns (EventDecision) {
+    option (cordis.schema.errors) = "closed";
+    option (cordis.schema.errors) = "overflow";
+    option (cordis.schema.errors) = "cleanup_failed";
+    option (cordis.schema.errors) = "event_failed";
+  }
+  rpc Emit(TickValue) returns (google.protobuf.Empty);
+  rpc Join(google.protobuf.Empty) returns (EventDecisions) { option (cordis.schema.errors) = "no_dispatch"; option (cordis.schema.errors) = "event_failed"; }
+  rpc Status(google.protobuf.Empty) returns (DispatchStatus) { option (cordis.schema.errors) = "no_dispatch"; }
+  rpc Count(google.protobuf.Empty) returns (google.protobuf.UInt64Value);
+  rpc Start(google.protobuf.Empty) returns (google.protobuf.Empty);
+}

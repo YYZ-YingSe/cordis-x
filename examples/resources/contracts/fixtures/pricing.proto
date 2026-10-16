@@ -1,0 +1,32 @@
+syntax = "proto3";
+package fixtures.pricing;
+import "fixtures/logger.proto";
+import "cordis/options.proto";
+import "cordis/types.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/wrappers.proto";
+
+message QuoteArgs {
+  optional sint64 quantity = 1 [(cordis.schema.required) = true];
+  optional sint64 unit_price = 2 [(cordis.schema.required) = true];
+}
+message QuoteResultReceipt {
+  optional sint64 generation = 1 [(cordis.schema.required) = true];
+  optional sint64 owner = 2 [(cordis.schema.required) = true];
+  optional sint64 caller = 3 [(cordis.schema.required) = true];
+}
+message QuoteResult {
+  optional sint64 total = 1 [(cordis.schema.required) = true];
+  QuoteResultReceipt receipt = 2 [(cordis.schema.required) = true];
+}
+message FlushResult {
+  optional sint64 generation = 1 [(cordis.schema.required) = true];
+  optional sint64 owner = 2 [(cordis.schema.required) = true];
+  optional sint64 caller = 3 [(cordis.schema.required) = true];
+}
+service Pricing {
+  option (cordis.schema.contract) = { name: "example.pricing" revision: "1" config: "cordis.data.Unit" dependencies: { alias: "logger" service: "fixtures.logger.Logger" } };
+  rpc Quote(QuoteArgs) returns (QuoteResult) { option (cordis.schema.wire_name) = "quote"; option (cordis.schema.errors) = "invalid_argument"; }
+  rpc Flush(google.protobuf.Empty) returns (FlushResult) { option (cordis.schema.wire_name) = "flush"; }
+}

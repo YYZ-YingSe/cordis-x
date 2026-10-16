@@ -1,0 +1,18 @@
+[package]
+publish = false
+description = "Cordis framework: cordis-sdk-core"
+name = "cordis-sdk-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cordis-contract.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+prost.workspace = true
+prost-reflect.workspace = true
+
+[lints]
+workspace = true

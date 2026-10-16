@@ -1,0 +1,42 @@
+[package]
+publish = false
+description = "Cordis framework: cordis-remote"
+name = "cordis-remote"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+loader = ["dep:cordis-loader"]
+
+[dependencies]
+cordis-wire.workspace = true
+prost.workspace = true
+cordis-runtime.workspace = true
+cordis-contract.workspace = true
+cordis-kernel.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["process", "io-util", "net"] }
+reqwest = { version = "0.13", default-features = false, features = ["stream"] }
+getrandom = "0.4"
+cordis-loader = { workspace = true, optional = true }
+
+[[example]]
+name = "process_reload"
+required-features = ["loader"]
+
+[[example]]
+name = "process_rolling"
+required-features = ["loader"]
+
+[dev-dependencies]
+cordis-test-contracts.workspace = true
+cordis-example-contracts.workspace = true
+cordis-sdk-core.workspace = true
+cordis-portable-example = { path = "../../sdk/rust/examples/portable" }
+cordis-loader.workspace = true
+cordis-sdk.workspace = true
+
+[lints]
+workspace = true

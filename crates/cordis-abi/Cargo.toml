@@ -1,0 +1,46 @@
+[package]
+publish = false
+description = "Cordis framework: cordis-abi"
+name = "cordis-abi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+loader = ["dep:cordis-loader"]
+
+[dependencies]
+cordis-runtime.workspace = true
+cordis-contract.workspace = true
+cordis-kernel.workspace = true
+cordis-wire.workspace = true
+prost.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+futures-util.workspace = true
+libloading = "0.8.9"
+cordis-loader = { workspace = true, optional = true }
+
+[[example]]
+name = "abi_reload"
+required-features = ["loader"]
+
+[[example]]
+name = "abi_rolling"
+required-features = ["loader"]
+
+[dev-dependencies]
+cordis-example-contracts.workspace = true
+cordis-sdk-core.workspace = true
+cordis-portable-example = { path = "../../sdk/rust/examples/portable" }
+cordis-sdk.workspace = true
+cordis-remote = { path = "../cordis-remote" }
+
+# Only the FFI module and explicit loading entry point opt into unsafe code.
+# All other workspace crates retain their inherited unsafe_code = forbid.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+await_holding_lock = "deny"

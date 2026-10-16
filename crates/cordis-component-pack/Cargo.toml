@@ -1,0 +1,15 @@
+[package]
+publish = false
+name = "cordis-component-pack"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Encode a Cordis core WebAssembly module as a component"
+
+[dependencies]
+wit-component = "=0.258.3"
+wasi-preview1-component-adapter-provider = "=43.0.1"
+
+[lints]
+workspace = true

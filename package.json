@@ -1,0 +1,20 @@
+{
+  "name": "cordis-x",
+  "private": true,
+  "workspaces": [
+    "sdk/typescript",
+    "tools/codegen/typescript",
+    "examples",
+    "tests"
+  ],
+  "scripts": {
+    "codegen": "npm run codegen --workspace @cordis-x/codegen-typescript --",
+    "generate": "npm run generate --workspace @cordis-x/codegen-typescript --",
+    "test:typescript": "npm run test --workspace @cordis-x/sdk"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "type": "module",
+  "license": "Apache-2.0"
+}

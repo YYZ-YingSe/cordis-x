@@ -1,0 +1,32 @@
+syntax = "proto3";
+package cordis.data;
+import "cordis/options.proto";
+
+message Unit {}
+enum Null { NULL_VALUE = 0; }
+// A factory result marker. It may only be used as an acquires RPC result;
+// no application can manufacture a resource capability by serializing it.
+message Lease {}
+// Child-plugin factory result marker; never a serializable capability.
+message Child {}
+message Int64 { optional sint64 value = 1 [(cordis.schema.required) = true]; }
+message Text { optional string value = 1 [(cordis.schema.required) = true]; }
+
+// All cases are tagged. In particular integers never pass through a double.
+message DynamicValue {
+  option (cordis.schema.semantics) = VARIANT;
+  oneof value {
+    Null null = 1;
+    bool boolean = 2;
+    sint64 signed_integer = 3;
+    uint64 unsigned_integer = 4;
+    float float32 = 5;
+    double float64 = 6;
+    string text = 7;
+    bytes binary = 8;
+    DynamicList list = 9;
+    DynamicMap map = 10;
+  }
+}
+message DynamicList { repeated DynamicValue values = 1; }
+message DynamicMap { map<string, DynamicValue> values = 1; }

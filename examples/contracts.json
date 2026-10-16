@@ -1,0 +1,66 @@
+{
+  "examples": {
+    "source": "examples.proto",
+    "languages": "cpp,rust,typescript"
+  },
+  "workflows": {
+    "source": "workflows.proto",
+    "languages": "cpp,rust,typescript"
+  },
+  "portable": {
+    "source": "portable.proto",
+    "languages": "cpp,rust,typescript"
+  },
+  "lifecycle": {
+    "source": "lifecycle.proto",
+    "languages": "cpp,rust,typescript"
+  },
+  "context": {
+    "source": "context.proto",
+    "languages": "cpp,rust,typescript"
+  },
+  "configuration": {
+    "source": "configuration.proto",
+    "languages": ""
+  },
+  "native_shared": {
+    "source": "examples.proto",
+    "languages": "rust",
+    "rust_packages": [
+      "example=crate::examples::data::example",
+      "cordis.data=crate::examples::data::cordis::data"
+    ]
+  },
+  "calculator_process": {
+    "source": "fixtures/calculator_process.proto",
+    "languages": "cpp,rust,typescript"
+  },
+  "pricing": {
+    "source": "fixtures/pricing.proto",
+    "languages": "cpp,rust,typescript"
+  },
+  "orders": {
+    "source": "fixtures/orders.proto",
+    "languages": "cpp,rust,typescript"
+  },
+  "calculator_abi": {
+    "source": "fixtures/calculator_abi.proto",
+    "languages": "cpp,rust,typescript"
+  },
+  "calculator_wasm": {
+    "source": "fixtures/calculator_wasm.proto",
+    "languages": "rust"
+  },
+  "logger": {
+    "source": "fixtures/logger.proto",
+    "languages": "cpp,rust,typescript"
+  },
+  "calculator_logging": {
+    "source": "fixtures/calculator_logging.proto",
+    "languages": "cpp,rust,typescript"
+  },
+  "counters": {
+    "source": "fixtures/counters.proto",
+    "languages": "cpp,rust,typescript"
+  }
+}
