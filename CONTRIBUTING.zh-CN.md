@@ -23,7 +23,46 @@ Issue 和 Pull Request 均可使用中文或英文。讨论代码和取舍，避
 | Rust Wasm | Rust 的 `wasm32-unknown-unknown` 目标 |
 | C++ Wasm | WASI SDK、`wit-bindgen` 0.61.1、宿主 `protoc`、为 WASI 构建的 Protobuf/Abseil 库 |
 
-项目负责调用工具，不负责安装。`PROTOC` 和 `CORDIS_PROTOC_GEN_ES` 可以指定生成器程序，否则从 `PATH` 查找。CMake 依赖通过 `CMAKE_PREFIX_PATH` 或对应的包变量配置。
+构建命令调用环境中已有的工具。可以自行准备，也可以显式运行 `tools/setup/` 中的安装脚本。`PROTOC` 和 `CORDIS_PROTOC_GEN_ES` 可以指定生成器程序，否则从 `PATH` 查找。CMake 依赖通过 `CMAKE_PREFIX_PATH` 或对应的包变量配置。
+
+### 可选的搭建脚本
+
+搭建脚本需要 Python 3.12+。系统前提脚本覆盖使用 Homebrew 的 macOS、使用 apt 的 Ubuntu 24.04+/Debian 13+ 和使用 winget 的 Windows x64。它们通过系统工具安装编译器、Python 和 Git，安装过程可能要求管理员权限。Apple 命令行工具通过系统安装窗口完成；Windows 安装前提后需要重新打开终端。其他 Linux 发行版可通过自己的包管理器准备同样的前提。
+
+```sh
+bash tools/setup/system.sh
+python3 tools/setup/setup.py --prefix "$HOME/.local/share/cordis-tools" --jobs 4
+source "$HOME/.local/share/cordis-tools/env.sh"
+```
+
+```powershell
+./tools/setup/system.ps1
+# 在新终端中执行：
+py -3.12 tools/setup/setup.py --prefix "$env:LOCALAPPDATA/CordisTools" --jobs 4
+. "$env:LOCALAPPDATA/CordisTools/env.ps1"
+```
+
+`--prefix` 必填，工具、下载文件、依赖源码和编译缓存均存放在该目录中。脚本不修改 shell 配置，不替换系统的 Rust/Node；Rust 的 Cargo/rustup home 和 Python 虚拟环境位于该目录中。Node 依赖通过 `npm ci --ignore-scripts` 安装到当前仓库。重复执行会复用下载和 CMake 构建结果。安装结束后，在需要使用工具的终端加载生成的环境文件；安装脚本无法激活父进程的 shell。该目录包含绝对路径，安装后请保留原位置。
+
+每种工具链都有独立入口，接受相同的 `--prefix` 和 `--jobs` 参数，并自动包含自身需要的依赖：
+
+| `tools/setup/` 中的脚本 | 安装内容 |
+| --- | --- |
+| `rust.py` | Rust/Cargo 1.98.1、rustfmt、Clippy、`wasm32-unknown-unknown` |
+| `python.py` | 虚拟环境、仓库 Python 依赖、CMake 3.31.10、Ninja 1.13.0、libclang 18.1.1 |
+| `typescript.py` | Node.js 24.14.1 及 npm；根 npm 锁文件中的 TypeScript、`protoc-gen-es` 和 esbuild |
+| `protoc.py` | 宿主 `protoc` 34.1 及标准 `.proto` 文件 |
+| `cpp.py` | Python 构建工具、`protoc`、原生静态 Protobuf 34.1.0 和 Abseil 20260817.0；macOS 使用共享 Abseil 并加入线程存储适配 |
+| `wasm.py` | Rust/Python 工具、宿主 `protoc`、WASI SDK 34.0、`wit-bindgen` 0.61.1、为 WASI 编译的静态 Protobuf/Abseil、`cordis-component-pack` |
+| `setup.py` | 上述全部工具，或 `--only` 选择的部分 |
+
+例如，`python3 tools/setup/setup.py --prefix /path/to/tools --only rust protoc` 准备 Rust/protoc 路径。代码生成和 TypeScript 开发再加入 `python typescript`；完整集成测试再加入 `cpp wasm`。原生 C++ 使用系统前提步骤提供的编译器。Windows 同时安装 Debug 和 Release 依赖，以匹配使用方的 MSVC 运行库。
+
+[versions.json](tools/setup/versions.json)固定官方二进制、源码归档及 SHA-256；Python 工具版本在 [requirements.txt](tools/setup/requirements.txt)，npm 和 Cargo 依赖使用各自锁文件。系统编译器和 Python 的补丁版本跟随所用包管理器。二进制安装配方覆盖 Linux/macOS x64、ARM64，以及 Windows x64。平台实际验收仍由 CI 执行，有安装配方本身不代表后端已通过验证。
+
+CI 使用同一套脚本，通过 `--github-env` 把环境传给后续步骤。安装失败会直接中止 job，不会跳过缺失后端后报告测试成功。普通 Cargo、CMake、npm 生成和 SDK 命令均不调用安装脚本。
+
+### 使用已有环境
 
 修改 TypeScript、运行代码生成或进程测试时，先准备依赖：
 
@@ -36,7 +75,7 @@ export CORDIS_TEST_PYTHON="$(python3 -c 'import sys; print(sys.executable)')"
 
 如果 Python 环境要求使用虚拟环境，请先创建并激活。npm workspace 共用根锁文件。生成工具版本在[生成工具 workspace](tools/codegen/typescript/package.json)中声明，运行依赖放在实际使用它的包中。
 
-macOS 上的 C++ ABI 卸载需要私有静态 Protobuf 和由宿主共享的 Abseil。开发者提供的 Protobuf 构建需要包含[线程存储适配](sdk/cpp/tools/protobuf/macos-thread-storage.patch)及其[头文件](sdk/cpp/tools/protobuf/cordis_thread_storage.h)、[实现](sdk/cpp/tools/protobuf/cordis_thread_storage.cc)，CMake 会检查对应支持。WASI 使用单独构建的目标库，不能将原生依赖前缀用于 Wasm 构建。
+macOS 上的 C++ ABI 卸载需要私有静态 Protobuf 和由宿主共享的 Abseil。自行提供的 Protobuf 构建需要包含[线程存储适配](sdk/cpp/tools/protobuf/macos-thread-storage.patch)及其[头文件](sdk/cpp/tools/protobuf/cordis_thread_storage.h)、[实现](sdk/cpp/tools/protobuf/cordis_thread_storage.cc)。可选的 `cpp.py` 安装脚本会完成这一步，SDK CMake 只检查对应支持。WASI 使用单独构建的目标库，不能将原生依赖前缀用于 Wasm 构建。
 
 ## 源码与生成文件
 

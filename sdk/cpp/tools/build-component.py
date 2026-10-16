@@ -27,6 +27,7 @@ def main():
     parser.add_argument('--protoc', default=os.environ.get('PROTOC', 'protoc'))
     parser.add_argument('--component-pack', default=os.environ.get('CORDIS_COMPONENT_PACK', 'cordis-component-pack'))
     parser.add_argument('--cmake', default='cmake')
+    parser.add_argument('--generator', default='Ninja', help='CMake generator for WASI cross compilation')
     parser.add_argument('--proto', action='append', default=[], type=Path)
     parser.add_argument('--proto-path', action='append', default=[], type=Path)
     parser.add_argument('--include', action='append', default=[], type=Path, help='consumer generated/source include directories')
@@ -62,7 +63,7 @@ def main():
     output.parent.mkdir(parents=True, exist_ok=True)
     build = (args.build_dir or output.parent / (output.stem + '-build')).resolve()
     prefixes = [p.resolve() for p in args.dependency_prefix]
-    command = [cmake, '-S', str(Path(__file__).resolve().parent / 'component-project'), '-B', str(build),
+    command = [cmake, '-G', args.generator, '-S', str(Path(__file__).resolve().parent / 'component-project'), '-B', str(build),
         '-DCMAKE_BUILD_TYPE=MinSizeRel', f'-DCMAKE_TOOLCHAIN_FILE={toolchain.resolve()}',
         '-DCMAKE_PREFIX_PATH=' + ';'.join(map(str, prefixes)),
         '-DCMAKE_FIND_ROOT_PATH=' + ';'.join(map(str, prefixes)),

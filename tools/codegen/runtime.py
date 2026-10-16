@@ -20,13 +20,24 @@ def write(path, text):
 
 def messages(sources, inputs, language, output):
     output.mkdir(parents=True, exist_ok=True)
-    options = []
-    if language == "es":
-        plugin = os.environ.get("CORDIS_PROTOC_GEN_ES") or shutil.which("protoc-gen-es")
-        if not plugin:
-            raise RuntimeError("Provide protoc-gen-es on PATH or CORDIS_PROTOC_GEN_ES")
-        options = [f"--plugin=protoc-gen-es={plugin}", "--es_opt=target=ts,import_extension=ts"]
-    protoc(["-I", sources, f"--{language}_out={output}", *options, *inputs])
+    with tempfile.TemporaryDirectory() as temporary:
+        options = []
+        environment = os.environ.copy()
+        if language == "es":
+            plugin = os.environ.get("CORDIS_PROTOC_GEN_ES") or shutil.which("protoc-gen-es")
+            if not plugin:
+                raise RuntimeError("Provide protoc-gen-es on PATH or CORDIS_PROTOC_GEN_ES")
+            options = ["--es_opt=target=ts,import_extension=ts"]
+            if os.name == "nt" and Path(plugin).suffix.lower() in (".cmd", ".bat"):
+                # protoc invokes cmd.exe only for PATH lookup, not --plugin=FILE.
+                # Forward to the original npm script so its relative imports work.
+                Path(temporary, "protoc-gen-es.cmd").write_text(
+                    '@echo off\n@setlocal DisableDelayedExpansion\n@"%CORDIS_PROTOC_ES_SCRIPT%"\n')
+                environment["CORDIS_PROTOC_ES_SCRIPT"] = str(Path(plugin).resolve())
+                environment["PATH"] = temporary + os.pathsep + environment.get("PATH", "")
+            else:
+                options.append(f"--plugin=protoc-gen-es={plugin}")
+        protoc(["-I", sources, f"--{language}_out={output}", *options, *inputs], env=environment)
 
 
 def schema(sources, output, cpp_header=None):

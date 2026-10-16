@@ -59,9 +59,8 @@ pub fn generate(
             if name == "cpp" {
                 command.arg(format!("--cpp_out={}", output.display()));
             } else if name == "typescript" {
-                let plugin = tools.es_plugin()?;
+                tools.configure_es(&mut command, temp.path())?;
                 command
-                    .arg(format!("--plugin=protoc-gen-es={}", plugin.display()))
                     .arg(format!("--es_out={}", output.display()))
                     .arg("--es_opt=target=ts,import_extension=ts,erasable_syntax=true");
             } else {

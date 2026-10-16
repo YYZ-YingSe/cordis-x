@@ -192,24 +192,27 @@ fn artifact() -> &'static std::path::Path {
     BUILD.get_or_init(|| {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let output = root.join("target/cpp-component/portable.wasm");
-        let build = std::process::Command::new("python3")
-            .current_dir(&root)
-            .args([
-                "sdk/cpp/tools/build-component.py",
-                "--sdk-source",
-                "sdk/cpp",
-                "--include",
-                "examples/generated/cpp",
-                "--proto-path",
-                "examples/resources/contracts",
-                "--core",
-                "--proto",
-                "portable.proto",
-                "sdk/cpp/examples/portable/component.cpp",
-            ])
-            .arg(&output)
-            .output()
-            .unwrap();
+        let build = std::process::Command::new(
+            std::env::var_os("PYTHON")
+                .unwrap_or_else(|| if cfg!(windows) { "python" } else { "python3" }.into()),
+        )
+        .current_dir(&root)
+        .args([
+            "sdk/cpp/tools/build-component.py",
+            "--sdk-source",
+            "sdk/cpp",
+            "--include",
+            "examples/generated/cpp",
+            "--proto-path",
+            "examples/resources/contracts",
+            "--core",
+            "--proto",
+            "portable.proto",
+            "sdk/cpp/examples/portable/component.cpp",
+        ])
+        .arg(&output)
+        .output()
+        .unwrap();
         assert!(
             build.status.success(),
             "{}\n{}",

@@ -57,21 +57,24 @@ fn rust_guest(example: &str) -> Vec<u8> {
 fn component(cpp: bool) -> Vec<u8> {
     let core = if cpp {
         let output = root().join("target/workflow-components/cpp.wasm");
-        run(Command::new("python3")
-            .args([
-                "sdk/cpp/tools/build-component.py",
-                "--sdk-source",
-                "sdk/cpp",
-                "--include",
-                "examples/generated/cpp",
-                "--proto-path",
-                "examples/resources/contracts",
-                "--core",
-                "--proto",
-                "workflows.proto",
-                "sdk/cpp/examples/workflows/component.cpp",
-            ])
-            .arg(&output));
+        run(Command::new(
+            std::env::var_os("PYTHON")
+                .unwrap_or_else(|| if cfg!(windows) { "python" } else { "python3" }.into()),
+        )
+        .args([
+            "sdk/cpp/tools/build-component.py",
+            "--sdk-source",
+            "sdk/cpp",
+            "--include",
+            "examples/generated/cpp",
+            "--proto-path",
+            "examples/resources/contracts",
+            "--core",
+            "--proto",
+            "workflows.proto",
+            "sdk/cpp/examples/workflows/component.cpp",
+        ])
+        .arg(&output));
         std::fs::read(output).unwrap()
     } else {
         rust_guest("wasm_workflows")

@@ -95,7 +95,30 @@ cargo run --locked -p cordis-sdk --example broker
 
 原生插件和 C ABI 动态库拥有宿主进程的权限。独立进程本身不构成插件沙箱。Wasm 能访问什么，取决于宿主授予的导入和 WASI 能力，以及配置的执行限制。
 
-C++ 进程适配器要求 POSIX 环境；C++ Wasm 构建需要开发者准备对应的 WASI 目标库。仓库包含 Linux、macOS 和 Windows 的 CI 配置，但配置文件本身不代表所有后端与平台组合都已完成验证。
+C++ 进程适配器要求 POSIX 环境；C++ Wasm 构建需要对应的 WASI 目标库，可由可选的环境搭建脚本编译。仓库包含 Linux、macOS 和 Windows 的 CI 配置，但配置文件本身不代表所有后端与平台组合都已完成验证。
+
+## 快捷搭建环境
+
+可选的[环境搭建脚本](tools/setup/setup.py)提供 Rust、Python、Node.js 与 npm 工具、`protoc`、原生 C++ 依赖和 C++ Wasm 工具链的安装入口。工具存放目录由使用者指定，不影响应用的插件目录或代码生成目录。
+
+macOS 或 Ubuntu/Debian 上，按需安装系统前提后执行：
+
+```sh
+bash tools/setup/system.sh
+python3 tools/setup/setup.py --prefix "$HOME/.local/share/cordis-tools"
+source "$HOME/.local/share/cordis-tools/env.sh"
+```
+
+搭建脚本需要 Python 3.12+。macOS 上若安装的 Python 不在 `PATH` 中，`system.sh` 会输出对应命令。Windows 使用 PowerShell：
+
+```powershell
+./tools/setup/system.ps1
+# 系统安装结束后重新打开终端。
+py -3.12 tools/setup/setup.py --prefix "$env:LOCALAPPDATA/CordisTools"
+. "$env:LOCALAPPDATA/CordisTools/env.ps1"
+```
+
+只需要部分工具时，可传入 `--only rust protoc`，或调用对应脚本，例如 `python3 tools/setup/cpp.py --prefix /path/to/tools`。安装仅在显式调用时发生，构建和生成命令不会安装工具。支持范围、版本及前提见[贡献指南](CONTRIBUTING.zh-CN.md#开发环境)。
 
 ## 契约与生成代码
 
@@ -167,6 +190,7 @@ npm run codegen -- generate \
 | `examples/` | 共用的示例契约、资源和构建配置 |
 | `tests/` | 共用的测试契约、夹具和构建配置 |
 | `tools/codegen/` | 仓库生成入口和工具版本声明 |
+| `tools/setup/` | 可选的环境安装脚本和固定工具版本 |
 
 生成代码与手写源码分开存放。工具链和目标库由开发者准备，构建命令不会自动安装。
 

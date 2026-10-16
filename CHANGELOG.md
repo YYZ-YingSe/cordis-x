@@ -25,6 +25,8 @@ This file records user-visible changes. Development work is listed under Unrelea
   手写资源与生成代码分离，具体路径由框架、示例和测试的构建配置管理。
 - Source workspace integration and developer-managed external toolchains.
   通过源码工作区接入，外部工具链由开发者管理。
+- Optional setup scripts for Rust, Python, TypeScript, Protobuf, native C++, and Wasm, with an explicit installation prefix; CI uses the same scripts to prepare its dependencies.
+  提供 Rust、Python、TypeScript、Protobuf、原生 C++ 和 Wasm 的可选搭建脚本，安装目录由使用者指定；CI 使用同一套脚本准备依赖。
 
 ### Project / 项目
 

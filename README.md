@@ -95,7 +95,30 @@ The portable SDKs expose services, resources, dependency calls, events, middlewa
 
 Native plugins and C ABI libraries execute with the host process's privileges. A process boundary does not by itself sandbox a plugin. Wasm access depends on the imports and WASI capabilities the host grants, together with its configured execution limits.
 
-The C++ process adapter requires POSIX. C++ Wasm builds require externally prepared WASI libraries. The repository contains Linux, macOS, and Windows CI configurations; that configuration alone is not a claim that every backend and platform combination has been validated.
+The C++ process adapter requires POSIX. C++ Wasm builds require WASI target libraries, which the optional setup scripts can build. The repository contains Linux, macOS, and Windows CI configurations; that configuration alone is not a claim that every backend and platform combination has been validated.
+
+## Setting up the tools
+
+The optional [setup scripts](tools/setup/setup.py) prepare Rust, Python, Node.js and npm tools, `protoc`, native C++ dependencies, and the C++ Wasm toolchain. Choose a directory for the tools; it does not determine where an application stores plugins or generated code.
+
+On macOS or Ubuntu/Debian, install the system prerequisites if needed, then run:
+
+```sh
+bash tools/setup/system.sh
+python3 tools/setup/setup.py --prefix "$HOME/.local/share/cordis-tools"
+source "$HOME/.local/share/cordis-tools/env.sh"
+```
+
+The setup entry point requires Python 3.12+. On macOS, `system.sh` prints the installed Python command if it is not on `PATH`. On Windows, use PowerShell:
+
+```powershell
+./tools/setup/system.ps1
+# Open a new terminal after system installation.
+py -3.12 tools/setup/setup.py --prefix "$env:LOCALAPPDATA/CordisTools"
+. "$env:LOCALAPPDATA/CordisTools/env.ps1"
+```
+
+For a subset, pass `--only rust protoc`, or invoke a tool's script such as `python3 tools/setup/cpp.py --prefix /path/to/tools`. Installation happens only when requested; build and generation commands do not install tools. See [the contribution guide](CONTRIBUTING.md#development-setup) for coverage, versions, and prerequisites.
 
 ## Contracts and generated code
 
@@ -167,6 +190,7 @@ The application registers plugin sources and grants dependencies and capabilitie
 | `examples/` | Shared example contracts, resources, and build configuration |
 | `tests/` | Shared test contracts, fixtures, and build configuration |
 | `tools/codegen/` | Repository generation entry points and tool version declarations |
+| `tools/setup/` | Optional environment installers and pinned tool releases |
 
 Generated code lives separately from handwritten source. Tools and target libraries are supplied by the developer; build commands do not install them automatically.
 

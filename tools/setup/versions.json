@@ -1,0 +1,119 @@
+{
+  "rust": "1.98.1",
+  "rustup": "1.28.2",
+  "node": "24.14.1",
+  "protobuf": "34.1",
+  "abseil": "20260817.0",
+  "wasi_sdk": "34.0",
+  "wit_bindgen": "0.61.1",
+  "assets": {
+    "protobuf-source": {
+      "url": "https://github.com/protocolbuffers/protobuf/releases/download/v34.1/protobuf-34.1.tar.gz",
+      "sha256": "e4e6ff10760cf747a2decd1867741f561b216bd60cc4038c87564713a6da1848"
+    },
+    "protoc-linux-x64": {
+      "url": "https://github.com/protocolbuffers/protobuf/releases/download/v34.1/protoc-34.1-linux-x86_64.zip",
+      "sha256": "af27ea66cd26938fe48587804ca7d4817457a08350021a1c6e23a27ccc8c6904"
+    },
+    "protoc-linux-arm64": {
+      "url": "https://github.com/protocolbuffers/protobuf/releases/download/v34.1/protoc-34.1-linux-aarch_64.zip",
+      "sha256": "31c5e9e3c7bf013cf41fb97765ee255c140024a6b175b6cc9b64beddd7c23ba7"
+    },
+    "protoc-macos-x64": {
+      "url": "https://github.com/protocolbuffers/protobuf/releases/download/v34.1/protoc-34.1-osx-x86_64.zip",
+      "sha256": "ab124429c1f49951f03b6c0c0e911fec04e2c7c20de5c935e0cde7353bbd016c"
+    },
+    "protoc-macos-arm64": {
+      "url": "https://github.com/protocolbuffers/protobuf/releases/download/v34.1/protoc-34.1-osx-aarch_64.zip",
+      "sha256": "2c7e92b8b578916937df132b3032e2e8e6c170862ecf7a8333094a6f3d03650c"
+    },
+    "protoc-windows-x64": {
+      "url": "https://github.com/protocolbuffers/protobuf/releases/download/v34.1/protoc-34.1-win64.zip",
+      "sha256": "6d7ebdc75e9c1f0026d4fb28f17ef1d0aae77d36744d83a9e052d79ba493724f"
+    },
+    "abseil-source": {
+      "url": "https://github.com/abseil/abseil-cpp/releases/download/20260817.0/abseil-cpp-20260817.0.tar.gz",
+      "sha256": "f7e05179df39c45434cad433f5783840bb3788ef322976f9138bc6b72b3a107d"
+    },
+    "wasi_sdk-linux-x64": {
+      "url": "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-linux.tar.gz",
+      "sha256": "b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4"
+    },
+    "wasi_sdk-linux-arm64": {
+      "url": "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-arm64-linux.tar.gz",
+      "sha256": "f7e243dff54d60bcc576e94d6166b69f410f2500ae4a9ceef34315be10e77971"
+    },
+    "wasi_sdk-macos-x64": {
+      "url": "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-macos.tar.gz",
+      "sha256": "87d27fa8adc68dee59bfbf2e22a6d34ef717c34d6bf1d8af2a56fc929d9ce0eb"
+    },
+    "wasi_sdk-macos-arm64": {
+      "url": "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-arm64-macos.tar.gz",
+      "sha256": "9c59398106b417f8f14913380fdf0097a8cc0ff4af9eb3ce0065a859e88d49e9"
+    },
+    "wasi_sdk-windows-x64": {
+      "url": "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-windows.tar.gz",
+      "sha256": "cccb5c323a9b34f0349a9b09e8804a0a7632c68c3310f4b5f437ed57d7e71d8f"
+    },
+    "wit_bindgen-linux-x64": {
+      "url": "https://github.com/bytecodealliance/wit-bindgen/releases/download/v0.61.1/wit-bindgen-0.61.1-x86_64-linux.tar.gz",
+      "sha256": "1aea51f8379e36e76081c08fcc5faada928c03a6d0965a55132d72c8d966463c"
+    },
+    "wit_bindgen-linux-arm64": {
+      "url": "https://github.com/bytecodealliance/wit-bindgen/releases/download/v0.61.1/wit-bindgen-0.61.1-aarch64-linux.tar.gz",
+      "sha256": "f696fe9d1f3ded1926f3648e07371dc5b55467125e57c89ebbe3d3e595c1c1c2"
+    },
+    "wit_bindgen-macos-x64": {
+      "url": "https://github.com/bytecodealliance/wit-bindgen/releases/download/v0.61.1/wit-bindgen-0.61.1-x86_64-macos.tar.gz",
+      "sha256": "f14010b6531e6fe420763b9e04d000f81f4afb535285c6da5cff49fee585f96c"
+    },
+    "wit_bindgen-macos-arm64": {
+      "url": "https://github.com/bytecodealliance/wit-bindgen/releases/download/v0.61.1/wit-bindgen-0.61.1-aarch64-macos.tar.gz",
+      "sha256": "7f3a73a917a73a67d9d9b8e422dc4e938d3bdb749926109426dd631de2298365"
+    },
+    "wit_bindgen-windows-x64": {
+      "url": "https://github.com/bytecodealliance/wit-bindgen/releases/download/v0.61.1/wit-bindgen-0.61.1-x86_64-windows.zip",
+      "sha256": "42f255e8d185ab9f2d7677e1bb437eb4ff37041943d25357476d718b542d629f"
+    },
+    "node-linux-x64": {
+      "url": "https://nodejs.org/dist/v24.14.1/node-v24.14.1-linux-x64.tar.gz",
+      "sha256": "ace9fa104992ed0829642629c46ca7bd7fd6e76278cb96c958c4b387d29658ea"
+    },
+    "rustup-linux-x64": {
+      "url": "https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init",
+      "sha256": "20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c"
+    },
+    "node-linux-arm64": {
+      "url": "https://nodejs.org/dist/v24.14.1/node-v24.14.1-linux-arm64.tar.gz",
+      "sha256": "734ff04fa7f8ed2e8a78d40cacf5ac3fc4515dac2858757cbab313eb483ba8a2"
+    },
+    "rustup-linux-arm64": {
+      "url": "https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-unknown-linux-gnu/rustup-init",
+      "sha256": "e3853c5a252fca15252d07cb23a1bdd9377a8c6f3efa01531109281ae47f841c"
+    },
+    "node-macos-x64": {
+      "url": "https://nodejs.org/dist/v24.14.1/node-v24.14.1-darwin-x64.tar.gz",
+      "sha256": "2526230ad7d922be82d4fdb1e7ee1e84303e133e3b4b0ec4c2897ab31de0253d"
+    },
+    "rustup-macos-x64": {
+      "url": "https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-apple-darwin/rustup-init",
+      "sha256": "9c331076f62b4d0edeae63d9d1c9442d5fe39b37b05025ec8d41c5ed35486496"
+    },
+    "node-macos-arm64": {
+      "url": "https://nodejs.org/dist/v24.14.1/node-v24.14.1-darwin-arm64.tar.gz",
+      "sha256": "25495ff85bd89e2d8a24d88566d7e2f827c6b0d3d872b2cebf75371f93fcb1fe"
+    },
+    "rustup-macos-arm64": {
+      "url": "https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-apple-darwin/rustup-init",
+      "sha256": "20ef5516c31b1ac2290084199ba77dbbcaa1406c45c1d978ca68558ef5964ef5"
+    },
+    "node-windows-x64": {
+      "url": "https://nodejs.org/dist/v24.14.1/node-v24.14.1-win-x64.zip",
+      "sha256": "6e50ce5498c0cebc20fd39ab3ff5df836ed2f8a31aa093cecad8497cff126d70"
+    },
+    "rustup-windows-x64": {
+      "url": "https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-pc-windows-msvc/rustup-init.exe",
+      "sha256": "88d8258dcf6ae4f7a80c7d1088e1f36fa7025a1cfd1343731b4ee6f385121fc0"
+    }
+  }
+}
