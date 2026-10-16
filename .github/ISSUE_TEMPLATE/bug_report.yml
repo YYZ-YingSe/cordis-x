@@ -1,0 +1,30 @@
+name: Bug report / 问题报告
+description: Report incorrect behavior with a reproduction. 提供复现并报告行为问题。
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior / 预期与实际行为
+      description: Describe what should happen and what happened instead. 说明预期结果和实际结果。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction / 复现方式
+      description: Include minimal code, configuration, and commands. 提供最小代码、配置和执行命令。
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment / 环境
+      description: Source revision, OS, backend, plugin language, and relevant tool versions. 填写源码版本、系统、后端、插件语言及相关工具版本。
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output / 相关输出
+      description: Include the failure and nearby output; remove private data. 提供错误及其上下文，并移除私人数据。
+      render: text

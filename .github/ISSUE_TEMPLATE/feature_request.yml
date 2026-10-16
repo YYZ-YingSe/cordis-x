@@ -1,0 +1,22 @@
+name: Feature proposal / 功能建议
+description: Describe a use case and the behavior it needs. 描述使用场景及所需行为。
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case / 使用场景
+      description: What are you building, and what is difficult with the current API? 正在实现什么功能，当前 API 遇到了什么困难？
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed behavior / 期望行为
+      description: An API example or lifecycle sequence helps. 可以用 API 示例或生命周期顺序说明。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and scope / 替代方案与范围
+      description: Mention alternatives, affected languages or backends, and tradeoffs. 说明替代做法、涉及的语言或后端及相关取舍。
