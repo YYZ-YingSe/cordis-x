@@ -136,8 +136,10 @@ fn dispatch(w: &mut Writer, methods: &[Operation], prefix: &str) {
         w.close("}");
     }
     if !methods.iter().any(|o| o.wire.is_none()) {
+        if methods.is_empty() {
+            w.line("co_await corral::noop();");
+        }
         w.line("throw cordis::Refusal(\"unknown_method\", method);");
-        w.line("co_return cordis::Message(\"\");");
     }
     w.close("}");
     w.line("cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }");
@@ -224,7 +226,6 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
         }
         if !s.resources.iter().any(|r| r.wire.is_none()) {
             w.line("throw cordis::Refusal(\"unknown_resource_kind\", kind);");
-            w.line("co_return nullptr;");
         }
         w.close("}");
         w.line("cordis::Async<std::shared_ptr<cordis::Resource>> acquire(cordis::Context ctx, std::string kind, cordis::Message args) override { return acquire_impl(server_, std::move(ctx), std::move(kind), std::move(args)); }");

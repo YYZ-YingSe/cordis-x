@@ -20,6 +20,10 @@ Corral has local portability changes: native return-address capture is disabled 
 
 Corral 包含本地移植修改：在 WebAssembly 上关闭原生返回地址采集，并允许执行器指针使用存储访问器。macOS 原生适配器使用 pthread 存储，避免线程局部析构记录阻止已退出的插件动态库卸载。对掩码后的任务标签显式转换为对应整数类型，消除 MSVC 的窄化告警。这些修改没有替换 Corral 的协程、取消或任务所有权算法。
 
+Corral's callback portal omits a dead return after its terminating assertion. A local MSVC C4702 diagnostic override is limited to `BasicNursery::wrapError`, preserving the defensive assertion for custom error policies after built-in non-returning policies. Other code retains unreachable-code diagnostics.
+
+Corral 的回调入口移除了终止断言后的不可达返回。MSVC C4702 的局部诊断覆盖仅限 `BasicNursery::wrapError`，保留内置不返回错误策略之后对自定义错误策略的防御断言。其他代码继续执行不可达代码检查。
+
 ## External dependencies / 外部依赖
 
 Rust and JavaScript dependencies are declared in Cargo and npm manifests and resolved by the repository lockfiles. Their upstream licenses remain applicable. Protobuf and Abseil C++ libraries, WASI SDK, and other compiler tools are provided by the developer and are not included as tool binaries in this source tree.

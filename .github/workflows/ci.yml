@@ -39,11 +39,6 @@ jobs:
         with:
           path: ${{ runner.temp }}/cordis-tools
           key: ${{ steps.tools.outputs.cache-primary-key }}
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
-        with:
-          cache-on-failure: true
-          cache-bin: false
       - name: Test setup helpers
         run: python -m unittest discover -s tests/setup -v
       - run: cargo fmt --all -- --check
@@ -53,6 +48,14 @@ jobs:
         run: cmake --build target/abi --config Debug -j 2
       - name: Test C++ SDK
         run: ctest --test-dir target/abi -C Debug --output-on-failure
+      # Start the Rust cache only after native build prerequisites pass, so a
+      # C++ failure cannot publish a cache with no compiled Rust dependencies.
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          key: compiled-dependencies
+          cache-on-failure: true
+          cache-bin: false
       - run: cargo clippy --workspace --all-targets --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked -- -D warnings
       - run: cargo test --workspace --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked
       - run: cargo build -p cordis-wasm-calculator --target wasm32-unknown-unknown --release --locked

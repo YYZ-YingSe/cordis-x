@@ -261,7 +261,6 @@ namespace component_example {
                 co_return cordis::typed::output(std::move(result), ContextWasiWriteSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };
@@ -379,7 +378,6 @@ namespace component_example {
                 co_return cordis::typed::output(std::move(result), ContextLogWriteSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };
@@ -517,7 +515,6 @@ namespace component_example {
                 co_return cordis::typed::output(std::move(result), ContextProbeWasiBlockSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };

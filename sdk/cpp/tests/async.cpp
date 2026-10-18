@@ -32,13 +32,22 @@ struct Completion {
   void await_resume() {}
 };
 
+struct MethodOnlyService : cordis::Service {
+  cordis::Async<cordis::Message> invoke(cordis::Context, std::string,
+                                       cordis::Message args) override {
+    return corral::just(std::move(args));
+  }
+};
+
 cordis::Async<void> check(Loop &loop) {
   using namespace cordis;
+  MethodOnlyService service;
   auto capture = std::make_shared<std::string>(4096, 'x');
   std::weak_ptr<std::string> weak = capture;
   {
     Async<Message> invocation;
     Async<std::vector<Flow>> dispatch;
+    Async<std::shared_ptr<Resource>> rejected;
     {
       Context::Operations operations;
       operations.invoke = [capture, &loop](std::string dependency,
@@ -69,6 +78,11 @@ cordis::Async<void> check(Loop &loop) {
             []() -> Async<Value> { co_return nullptr; });
       };
       Context context(std::move(operations));
+      {
+        // Unsupported operations remain lazy, even if their task is abandoned.
+        auto abandoned = service.acquire(context, "missing", Message(""));
+      }
+      rejected = service.acquire(context, "missing", Message(""));
       invocation = context.invoke("dependency", "method",
                                   test::body(Value{{"answer", 42}}));
       dispatch = context.parallel("event", test::body(7));
@@ -80,6 +94,16 @@ cordis::Async<void> check(Loop &loop) {
     auto result = co_await std::move(invocation);
     assert(test::json(result) == Value({{"answer", 42}}));
     assert(test::json(*(co_await std::move(dispatch)).at(0).value) == 7);
+    // The failing task still owns its Context after the other calls complete.
+    assert(!weak.expired());
+    bool refused = false;
+    try {
+      co_await std::move(rejected);
+    } catch (const Refusal &error) {
+      refused = error.code == "unknown_resource_kind" &&
+                std::string(error.what()) == "missing";
+    }
+    assert(refused);
   }
   assert(weak.expired());
 }

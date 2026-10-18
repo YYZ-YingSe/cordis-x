@@ -43,7 +43,6 @@ namespace lifecycle {
                 co_return cordis::typed::output(std::move(result), ApplicationStartSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };
@@ -129,7 +128,6 @@ namespace lifecycle {
                 co_return cordis::typed::output(std::move(result), AuditedSubscriptionsUnsubscribeSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };
@@ -280,7 +278,6 @@ namespace lifecycle {
                 co_return cordis::typed::output(std::move(result), ComposerStatusSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };
@@ -428,7 +425,6 @@ namespace lifecycle {
                 co_return cordis::typed::output(std::move(result), ConnectionsStatusSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };
@@ -612,7 +608,6 @@ namespace lifecycle {
                 co_return cordis::typed::output(std::move(result), EventsUnsubscribeSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };
@@ -741,7 +736,6 @@ namespace lifecycle {
                 co_return cordis::typed::output(std::move(result), HeartbeatsStatusSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };
@@ -804,7 +798,6 @@ namespace lifecycle {
                 co_return cordis::typed::output(std::move(result), LifecycleLogWriteSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };
@@ -936,7 +929,6 @@ namespace lifecycle {
                 co_return cordis::typed::output(std::move(result), PipelineRunSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };
@@ -1032,7 +1024,6 @@ namespace lifecycle {
                 co_return cordis::typed::output(std::move(result), ReactiveSubscribeSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };
@@ -1151,7 +1142,6 @@ namespace lifecycle {
                 co_return cordis::typed::output(std::move(result), SequencesStatusSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };
@@ -1241,7 +1231,6 @@ namespace lifecycle {
                 co_return cordis::typed::output(std::move(result), SubscriptionsUnsubscribeSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
     };

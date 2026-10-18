@@ -17,12 +17,12 @@ public:
       throw std::runtime_error("null resource");
   }
   Async<Message> invoke(std::string, Message) override {
+    co_await corral::noop();
     throw Refusal("context", "resource requires callback authority");
-    co_return Message("");
   }
   Async<void> close() override {
+    co_await corral::noop();
     throw Refusal("context", "resource requires callback authority");
-    co_return;
   }
   Async<Message> invoke(std::string method, Message args,
                         Context ctx) override {

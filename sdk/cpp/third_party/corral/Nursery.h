@@ -846,6 +846,12 @@ struct NurseryBase::ArgConverter {
 // BasicNursery
 //
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+// Built-in policies mark wrapError noreturn. Retain the defensive assertion
+// for custom policies; MSVC's back end diagnoses it after instantiation.
+#pragma warning(disable : 4702)
+#endif
 template <class Policy>
 detail::PolicyReturnTypeFor<Policy, void> BasicNursery<Policy>::wrapError() {
     if (!Policy::hasError(error_)) {
@@ -857,6 +863,9 @@ detail::PolicyReturnTypeFor<Policy, void> BasicNursery<Policy>::wrapError() {
         return Policy::wrapError(error_);
     }
 }
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 template <class Policy>
 template <class Callable, class... Args>

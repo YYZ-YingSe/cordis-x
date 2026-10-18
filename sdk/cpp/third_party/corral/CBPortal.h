@@ -520,7 +520,6 @@ class CBPortalProxy : private detail::Noncopyable {
                 return awaiter_.await_cancel(h);
         }
         CORRAL_ASSERT_UNREACHABLE();
-        return true;
     }
 
     bool await_must_resume() const noexcept { return awaiter_.await_ready(); }

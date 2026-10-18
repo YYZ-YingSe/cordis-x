@@ -18,8 +18,9 @@ struct Service {
                                 Message args) = 0;
   virtual Async<std::shared_ptr<Resource>> acquire(Context, std::string kind,
                                                    Message) {
+    // Keep rejection lazy and retain the call's parameters until completion.
+    co_await corral::noop();
     throw Refusal("unknown_resource_kind", kind);
-    co_return nullptr;
   }
   virtual Async<void> deactivate(Context) { co_return; }
 };

@@ -57,7 +57,6 @@ namespace fixtures_calculator_process {
                 co_return cordis::typed::output(std::move(result), ServiceCounterMetadataSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
         cordis::Async<void> close(cordis::Context ctx) override { return cordis::typed::close(server_, std::move(ctx)); }
@@ -142,7 +141,6 @@ namespace fixtures_calculator_process {
                 co_return cordis::typed::output(std::move(result), ServiceMetadataForSignature().at("result"), validation);
             }
             throw cordis::Refusal("unknown_method", method);
-            co_return cordis::Message("");
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
         static cordis::Async<std::shared_ptr<cordis::Resource>> acquire_impl(std::shared_ptr<ServiceServer> server, cordis::Context ctx, std::string kind, cordis::Message args) {
@@ -152,7 +150,6 @@ namespace fixtures_calculator_process {
                 co_return std::make_shared<ServiceCounterExport>(std::move(object));
             }
             throw cordis::Refusal("unknown_resource_kind", kind);
-            co_return nullptr;
         }
         cordis::Async<std::shared_ptr<cordis::Resource>> acquire(cordis::Context ctx, std::string kind, cordis::Message args) override { return acquire_impl(server_, std::move(ctx), std::move(kind), std::move(args)); }
     };
