@@ -49,7 +49,7 @@ Every toolchain has its own entry point, accepting the same `--prefix` and `--jo
 | Script in `tools/setup/` | Installs |
 | --- | --- |
 | `rust.py` | Rust/Cargo 1.98.1, rustfmt, Clippy, `wasm32-unknown-unknown` |
-| `python.py` | Virtual environment, repository Python dependencies, CMake 3.31.10, Ninja 1.13.0, libclang 18.1.1 |
+| `python.py` | Virtual environment, repository Python dependencies, CMake 4.4.4, Ninja 1.13.0, libclang 18.1.1 |
 | `typescript.py` | Node.js 24.14.1 with npm; TypeScript, `protoc-gen-es`, and esbuild from the root npm lockfile |
 | `protoc.py` | Host `protoc` 34.1 and standard `.proto` includes |
 | `cpp.py` | Python build tools, `protoc`, native static Protobuf 34.1.0 and Abseil 20260817.0; macOS uses shared Abseil and the thread-storage adaptation |
@@ -57,6 +57,8 @@ Every toolchain has its own entry point, accepting the same `--prefix` and `--jo
 | `setup.py` | All of the above, or the subset selected with `--only` |
 
 For example, `python3 tools/setup/setup.py --prefix /path/to/tools --only rust protoc` prepares the Rust/protoc path. Add `python typescript` for generation and TypeScript work; add `cpp wasm` for the full integration suite. Native C++ needs the system compiler from the prerequisite step. Windows builds install both Debug and Release dependencies to match the MSVC runtime used by consumers.
+
+On Linux, setup selects Clang for native C++ and exports `CC`/`CXX` for subsequent builds; GCC 13 crashes on coroutine expressions used by the SDK. Explicit `CC`/`CXX` settings select your own compiler. On Windows, CMake selects the installed Visual Studio instance, including VS 2026, instead of assuming a specific IDE release.
 
 [versions.json](tools/setup/versions.json) pins official binary/source archives and their SHA-256 checksums. Python tools are pinned in [requirements.txt](tools/setup/requirements.txt); npm and Cargo dependencies use their lockfiles. OS compiler and Python patch versions follow the selected system package source. The binary recipes cover Linux/macOS x64 and ARM64, and Windows x64. Cross-platform validation is still performed by CI; having an installer recipe does not establish backend support on its own.
 

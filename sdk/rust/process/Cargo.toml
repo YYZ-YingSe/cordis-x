@@ -19,6 +19,7 @@ http-body-util = "0.1"
 
 [dev-dependencies]
 cordis-example-contracts.workspace = true
+cordis-test-contracts.workspace = true
 cordis-sdk-runtime.workspace = true
 cordis-kernel.workspace = true
 cordis-portable-example = { path = "../examples/portable" }

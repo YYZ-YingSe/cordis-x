@@ -232,7 +232,9 @@ async fn invalid_dependency_result_is_unknown_after_native_execution() {
     }
     let called = Arc::new(AtomicBool::new(false));
     let observed = called.clone();
-    let mut spec = ProcessSpec::new("python3").requires(Dependency::new_json(
+    let python = std::env::var_os("CORDIS_TEST_PYTHON")
+        .unwrap_or_else(|| if cfg!(windows) { "python" } else { "python3" }.into());
+    let mut spec = ProcessSpec::new(python).requires(Dependency::new_json(
         &logger,
         Descriptor::new(interface).unwrap(),
         move |_, _, _, _| {
@@ -240,6 +242,7 @@ async fn invalid_dependency_result_is_unknown_after_native_execution() {
             Box::pin(async { Ok(json!("wrong result type")) })
         },
     ));
+    spec.args.push(cordis_test_contracts::PYTHON_RUNNER.into());
     spec.args.push(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../crates/cordis-remote/tests/fixtures/dependency_peer.py")

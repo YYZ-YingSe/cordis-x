@@ -426,6 +426,7 @@ dependencies = [
  "cordis-runtime",
  "cordis-sdk-core",
  "cordis-sdk-runtime",
+ "cordis-test-contracts",
  "cordis-wire",
  "futures-util",
  "http-body-util",

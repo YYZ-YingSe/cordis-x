@@ -49,7 +49,7 @@ py -3.12 tools/setup/setup.py --prefix "$env:LOCALAPPDATA/CordisTools" --jobs 4
 | `tools/setup/` 中的脚本 | 安装内容 |
 | --- | --- |
 | `rust.py` | Rust/Cargo 1.98.1、rustfmt、Clippy、`wasm32-unknown-unknown` |
-| `python.py` | 虚拟环境、仓库 Python 依赖、CMake 3.31.10、Ninja 1.13.0、libclang 18.1.1 |
+| `python.py` | 虚拟环境、仓库 Python 依赖、CMake 4.4.4、Ninja 1.13.0、libclang 18.1.1 |
 | `typescript.py` | Node.js 24.14.1 及 npm；根 npm 锁文件中的 TypeScript、`protoc-gen-es` 和 esbuild |
 | `protoc.py` | 宿主 `protoc` 34.1 及标准 `.proto` 文件 |
 | `cpp.py` | Python 构建工具、`protoc`、原生静态 Protobuf 34.1.0 和 Abseil 20260817.0；macOS 使用共享 Abseil 并加入线程存储适配 |
@@ -57,6 +57,8 @@ py -3.12 tools/setup/setup.py --prefix "$env:LOCALAPPDATA/CordisTools" --jobs 4
 | `setup.py` | 上述全部工具，或 `--only` 选择的部分 |
 
 例如，`python3 tools/setup/setup.py --prefix /path/to/tools --only rust protoc` 准备 Rust/protoc 路径。代码生成和 TypeScript 开发再加入 `python typescript`；完整集成测试再加入 `cpp wasm`。原生 C++ 使用系统前提步骤提供的编译器。Windows 同时安装 Debug 和 Release 依赖，以匹配使用方的 MSVC 运行库。
+
+Linux 搭建脚本默认选择 Clang 编译原生 C++，并导出 `CC`/`CXX` 供后续构建使用；GCC 13 在 SDK 使用的协程表达式上会发生编译器崩溃。显式设置 `CC`/`CXX` 可以选择自己的编译器。Windows 由 CMake 选择已安装的 Visual Studio 实例，包括 VS 2026，不再假定某个固定 IDE 版本。
 
 [versions.json](tools/setup/versions.json)固定官方二进制、源码归档及 SHA-256；Python 工具版本在 [requirements.txt](tools/setup/requirements.txt)，npm 和 Cargo 依赖使用各自锁文件。系统编译器和 Python 的补丁版本跟随所用包管理器。二进制安装配方覆盖 Linux/macOS x64、ARM64，以及 Windows x64。平台实际验收仍由 CI 执行，有安装配方本身不代表后端已通过验证。
 

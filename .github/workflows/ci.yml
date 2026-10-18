@@ -18,12 +18,19 @@ jobs:
         id: python
         with:
           python-version: "3.12"
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: tools
         with:
           path: ${{ runner.temp }}/cordis-tools
           key: tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('tools/setup/**', 'sdk/cpp/tools/protobuf/**', 'tools/codegen/requirements.txt', 'tests/requirements.txt', 'package-lock.json', 'Cargo.lock', 'crates/cordis-component-pack/**') }}
       - name: Set up all development toolchains
         run: python tools/setup/setup.py --prefix "${{ runner.temp }}/cordis-tools" --jobs 2 --github-env
+      - name: Cache prepared toolchains
+        if: steps.tools.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/cordis-tools
+          key: ${{ steps.tools.outputs.cache-primary-key }}
       - name: Test setup helpers
         run: python -m unittest discover -s tests/setup -v
       - run: cargo fmt --all -- --check

@@ -8,11 +8,17 @@ from common import HERE, ROOT, main
 
 def build(setup, source, name, prefix, options, *, wasm=False):
     directory = setup.prefix / "build" / name
-    generator = ["-G", "Visual Studio 17 2022", "-A", "x64"] if setup.windows and not wasm else ["-G", "Ninja"]
+    # CMake selects the installed Visual Studio instance on Windows.
+    generator = ["-A", "x64"] if setup.windows and not wasm else ["-G", "Ninja"]
+    compiler = []
+    if not wasm:
+        for variable in ("CC", "CXX"):
+            if value := setup.environment().get(variable):
+                compiler.append(f"-DCMAKE_{'C' if variable == 'CC' else 'CXX'}_COMPILER={value}")
     setup.run("cmake", "-S", source, "-B", directory, *generator,
               f"-DCMAKE_INSTALL_PREFIX={prefix}", "-DCMAKE_INSTALL_LIBDIR=lib", "-DCMAKE_CXX_STANDARD=20",
               "-DCMAKE_POSITION_INDEPENDENT_CODE=ON", "-DCMAKE_BUILD_TYPE=Release",
-              "-DCMAKE_DEBUG_POSTFIX=d", *options)
+              "-DCMAKE_DEBUG_POSTFIX=d", *compiler, *options)
     # MSVC's Debug CRT/STL must match Debug SDK consumers. Install both configs.
     for config in (["Release", "Debug"] if setup.windows and not wasm else ["Release"]):
         setup.run("cmake", "--build", directory, "--config", config, "--parallel", setup.jobs)
@@ -65,6 +71,11 @@ def dependencies(setup, *, wasm=False, toolchain=None):
 def install(setup):
     setup.require("python")
     setup.require("protoc")
+    if setup.host.startswith("linux"):
+        # GCC 13 crashes while lowering several C++20 coroutine expressions.
+        # Select Clang for the prepared environment; explicit CC/CXX still win.
+        environment = setup.environment()
+        setup.set(CC=environment.get("CC", "clang"), CXX=environment.get("CXX", "clang++"))
     prefix = dependencies(setup)
     setup.set(CMAKE_PREFIX_PATH=prefix)
     if setup.host.startswith("macos"):
