@@ -160,7 +160,8 @@ template <class T> class ValueOrPromise {
         /// ValueOrPromise and the one that has already had its value taken.
         static constexpr const uintptr_t Consumed = 0 | IsValuePtr;
         uintptr_t bits = std::exchange(bits_, Consumed);
-        return {bits & Mask, bits & ~Mask};
+        // Mask contains only the small type tag; the remaining bits hold data.
+        return {static_cast<int>(bits & Mask), bits & ~Mask};
     }
 
   private:

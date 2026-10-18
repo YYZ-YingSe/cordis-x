@@ -12,6 +12,11 @@
 #include <utf8_validity.h>
 #include <vector>
 
+// Windows headers define GetMessage as an object-like macro. Keep the
+// reflection method name intact without changing the includer's macro state.
+#pragma push_macro("GetMessage")
+#undef GetMessage
+
 namespace cordis::protobuf {
 inline constexpr std::size_t max_bytes = 1024 * 1024;
 inline constexpr std::size_t max_nodes = 65536;
@@ -256,3 +261,4 @@ inline void validate(const T &message, Validation policy = Validation::Audit,
   plan.validate(message, policy, decoded);
 }
 } // namespace cordis::protobuf
+#pragma pop_macro("GetMessage")

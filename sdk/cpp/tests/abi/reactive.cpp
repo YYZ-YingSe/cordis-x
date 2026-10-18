@@ -93,30 +93,30 @@ struct Fixture : fixture::JsonContextService {
     if (method == "version")
       co_return CORDIS_ABI_CODE_VERSION;
     if (method == "before") {
-      auto config = this->config;
-      (co_await ctx.defer("older", [config](Context) -> Async<void> {
-        trace(config, "older");
+      auto captured_config = this->config;
+      (co_await ctx.defer("older", [captured_config](Context) -> Async<void> {
+        trace(captured_config, "older");
         co_return;
       }));
       co_return nullptr;
     }
     if (method == "on" || method == "use") {
-      auto config = this->config;
-      auto state = this->state;
+      auto captured_config = this->config;
+      auto shared_state = this->state;
       auto label = args.value("id", "callback");
       auto capture = std::make_shared<Capture>();
-      capture->config = config;
+      capture->config = captured_config;
       capture->label = label;
       Subscription registration;
       if (method == "on") {
         registration = (co_await fixture::on_json(
             ctx, args.value("alias", "tick"),
-            [config, state, args, label, capture](Context callback,
+            [captured_config, shared_state, args, label, capture](Context callback,
                                                   Value input) -> Async<Flow> {
-              trace(config, "event:" + label);
+              trace(captured_config, "event:" + label);
               {
-                std::lock_guard<std::mutex> lock(state->mutex);
-                state->saved = callback;
+                std::lock_guard<std::mutex> lock(shared_state->mutex);
+                shared_state->saved = callback;
               }
               Value event = {{"version", CORDIS_ABI_CODE_VERSION},
                              {"label", label},
@@ -132,8 +132,8 @@ struct Fixture : fixture::JsonContextService {
               if (args.value("self", false)) {
                 Subscription own;
                 {
-                  std::lock_guard<std::mutex> lock(state->mutex);
-                  own = state->subscriptions.front();
+                  std::lock_guard<std::mutex> lock(shared_state->mutex);
+                  own = shared_state->subscriptions.front();
                 }
                 std::optional<Rejected> caught_2;
                 try {
@@ -150,8 +150,8 @@ struct Fixture : fixture::JsonContextService {
               if (args.value("late", false))
                 (co_await callback.defer(
                     "event-late",
-                    [config, args](Context cleanup) -> Async<void> {
-                      trace(config, "late-cleanup");
+                    [captured_config, args](Context cleanup) -> Async<void> {
+                      trace(captured_config, "late-cleanup");
                       (co_await fixture::invoke_json(cleanup, "example.logger",
                                                      "cleanup",
                                                      CORDIS_ABI_CODE_VERSION));
@@ -172,15 +172,15 @@ struct Fixture : fixture::JsonContextService {
       } else {
         registration = (co_await fixture::middleware_json(
             ctx, args.value("alias", "chain"),
-            [config, state, args, label, capture](Context callback, Value input,
+            [captured_config, shared_state, args, label, capture](Context callback, Value input,
                                                   Next next) -> Async<Value> {
-              trace(config, "before:" + label);
+              trace(captured_config, "before:" + label);
               const auto frame = co_await current_frame();
               {
-                std::lock_guard lock(state->mutex);
-                state->saved = callback;
-                state->next = next;
-                state->next_id = frame.next;
+                std::lock_guard lock(shared_state->mutex);
+                shared_state->saved = callback;
+                shared_state->next = next;
+                shared_state->next_id = frame.next;
               }
               (co_await fixture::invoke_json(callback, "example.logger",
                                              "middleware",
@@ -197,21 +197,21 @@ struct Fixture : fixture::JsonContextService {
               if (args.value("detached", false)) {
                 (co_await callback.spawn(
                     "admitted next",
-                    [next, input, config](Context task) -> Async<void> {
+                    [next, input, captured_config](Context task) -> Async<void> {
                       auto result = (co_await fixture::next_json(
                           next, input.get<int>() + 1));
                       (co_await fixture::invoke_json(task, "example.logger",
                                                      "next-result", result));
-                      trace(config, "detached-next-finished");
+                      trace(captured_config, "detached-next-finished");
 
                       co_return;
                     }));
                 auto wait = co_await corral::anyOf(
-                    state->terminal_entered,
+                    shared_state->terminal_entered,
                     cordis::native::sleep(std::chrono::seconds(10)));
                 if (!std::get<0>(wait))
                   throw std::runtime_error("terminal did not enter");
-                trace(config, "early-handler-return");
+                trace(captured_config, "early-handler-return");
                 co_return 99;
               }
               auto output = (co_await fixture::next_json(
@@ -229,13 +229,13 @@ struct Fixture : fixture::JsonContextService {
                                                  "duplicate", e.code));
                 }
               }
-              trace(config, "after:" + label);
+              trace(captured_config, "after:" + label);
               co_return output.get<int>() * args.value("multiply", 1);
             }));
       }
-      std::lock_guard<std::mutex> lock(state->mutex);
-      state->subscriptions.push_back(registration);
-      co_return state->subscriptions.size() - 1;
+      std::lock_guard<std::mutex> lock(shared_state->mutex);
+      shared_state->subscriptions.push_back(registration);
+      co_return shared_state->subscriptions.size() - 1;
     }
     if (method == "dispose") {
       (co_await subscription(args.get<size_t>()).dispose());
@@ -293,28 +293,28 @@ struct Fixture : fixture::JsonContextService {
               .first.one());
     }
     if (method == "run") {
-      auto config = this->config;
-      auto state = this->state;
+      auto captured_config = this->config;
+      auto shared_state = this->state;
       co_return (co_await fixture::run_json(
           ctx, "chain", args,
-          [config, state](Context terminal, Value input) -> Async<Value> {
-            trace(config, "terminal");
-            state->terminal_entered.trigger();
-            if (config.value("hold_terminal", false))
+          [captured_config, shared_state](Context terminal, Value input) -> Async<Value> {
+            trace(captured_config, "terminal");
+            shared_state->terminal_entered.trigger();
+            if (captured_config.value("hold_terminal", false))
               (co_await fixture::invoke_json(terminal, "example.logger", "hold",
                                              input));
             (co_await terminal.defer(
-                "terminal-late", [config](Context cleanup) -> Async<void> {
-                  trace(config, "terminal-cleanup");
+                "terminal-late", [captured_config](Context cleanup) -> Async<void> {
+                  trace(captured_config, "terminal-cleanup");
                   (co_await fixture::invoke_json(cleanup, "example.logger",
                                                  "cleanup",
                                                  CORDIS_ABI_CODE_VERSION));
 
                   co_return;
                 }));
-            if (config.value("unknown_terminal", false))
+            if (captured_config.value("unknown_terminal", false))
               throw std::runtime_error("unknown terminal");
-            if (config.value("reject_terminal", false))
+            if (captured_config.value("reject_terminal", false))
               throw Rejected("terminal", "terminal rejected");
             co_return input;
           }));

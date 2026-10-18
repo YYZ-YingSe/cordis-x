@@ -3,6 +3,7 @@
 #include "protobuf.hpp"
 #include "service.hpp"
 #include <algorithm>
+#include <string_view>
 #include <variant>
 
 namespace cordis::typed {
@@ -15,7 +16,10 @@ template <class T> struct Codec {
   }
 };
 template <class T> void identity(const Value &shape) {
-  if (shape.at("message") != T::descriptor()->full_name())
+  const auto &message = shape.at("message");
+  if (!message.is_string() ||
+      std::string_view(message.get_ref<const Value::string_t &>()) !=
+          T::descriptor()->full_name())
     throw std::runtime_error("protobuf codec/contract mismatch");
 }
 template <class T> T input(const Message &value, const Value &shape, Validation policy = Validation::Contract) {

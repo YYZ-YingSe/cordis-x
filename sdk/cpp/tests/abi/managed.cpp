@@ -90,27 +90,27 @@ struct Fixture : fixture::JsonContextService {
     if (method == "version")
       co_return CORDIS_ABI_CODE_VERSION;
     if (method == "sequence-start") {
-      auto config = this->config;
-      auto state = this->state;
+      auto captured_config = this->config;
+      auto shared_state = this->state;
       auto sequence = (co_await ctx.effect(
           "sequence",
-          [config, state, number = 0](Context step) mutable -> Async<Step> {
+          [captured_config, shared_state, number = 0](Context step) mutable -> Async<Step> {
             ++number;
-            trace(config, "step:" + std::to_string(number));
+            trace(captured_config, "step:" + std::to_string(number));
             {
-              std::lock_guard<std::mutex> lock(state->mutex);
-              state->saved = step;
+              std::lock_guard<std::mutex> lock(shared_state->mutex);
+              shared_state->saved = step;
             }
-            if (config.value("hold_step", false) && number == 1)
+            if (captured_config.value("hold_step", false) && number == 1)
               (co_await fixture::invoke_json(step, "example.logger", "hold",
                                              number));
-            if (config.value("self_sequence", false) && number == 1) {
+            if (captured_config.value("self_sequence", false) && number == 1) {
               (co_await fixture::invoke_json(step, "example.logger", "hold",
                                              "self"));
               Sequence own;
               {
-                std::lock_guard<std::mutex> lock(state->mutex);
-                own = state->sequence.value();
+                std::lock_guard<std::mutex> lock(shared_state->mutex);
+                own = shared_state->sequence.value();
               }
               std::optional<Rejected> caught_2;
               try {
@@ -124,29 +124,29 @@ struct Fixture : fixture::JsonContextService {
                                                "self_wait", e.code));
               }
             }
-            if (config.value("unknown_step", false))
+            if (captured_config.value("unknown_step", false))
               throw std::runtime_error("unknown step");
             auto inverse =
                 Inverse{"step " + std::to_string(number),
-                        [config, number](Context cleanup) -> Async<void> {
-                          trace(config, "undo:" + std::to_string(number));
+                        [captured_config, number](Context cleanup) -> Async<void> {
+                          trace(captured_config, "undo:" + std::to_string(number));
                           (co_await fixture::invoke_json(
                               cleanup, "example.logger", "cleanup",
                               std::string(CORDIS_ABI_CODE_VERSION) +
                                   ":undo:" + std::to_string(number)));
-                          if (config.value("fail_undo", false))
+                          if (captured_config.value("fail_undo", false))
                             throw Rejected("undo", "inverse failed");
 
                           co_return;
                         }};
-            bool last = number >= config.value("steps", 2);
-            if (last && config.value("fail_step", false))
+            bool last = number >= captured_config.value("steps", 2);
+            if (last && captured_config.value("fail_step", false))
               co_return Step::failed(
                   Rejected("step", "failed after acquisition"), inverse);
             co_return last ? Step::complete(inverse) : Step::yielded(inverse);
           }));
-      std::lock_guard<std::mutex> lock(state->mutex);
-      state->sequence = sequence;
+      std::lock_guard<std::mutex> lock(shared_state->mutex);
+      shared_state->sequence = sequence;
       co_return nullptr;
     }
     if (method == "sequence-ready")
@@ -175,25 +175,25 @@ struct Fixture : fixture::JsonContextService {
     if (method == "scope-status")
       co_return (co_await scope().snapshot());
     if (method == "scope-run") {
-      auto state = this->state;
-      auto config = this->config;
+      auto shared_state = this->state;
+      auto captured_config = this->config;
       co_return (co_await scope().run(
-          [state, config, args](Context child) -> Async<Value> {
+          [shared_state, captured_config, args](Context child) -> Async<Value> {
             (co_await fixture::invoke_json(child, "example.logger", "scoped",
                                            args));
             {
-              std::lock_guard<std::mutex> lock(state->mutex);
-              state->saved = child;
+              std::lock_guard<std::mutex> lock(shared_state->mutex);
+              shared_state->saved = child;
             }
             if (args == "hold")
               (co_await fixture::invoke_json(child, "example.logger", "hold",
                                              args));
             if (args == "nested") {
               auto nested = (co_await child.scope("nested"));
-              (co_await nested.run([config](Context sub) -> Async<Value> {
+              (co_await nested.run([captured_config](Context sub) -> Async<Value> {
                 (co_await sub.defer(
-                    "nested", [config](Context cleanup) -> Async<void> {
-                      trace(config, "nested-cleanup");
+                    "nested", [captured_config](Context cleanup) -> Async<void> {
+                      trace(captured_config, "nested-cleanup");
                       (co_await fixture::invoke_json(cleanup, "example.logger",
                                                      "cleanup", "nested"));
 
@@ -205,8 +205,8 @@ struct Fixture : fixture::JsonContextService {
             if (args == "self") {
               Scope own;
               {
-                std::lock_guard<std::mutex> lock(state->mutex);
-                own = state->scope.value();
+                std::lock_guard<std::mutex> lock(shared_state->mutex);
+                own = shared_state->scope.value();
               }
               try {
                 (co_await own.dispose());
@@ -215,12 +215,12 @@ struct Fixture : fixture::JsonContextService {
               }
             }
             (co_await child.defer(
-                "scope contribution", [config](Context cleanup) -> Async<void> {
-                  trace(config, "scope-cleanup");
+                "scope contribution", [captured_config](Context cleanup) -> Async<void> {
+                  trace(captured_config, "scope-cleanup");
                   (co_await fixture::invoke_json(
                       cleanup, "example.logger", "cleanup",
                       std::string(CORDIS_ABI_CODE_VERSION) + ":scope"));
-                  if (config.value("fail_scope", false))
+                  if (captured_config.value("fail_scope", false))
                     throw Rejected("scope", "scope inverse failed");
 
                   co_return;
@@ -233,32 +233,32 @@ struct Fixture : fixture::JsonContextService {
           }));
     }
     if (method == "task-start") {
-      auto config = this->config;
-      auto state = this->state;
+      auto captured_config = this->config;
+      auto shared_state = this->state;
       auto task = (co_await ctx.spawn(
-          "worker", [config, state](Context task) -> Async<void> {
-            trace(config, "task-start");
+          "worker", [captured_config, shared_state](Context task) -> Async<void> {
+            trace(captured_config, "task-start");
             (co_await fixture::invoke_json(task, "example.logger", "task-start",
                                            CORDIS_ABI_CODE_VERSION));
             {
-              std::lock_guard<std::mutex> lock(state->mutex);
-              state->saved = task;
+              std::lock_guard<std::mutex> lock(shared_state->mutex);
+              shared_state->saved = task;
             }
             (co_await task.defer(
-                "task first", [config](Context cleanup) -> Async<void> {
-                  trace(config, "task-first-cleanup");
+                "task first", [captured_config](Context cleanup) -> Async<void> {
+                  trace(captured_config, "task-first-cleanup");
                   (co_await fixture::invoke_json(cleanup, "example.logger",
                                                  "cleanup", "task-first"));
 
                   co_return;
                 }));
-            if (config.value("self_task", false)) {
+            if (captured_config.value("self_task", false)) {
               (co_await fixture::invoke_json(task, "example.logger", "hold",
                                              "self"));
               Task own;
               {
-                std::lock_guard<std::mutex> lock(state->mutex);
-                own = state->tasks.at(0);
+                std::lock_guard<std::mutex> lock(shared_state->mutex);
+                own = shared_state->tasks.at(0);
               }
               std::optional<Rejected> caught_1;
               try {
@@ -272,22 +272,22 @@ struct Fixture : fixture::JsonContextService {
                                                "self_wait", e.code));
               }
             }
-            if (config.value("unknown_task", false))
+            if (captured_config.value("unknown_task", false))
               throw std::runtime_error("unknown task outcome");
-            if (config.value("fail_task", false))
+            if (captured_config.value("fail_task", false))
               throw Rejected("task", "task failed");
-            if (!config.value("finite_task", false)) {
+            if (!captured_config.value("finite_task", false)) {
               (co_await task.cancelled_for(std::chrono::milliseconds(1)));
               if (!(co_await task.cancelled_for(std::chrono::seconds(15))))
                 throw std::runtime_error("fixture stop timeout");
               (co_await task.cancelled());
             }
-            trace(config, "task-stop");
+            trace(captured_config, "task-stop");
             (co_await fixture::invoke_json(task, "example.logger", "task-stop",
                                            CORDIS_ABI_CODE_VERSION));
             (co_await task.defer(
-                "task last", [config](Context cleanup) -> Async<void> {
-                  trace(config, "task-last-cleanup");
+                "task last", [captured_config](Context cleanup) -> Async<void> {
+                  trace(captured_config, "task-last-cleanup");
                   (co_await fixture::invoke_json(cleanup, "example.logger",
                                                  "cleanup", "task-last"));
 
@@ -296,9 +296,9 @@ struct Fixture : fixture::JsonContextService {
 
             co_return;
           }));
-      std::lock_guard<std::mutex> lock(state->mutex);
-      auto id = state->tasks.size();
-      state->tasks.push_back(task);
+      std::lock_guard<std::mutex> lock(shared_state->mutex);
+      auto id = shared_state->tasks.size();
+      shared_state->tasks.push_back(task);
       co_return id;
     }
     if (method == "task-join") {

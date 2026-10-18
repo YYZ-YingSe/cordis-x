@@ -66,14 +66,14 @@ struct Fixture : fixture::JsonContextService {
     co_return;
   }
   Async<uint64_t> subscribe(Context ctx, std::string label) {
-    auto config = this->config;
+    auto captured_config = this->config;
     auto effect = (co_await ctx.defer(
-        label, [config, label](Context cleanup) -> Async<void> {
-          trace(config, "cleanup:" + label);
+        label, [captured_config, label](Context cleanup) -> Async<void> {
+          trace(captured_config, "cleanup:" + label);
           (co_await fixture::invoke_json(cleanup, "example.logger", "cleanup",
                                          std::string(CORDIS_ABI_CODE_VERSION) +
                                              ":" + label));
-          if (config.value("fail_cleanup", false))
+          if (captured_config.value("fail_cleanup", false))
             throw Rejected("cleanup", "inverse failed");
 
           co_return;
