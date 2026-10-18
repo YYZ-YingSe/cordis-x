@@ -215,11 +215,11 @@ if(CORDIS_BUILD_EXAMPLES OR BUILD_TESTING)
   endforeach()
 endif()
 
-if(APPLE AND BUILD_TESTING AND CORDIS_BUILD_ABI)
+if((APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux") AND BUILD_TESTING AND CORDIS_BUILD_ABI)
   add_executable(cordis_abi_unload_test tests/abi_unload.cpp)
   target_compile_features(cordis_abi_unload_test PRIVATE cxx_std_20)
   target_include_directories(cordis_abi_unload_test PRIVATE "${Cordis_PROTOCOL_DIR}/abi/include")
-  target_link_libraries(cordis_abi_unload_test PRIVATE Threads::Threads)
+  target_link_libraries(cordis_abi_unload_test PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
   add_test(NAME cordis_abi_unload COMMAND cordis_abi_unload_test
     $<TARGET_FILE:cordis_abi_calculator> $<TARGET_FILE:cordis_abi_calculator_v2>
     $<TARGET_FILE:cordis_resource_counter> $<TARGET_FILE:cordis_workflows_abi>

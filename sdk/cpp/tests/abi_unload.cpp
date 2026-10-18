@@ -6,7 +6,11 @@
 #include <exception>
 #include <iostream>
 #include <latch>
+#if defined(__APPLE__)
 #include <mach-o/dyld.h>
+#else
+#include <link.h>
+#endif
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -57,10 +61,21 @@ static bool resident(const char *path) {
 }
 static unsigned abseil_images() {
   unsigned count = 0;
+#if defined(__APPLE__)
   for (uint32_t i = 0; i < _dyld_image_count(); ++i)
     if (std::string(_dyld_get_image_name(i)).find("libabseil_dll.") !=
         std::string::npos)
       ++count;
+#else
+  dl_iterate_phdr(
+      [](dl_phdr_info *info, size_t, void *data) {
+        if (std::string(info->dlpi_name).find("libabseil_dll.so.") !=
+            std::string::npos)
+          ++*static_cast<unsigned *>(data);
+        return 0;
+      },
+      &count);
+#endif
   return count;
 }
 int main(int argc, char **argv) {

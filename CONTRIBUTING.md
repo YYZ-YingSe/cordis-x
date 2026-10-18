@@ -52,7 +52,7 @@ Every toolchain has its own entry point, accepting the same `--prefix` and `--jo
 | `python.py` | Virtual environment, repository Python dependencies, CMake 4.4.4, Ninja 1.13.0, libclang 18.1.1 |
 | `typescript.py` | Node.js 24.14.1 with npm; TypeScript, `protoc-gen-es`, and esbuild from the root npm lockfile |
 | `protoc.py` | Host `protoc` 34.1 and standard `.proto` includes |
-| `cpp.py` | Python build tools, `protoc`, native static Protobuf 34.1.0 and Abseil 20260817.0; macOS uses shared Abseil and the thread-storage adaptation |
+| `cpp.py` | Python build tools, `protoc`, native static Protobuf 34.1.0 and Abseil 20260817.0; Linux/macOS use shared Abseil, and macOS also applies the thread-storage adaptation |
 | `wasm.py` | Rust and Python tools, host `protoc`, WASI SDK 34.0, `wit-bindgen` 0.61.1, WASI-built static Protobuf/Abseil, and `cordis-component-pack` |
 | `setup.py` | All of the above, or the subset selected with `--only` |
 
@@ -77,7 +77,7 @@ export CORDIS_TEST_PYTHON="$(python3 -c 'import sys; print(sys.executable)')"
 
 Use a Python virtual environment if your Python installation requires one. The npm workspaces share the root lockfile. Keep tool versions in [the generator workspace](tools/codegen/typescript/package.json) and runtime dependencies in their owning packages.
 
-On macOS, C++ ABI unloading requires a private static Protobuf runtime and host-shared Abseil. A manually supplied Protobuf build must incorporate the [thread-storage adaptation](sdk/cpp/tools/protobuf/macos-thread-storage.patch) and its [header](sdk/cpp/tools/protobuf/cordis_thread_storage.h) and [implementation](sdk/cpp/tools/protobuf/cordis_thread_storage.cc). The optional `cpp.py` installer performs this step; SDK CMake only checks for that support. WASI needs its own target libraries; a native dependency prefix cannot be used for a Wasm build.
+On Linux and macOS, C++ ABI unloading requires a private static Protobuf runtime and host-shared Abseil. Abseil registers thread-exit callbacks on host threads, so its shared runtime must outlive plugin generations. On Linux, build the shared Abseil library with `-Wl,-z,nodelete`; plugins themselves remain unloadable. On macOS, a manually supplied Protobuf build must also incorporate the [thread-storage adaptation](sdk/cpp/tools/protobuf/macos-thread-storage.patch) and its [header](sdk/cpp/tools/protobuf/cordis_thread_storage.h) and [implementation](sdk/cpp/tools/protobuf/cordis_thread_storage.cc). The optional `cpp.py` installer prepares these dependencies; SDK CMake only checks for the required support. WASI needs its own static target libraries; a native dependency prefix cannot be used for a Wasm build.
 
 ## Source and generated files
 

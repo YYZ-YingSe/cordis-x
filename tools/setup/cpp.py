@@ -39,11 +39,17 @@ def dependencies(setup, *, wasm=False, toolchain=None):
                     "-DCMAKE_C_FLAGS=-D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_MMAN",
                     "-DCMAKE_CXX_FLAGS=-fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_MMAN"]
     macos = setup.host.startswith("macos") and not wasm
+    linux = setup.host.startswith("linux") and not wasm
+    shared_abseil = macos or linux
+    # Abseil registers pthread exit callbacks on foreign host threads. Keep
+    # that shared runtime resident while individual plugin generations unload.
+    abseil_options = ["-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,nodelete"] if linux else []
     build(setup, abseil, f"abseil-{kind}", prefix, options + [
         "-DABSL_ENABLE_INSTALL=ON", "-DABSL_BUILD_TESTING=OFF", "-DABSL_PROPAGATE_CXX_STD=ON",
         "-DABSL_MSVC_STATIC_RUNTIME=OFF",
-        "-DBUILD_SHARED_LIBS=" + ("ON" if macos else "OFF"),
-        "-DABSL_BUILD_MONOLITHIC_SHARED_LIBS=" + ("ON" if macos else "OFF")], wasm=wasm)
+        "-DBUILD_SHARED_LIBS=" + ("ON" if shared_abseil else "OFF"),
+        "-DABSL_BUILD_MONOLITHIC_SHARED_LIBS=" + ("ON" if shared_abseil else "OFF"),
+        *abseil_options], wasm=wasm)
     source = protobuf
     if macos:
         patch = ROOT / "sdk/cpp/tools/protobuf/macos-thread-storage.patch"
@@ -79,6 +85,12 @@ def install(setup):
             raise RuntimeError(f"Expected one versioned Abseil library in {prefix / 'lib'}")
         library = libraries[0]
         setup.set(CORDIS_EXAMPLE_HOST_LIBRARIES=json.dumps({"@rpath/" + library.name: str(library)}))
+    elif setup.host.startswith("linux"):
+        libraries = list((prefix / "lib").glob("libabseil_dll.so.*.*.*"))
+        if len(libraries) != 1:
+            raise RuntimeError(f"Expected one versioned Abseil library in {prefix / 'lib'}")
+        library = libraries[0]
+        setup.set(CORDIS_EXAMPLE_HOST_LIBRARIES=json.dumps({library.name: str(library)}))
 
 
 if __name__ == "__main__":

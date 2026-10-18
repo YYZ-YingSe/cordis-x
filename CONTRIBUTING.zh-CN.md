@@ -52,7 +52,7 @@ py -3.12 tools/setup/setup.py --prefix "$env:LOCALAPPDATA/CordisTools" --jobs 4
 | `python.py` | 虚拟环境、仓库 Python 依赖、CMake 4.4.4、Ninja 1.13.0、libclang 18.1.1 |
 | `typescript.py` | Node.js 24.14.1 及 npm；根 npm 锁文件中的 TypeScript、`protoc-gen-es` 和 esbuild |
 | `protoc.py` | 宿主 `protoc` 34.1 及标准 `.proto` 文件 |
-| `cpp.py` | Python 构建工具、`protoc`、原生静态 Protobuf 34.1.0 和 Abseil 20260817.0；macOS 使用共享 Abseil 并加入线程存储适配 |
+| `cpp.py` | Python 构建工具、`protoc`、原生静态 Protobuf 34.1.0 和 Abseil 20260817.0；Linux/macOS 使用共享 Abseil，macOS 另加入线程存储适配 |
 | `wasm.py` | Rust/Python 工具、宿主 `protoc`、WASI SDK 34.0、`wit-bindgen` 0.61.1、为 WASI 编译的静态 Protobuf/Abseil、`cordis-component-pack` |
 | `setup.py` | 上述全部工具，或 `--only` 选择的部分 |
 
@@ -77,7 +77,7 @@ export CORDIS_TEST_PYTHON="$(python3 -c 'import sys; print(sys.executable)')"
 
 如果 Python 环境要求使用虚拟环境，请先创建并激活。npm workspace 共用根锁文件。生成工具版本在[生成工具 workspace](tools/codegen/typescript/package.json)中声明，运行依赖放在实际使用它的包中。
 
-macOS 上的 C++ ABI 卸载需要私有静态 Protobuf 和由宿主共享的 Abseil。自行提供的 Protobuf 构建需要包含[线程存储适配](sdk/cpp/tools/protobuf/macos-thread-storage.patch)及其[头文件](sdk/cpp/tools/protobuf/cordis_thread_storage.h)、[实现](sdk/cpp/tools/protobuf/cordis_thread_storage.cc)。可选的 `cpp.py` 安装脚本会完成这一步，SDK CMake 只检查对应支持。WASI 使用单独构建的目标库，不能将原生依赖前缀用于 Wasm 构建。
+Linux 和 macOS 上的 C++ ABI 卸载需要私有静态 Protobuf 和由宿主共享的 Abseil。Abseil 会在宿主线程上注册线程退出回调，因此共享运行库必须比各代插件存活更久。Linux 构建共享 Abseil 时需要使用 `-Wl,-z,nodelete`，插件本身仍可卸载。macOS 上自行提供的 Protobuf 构建还需要包含[线程存储适配](sdk/cpp/tools/protobuf/macos-thread-storage.patch)及其[头文件](sdk/cpp/tools/protobuf/cordis_thread_storage.h)、[实现](sdk/cpp/tools/protobuf/cordis_thread_storage.cc)。可选的 `cpp.py` 安装脚本会准备这些依赖，SDK CMake 只检查对应支持。WASI 使用单独构建的静态目标库，不能将原生依赖前缀用于 Wasm 构建。
 
 ## 源码与生成文件
 
