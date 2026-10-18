@@ -1,44 +1,8 @@
 use super::*;
 
-use std::sync::OnceLock;
-
-static BINARY: OnceLock<PathBuf> = OnceLock::new();
 pub(super) fn binary() -> PathBuf {
-    BINARY
-        .get_or_init(|| {
-            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-            let build = root.join("target/cpp-conformance");
-            for args in [
-                vec![
-                    "-DCORDIS_BUILD_ABI=OFF".into(),
-                    "-DCORDIS_BUILD_EXAMPLES=ON".into(),
-                    "-DBUILD_TESTING=ON".into(),
-                    "-S".into(),
-                    root.join("sdk/cpp").display().to_string(),
-                    "-B".into(),
-                    build.display().to_string(),
-                ],
-                vec![
-                    "--build".into(),
-                    build.display().to_string(),
-                    "-j".into(),
-                    "2".into(),
-                ],
-            ] {
-                let output = std::process::Command::new("cmake")
-                    .args(args)
-                    .output()
-                    .expect("CMake and a C++20 compiler are required for process conformance");
-                assert!(
-                    output.status.success(),
-                    "C++ build failed:\n{}\n{}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-            build.join("cordis_calculator")
-        })
-        .clone()
+    // Conformance also uses the sibling lifecycle, dependency and package fixtures.
+    cordis_test_contracts::native::all().join("cordis_calculator")
 }
 
 pub(super) fn test_calculator() -> Service<RemoteService> {

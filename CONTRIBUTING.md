@@ -131,11 +131,8 @@ npx --no-install tsc -p sdk/typescript/tsconfig.json
 Native C++ changes:
 
 ```sh
-cmake -S sdk/cpp -B target/cpp \
-  -DCMAKE_PREFIX_PATH=/path/to/native/dependencies \
-  -DCORDIS_BUILD_EXAMPLES=ON -DBUILD_TESTING=ON
-cmake --build target/cpp --config Debug --parallel 2
-ctest --test-dir target/cpp -C Debug --output-on-failure
+python tests/build.py --native
+ctest --test-dir build/native -C Debug --output-on-failure
 ```
 
 The C++ process adapter is disabled by default on Windows. For Wasm tests, prepare the target compiler and libraries first. `CORDIS_WASM_RUSTC` can select a separate Rust guest compiler. The [C++ component builder](sdk/cpp/tools/build-component.py) accepts explicit toolchain, dependency, source, and output paths; use `--help` for its arguments.
@@ -151,7 +148,7 @@ cargo test --workspace \
   --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked
 ```
 
-Some integration tests build and launch real plugins. Do not run another build against the same output directory concurrently. Reuse build outputs; there is no need to clean the cache before every test run.
+Integration tests build and launch real plugins. Native fixtures share `build/native/bin`; `tests/build.py --native` serializes CMake builds across test processes and reuses existing objects. Use `--target <CMake target>` to build an individual fixture. Native Rust plugin tests share the Cargo target directory (including an explicit `CARGO_TARGET_DIR`). Rust artifacts normally remain in `target`, and C++ Wasm fixtures use `build/wasm`, so Cargo cache maintenance does not traverse CMake build trees. Reuse build outputs; there is no need to clean the cache before every test run.
 
 ## Submitting a change
 

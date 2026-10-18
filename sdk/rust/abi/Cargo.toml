@@ -17,6 +17,7 @@ futures-util.workspace = true
 bindgen = "0.72.1"
 
 [dev-dependencies]
+cordis-test-contracts.workspace = true
 cordis-example-contracts.workspace = true
 cordis-runtime.workspace = true
 cordis-abi = { path = "../../../crates/cordis-abi", features = ["loader"] }

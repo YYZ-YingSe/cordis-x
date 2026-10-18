@@ -56,7 +56,7 @@ fn rust_guest(example: &str) -> Vec<u8> {
 }
 fn component(cpp: bool) -> Vec<u8> {
     let core = if cpp {
-        let output = root().join("target/workflow-components/cpp.wasm");
+        let output = root().join("build/wasm/workflows/cpp.wasm");
         run(Command::new(
             std::env::var_os("PYTHON")
                 .unwrap_or_else(|| if cfg!(windows) { "python" } else { "python3" }.into()),
@@ -268,25 +268,7 @@ async fn scenario<S: Call>(setup: Setup, service: rt::Service<S>, plugin: rt::Pl
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn generated_controls_run_through_rust_and_cpp_abi() {
-    run(Command::new("cmake").args([
-        "-S",
-        "sdk/cpp",
-        "-DCORDIS_BUILD_EXAMPLES=ON",
-        "-DBUILD_TESTING=ON",
-        "-B",
-        "target/cpp",
-        "-DCMAKE_BUILD_TYPE=Debug",
-        "-DCORDIS_BUILD_EXAMPLES=ON",
-        "-DBUILD_TESTING=ON",
-    ]));
-    run(Command::new("cmake").args([
-        "--build",
-        "target/cpp",
-        "--target",
-        "cordis_workflows_abi",
-        "-j",
-        "4",
-    ]));
+    let cpp = cordis_test_contracts::native::build(&["cordis_workflows_abi"]);
     run(Command::new("cargo").args([
         "build",
         "--offline",
@@ -296,8 +278,8 @@ async fn generated_controls_run_through_rust_and_cpp_abi() {
         "abi_workflows",
     ]));
     for (directory, name) in [
-        ("target/cpp", "cordis_workflows_abi"),
-        ("target/debug/examples", "abi_workflows"),
+        (cpp, "cordis_workflows_abi"),
+        (root().join("target/debug/examples"), "abi_workflows"),
     ] {
         for validation in [
             sdk::Validation::Contract,
@@ -308,8 +290,8 @@ async fn generated_controls_run_through_rust_and_cpp_abi() {
             // SAFETY: this fixture was built from this repository's trusted ABI SDK above.
             #[allow(unsafe_code)]
             let module = unsafe {
-                cordis_abi::Library::load(root().join(format!(
-                    "{directory}/{}{name}{}",
+                cordis_abi::Library::load(directory.join(format!(
+                    "{}{name}{}",
                     std::env::consts::DLL_PREFIX,
                     std::env::consts::DLL_SUFFIX
                 )))

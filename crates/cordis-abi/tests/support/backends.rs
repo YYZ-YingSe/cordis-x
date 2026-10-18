@@ -3,7 +3,6 @@ use cordis_remote::{RemoteResource, RemoteService};
 use cordis_sdk::*;
 use std::{
     path::{Path, PathBuf},
-    process::Command,
     sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
@@ -425,77 +424,23 @@ pub(crate) async fn scenario<T: Calculator>(service: Service<T>, plugin: Plugin)
     result
 }
 
-fn build(source: &str, target: &str, artifact: &str, cmake_target: &str) -> PathBuf {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let target = root.join(target);
-    for args in [
-        vec![
-            if cmake_target == "cordis_calculator" {
-                "-DCORDIS_BUILD_ABI=OFF".into()
-            } else {
-                "-DCORDIS_BUILD_PROCESS=OFF".into()
-            },
-            "-DCORDIS_BUILD_EXAMPLES=ON".into(),
-            "-DBUILD_TESTING=ON".into(),
-            "-S".into(),
-            root.join(source).into_os_string(),
-            "-B".into(),
-            target.clone().into_os_string(),
-        ],
-        vec![
-            "--build".into(),
-            target.clone().into_os_string(),
-            "--target".into(),
-            cmake_target.into(),
-            "--config".into(),
-            "Debug".into(),
-            "-j".into(),
-            "2".into(),
-        ],
-    ] {
-        let output = Command::new("cmake").args(&args).output().unwrap();
-        assert!(
-            output.status.success(),
-            "cmake {args:?} failed ({}):\n{}\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    let path = target.join(artifact);
-    if path.exists() {
-        path
-    } else {
-        target.join("Debug").join(artifact)
-    }
-}
 pub(crate) fn compare(
     endpoint: Option<cordis_remote::Endpoint>,
 ) -> impl std::future::Future<Output = Vec<Value>> {
     static ABI: OnceLock<PathBuf> = OnceLock::new();
     let path = ABI.get_or_init(|| {
-        build(
-            "sdk/cpp",
-            "target/abi-backends",
-            &format!(
-                "{}cordis_abi_calculator{}",
-                std::env::consts::DLL_PREFIX,
-                std::env::consts::DLL_SUFFIX
-            ),
-            "cordis_abi_calculator",
-        )
+        cordis_test_contracts::native::build(&["cordis_abi_calculator"]).join(format!(
+            "{}cordis_abi_calculator{}",
+            std::env::consts::DLL_PREFIX,
+            std::env::consts::DLL_SUFFIX
+        ))
     });
     // The C++ process adapter requires POSIX. TypeScript IPC/HTTP does not;
     // keep its acceptance scenario available on Windows as well.
     let executable = if endpoint.is_some() && cfg!(unix) {
         static PROCESS: OnceLock<PathBuf> = OnceLock::new();
         let executable = PROCESS.get_or_init(|| {
-            build(
-                "sdk/cpp",
-                "target/abi-process-backends",
-                "cordis_calculator",
-                "cordis_calculator",
-            )
+            cordis_test_contracts::native::build(&["cordis_calculator"]).join("cordis_calculator")
         });
         Some(executable)
     } else {

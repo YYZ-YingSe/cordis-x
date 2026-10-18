@@ -191,8 +191,8 @@ fn artifact() -> &'static std::path::Path {
     static BUILD: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     BUILD.get_or_init(|| {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let core_output = root.join("target/cpp-component/portable-core.wasm");
-        let output = root.join("target/cpp-component/portable.wasm");
+        let core_output = root.join("build/wasm/portable/portable-core.wasm");
+        let output = root.join("build/wasm/portable/portable.wasm");
         let build = std::process::Command::new(
             std::env::var_os("PYTHON")
                 .unwrap_or_else(|| if cfg!(windows) { "python" } else { "python3" }.into()),

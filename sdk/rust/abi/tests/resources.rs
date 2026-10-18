@@ -28,7 +28,7 @@ fn artifact(name: &str) -> PathBuf {
     BUILD
         .get_or_init(|| {
             let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-            let target = root.join("target/rust-abi-sdk");
+            let target = cordis_test_contracts::native::cargo_target();
             let output = std::process::Command::new(env!("CARGO"))
                 .current_dir(&root)
                 .args([

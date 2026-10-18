@@ -10,7 +10,7 @@ pub fn bytes(name: &str) -> &'static [u8] {
             ("cpp_resource_probe_client", "sdk/cpp/tests/component/resource_probe_client.cpp"),
             ("cpp_resource_probe", "sdk/cpp/tests/component/resource_probe.cpp"),
         ].into_iter().map(|(name, source)| {
-            let output = root.join(format!("target/cpp-resource-components/{name}.wasm"));
+            let output = root.join(format!("build/wasm/resources/{name}.wasm"));
             let built = Command::new(std::env::var_os("PYTHON").unwrap_or_else(|| if cfg!(windows) { "python" } else { "python3" }.into())).current_dir(&root)
                 .args(["sdk/cpp/tools/build-component.py", "--sdk-source", "sdk/cpp", "--include", "examples/generated/cpp", "--proto-path", "examples/resources/contracts", "--core", "--proto", "fixtures/counters.proto", source])
                 .arg(&output).output().unwrap();

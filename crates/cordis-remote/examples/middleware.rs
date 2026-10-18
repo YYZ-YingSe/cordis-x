@@ -37,7 +37,9 @@ async fn main() -> Result<()> {
     );
     let remote = Service::<RemoteService>::new("example.middleware", "1")
         .with_descriptor(cordis_remote::Descriptor::new(PipelineClient::interface()).unwrap());
-    let mut cpp = ProcessSpec::new(root.join("target/cpp/cordis_middleware"));
+    let mut cpp = ProcessSpec::new(
+        std::path::Path::new(cordis_example_contracts::NATIVE_BIN).join("cordis_middleware"),
+    );
     cpp.args = vec!["--stdio-only".into(), "--listen".into()];
     let timer = rt.install_in(
         View::new().in_realm(&remote, RealmId(1)),

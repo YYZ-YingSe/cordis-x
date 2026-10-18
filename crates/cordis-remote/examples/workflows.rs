@@ -23,7 +23,9 @@ async fn main() -> Result<()> {
             );
             spec
         }
-        "cpp" => ProcessSpec::new(root.join("target/cpp/cordis_workflows")),
+        "cpp" => ProcessSpec::new(
+            std::path::Path::new(cordis_example_contracts::NATIVE_BIN).join("cordis_workflows"),
+        ),
         "rust" => ProcessSpec::new(root.join(format!(
             "target/debug/examples/process_workflows{}",
             std::env::consts::EXE_SUFFIX

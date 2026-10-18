@@ -87,7 +87,9 @@ async fn main() -> Result<()> {
             .plugin("TS listener", &remote),
     )?;
     listener.ready().await?;
-    let mut publisher = ProcessSpec::new(root.join("target/cpp/cordis_events"));
+    let mut publisher = ProcessSpec::new(
+        std::path::Path::new(cordis_example_contracts::NATIVE_BIN).join("cordis_events"),
+    );
     publisher.args.push("--stdio-only".into());
     let provider = rt.install(
         publisher

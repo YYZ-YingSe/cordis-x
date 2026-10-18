@@ -12,7 +12,9 @@ async fn main() -> Result<()> {
     );
 
     // Cordis starts the executable and manages its lifetime.
-    let mut spec = ProcessSpec::new("target/cpp/cordis_adder");
+    let mut spec = ProcessSpec::new(
+        std::path::Path::new(cordis_example_contracts::NATIVE_BIN).join("cordis_adder"),
+    );
     spec.endpoint = match std::env::args().nth(1).as_deref() {
         None | Some("ipc") => Endpoint::Ipc,
         Some("http") => Endpoint::Http,

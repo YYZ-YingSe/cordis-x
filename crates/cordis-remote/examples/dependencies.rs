@@ -55,30 +55,32 @@ async fn main() -> Result<()> {
         .provides(&logger()),
     )?;
 
-    let mut cpp =
-        ProcessSpec::new(root.join("target/cpp/cordis_pricing")).requires(Dependency::new_json(
-            &logger(),
-            cordis_contract::portable::decode(
-                &serde_json::from_str(cordis_example_contracts::resources::logger::LOGGER).unwrap(),
-            )
-            .unwrap(),
-            |logger, ctx, method, args| {
-                Box::pin(async move {
-                    if method != "write" {
-                        return Err(cordis_remote::Error::Refused {
-                            code: "unknown_method".into(),
-                            message: method,
-                        });
-                    }
-                    println!("logger {}: {args}", logger.generation);
-                    Ok(json!({
-                        "generation": logger.generation,
-                        "owner": ctx.owner().fiber.0,
-                        "caller": ctx.caller().unwrap().fiber.0,
-                    }))
-                })
-            },
-        ));
+    let mut cpp = ProcessSpec::new(
+        std::path::Path::new(cordis_example_contracts::NATIVE_BIN).join("cordis_pricing"),
+    )
+    .requires(Dependency::new_json(
+        &logger(),
+        cordis_contract::portable::decode(
+            &serde_json::from_str(cordis_example_contracts::resources::logger::LOGGER).unwrap(),
+        )
+        .unwrap(),
+        |logger, ctx, method, args| {
+            Box::pin(async move {
+                if method != "write" {
+                    return Err(cordis_remote::Error::Refused {
+                        code: "unknown_method".into(),
+                        message: method,
+                    });
+                }
+                println!("logger {}: {args}", logger.generation);
+                Ok(json!({
+                    "generation": logger.generation,
+                    "owner": ctx.owner().fiber.0,
+                    "caller": ctx.caller().unwrap().fiber.0,
+                }))
+            })
+        },
+    ));
     cpp.endpoint = endpoint;
     let price = runtime.install(cpp.plugin("pricing", &pricing()))?;
     let mut ts = ProcessSpec::new("node").requires(Dependency::remote(&pricing()));

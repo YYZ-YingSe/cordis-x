@@ -57,7 +57,9 @@ async fn caller(rt: &Runtime) -> Result<(PluginHandle, ServiceHandle<RemoteServi
 async fn main() -> Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut spec = match std::env::args().nth(1).as_deref() {
-        None | Some("cpp") => ProcessSpec::new(root.join("target/cpp/cordis_scopes")),
+        None | Some("cpp") => ProcessSpec::new(
+            std::path::Path::new(cordis_example_contracts::NATIVE_BIN).join("cordis_scopes"),
+        ),
         Some("ts") => {
             let mut spec = ProcessSpec::new("node");
             spec.args.push(

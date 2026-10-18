@@ -10,7 +10,9 @@ async fn main() -> Result<()> {
             s.args.push("sdk/typescript/examples/composition.ts".into());
             s
         }
-        "cpp" => ProcessSpec::new("target/cpp/cordis_composition"),
+        "cpp" => ProcessSpec::new(
+            std::path::Path::new(cordis_example_contracts::NATIVE_BIN).join("cordis_composition"),
+        ),
         _ => {
             return Err(Error::Message(
                 "usage: composition [ts|cpp] [ipc|http]".into(),

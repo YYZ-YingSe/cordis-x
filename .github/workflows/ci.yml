@@ -43,23 +43,26 @@ jobs:
         run: python -m unittest discover -s tests/setup -v
       - run: cargo fmt --all -- --check
       - name: Configure C++ SDK
-        run: cmake -S sdk/cpp -B target/abi -DCORDIS_BUILD_EXAMPLES=ON -DBUILD_TESTING=ON -DCORDIS_BUILD_PROCESS=OFF
+        run: python tests/build.py --native --configure-only
       - name: Compile C++ API and generated dispatch
-        run: cmake --build target/abi --config Debug --target cordis_abi_calculator cordis_async_test cordis_codegen_test -j 2
-      - name: Build C++ SDK
-        run: cmake --build target/abi --config Debug -j 2
+        run: python tests/build.py --native --target cordis_abi_calculator cordis_async_test cordis_codegen_test
+      - name: Prepare native integration fixtures
+        run: python tests/build.py --native
       - name: Test C++ SDK
-        run: ctest --test-dir target/abi -C Debug --output-on-failure
+        run: ctest --test-dir build/native -C Debug --output-on-failure
       # Start the Rust cache only after native build prerequisites pass, so a
       # C++ failure cannot publish a cache with no compiled Rust dependencies.
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
-          key: compiled-dependencies
+          key: native-fixtures-separated
           cache-on-failure: true
           cache-bin: false
       - run: cargo clippy --workspace --all-targets --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked -- -D warnings
-      - run: cargo test --workspace --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked
+      - name: Compile Rust tests
+        run: cargo test --workspace --no-run --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked
+      - name: Run workspace tests
+        run: cargo test --workspace --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked
       - run: cargo build -p cordis-wasm-calculator --target wasm32-unknown-unknown --release --locked
       - run: cargo run -p cordis-component-pack --locked -- target/wasm32-unknown-unknown/release/cordis_wasm_calculator.wasm target/calculator.component.wasm
       - run: cargo run -p cordis-wasm --example component --locked -- target/calculator.component.wasm
@@ -79,44 +82,42 @@ jobs:
       - run: cargo run -p cordis-sdk --example loader --locked
       - run: npm test --prefix sdk/typescript
       - if: runner.os == 'Linux'
-        run: cargo run -p cordis-abi --example library --locked -- target/abi/libcordis_abi_calculator.so
+        run: cargo run -p cordis-abi --example library --locked -- build/native/bin/libcordis_abi_calculator.so
       - if: runner.os == 'macOS'
-        run: cargo run -p cordis-abi --example library --locked -- target/abi/libcordis_abi_calculator.dylib
+        run: cargo run -p cordis-abi --example library --locked -- build/native/bin/libcordis_abi_calculator.dylib
       - if: runner.os == 'Windows'
-        run: cargo run -p cordis-abi --example library --locked -- target/abi/Debug/cordis_abi_calculator.dll
+        run: cargo run -p cordis-abi --example library --locked -- build/native/bin/cordis_abi_calculator.dll
       - if: runner.os == 'Linux'
-        run: cargo run -p cordis-abi --example abi_context --locked -- target/abi/libcordis_abi_context_example.so
+        run: cargo run -p cordis-abi --example abi_context --locked -- build/native/bin/libcordis_abi_context_example.so
       - if: runner.os == 'macOS'
-        run: cargo run -p cordis-abi --example abi_context --locked -- target/abi/libcordis_abi_context_example.dylib
+        run: cargo run -p cordis-abi --example abi_context --locked -- build/native/bin/libcordis_abi_context_example.dylib
       - if: runner.os == 'Windows'
-        run: cargo run -p cordis-abi --example abi_context --locked -- target/abi/Debug/cordis_abi_context_example.dll
+        run: cargo run -p cordis-abi --example abi_context --locked -- build/native/bin/cordis_abi_context_example.dll
       - if: runner.os == 'Linux'
-        run: cargo run -p cordis-abi --example abi_managed --locked -- target/abi/libcordis_abi_managed_example.so
+        run: cargo run -p cordis-abi --example abi_managed --locked -- build/native/bin/libcordis_abi_managed_example.so
       - if: runner.os == 'macOS'
-        run: cargo run -p cordis-abi --example abi_managed --locked -- target/abi/libcordis_abi_managed_example.dylib
+        run: cargo run -p cordis-abi --example abi_managed --locked -- build/native/bin/libcordis_abi_managed_example.dylib
       - if: runner.os == 'Windows'
-        run: cargo run -p cordis-abi --example abi_managed --locked -- target/abi/Debug/cordis_abi_managed_example.dll
+        run: cargo run -p cordis-abi --example abi_managed --locked -- build/native/bin/cordis_abi_managed_example.dll
       - if: runner.os == 'Linux'
-        run: cargo run -p cordis-abi --example abi_composition --locked -- target/abi/libcordis_abi_composition_example.so
+        run: cargo run -p cordis-abi --example abi_composition --locked -- build/native/bin/libcordis_abi_composition_example.so
       - if: runner.os == 'macOS'
-        run: cargo run -p cordis-abi --example abi_composition --locked -- target/abi/libcordis_abi_composition_example.dylib
+        run: cargo run -p cordis-abi --example abi_composition --locked -- build/native/bin/libcordis_abi_composition_example.dylib
       - if: runner.os == 'Windows'
-        run: cargo run -p cordis-abi --example abi_composition --locked -- target/abi/Debug/cordis_abi_composition_example.dll
+        run: cargo run -p cordis-abi --example abi_composition --locked -- build/native/bin/cordis_abi_composition_example.dll
       - if: runner.os == 'Linux'
-        run: cargo run -p cordis-abi --example abi_reactive --locked -- target/abi/libcordis_abi_reactive_example.so
+        run: cargo run -p cordis-abi --example abi_reactive --locked -- build/native/bin/libcordis_abi_reactive_example.so
       - if: runner.os == 'macOS'
-        run: cargo run -p cordis-abi --example abi_reactive --locked -- target/abi/libcordis_abi_reactive_example.dylib
+        run: cargo run -p cordis-abi --example abi_reactive --locked -- build/native/bin/libcordis_abi_reactive_example.dylib
       - if: runner.os == 'Windows'
-        run: cargo run -p cordis-abi --example abi_reactive --locked -- target/abi/Debug/cordis_abi_reactive_example.dll
-      - run: python examples/package-native.py --build target/abi --backend abi --output target/abi-packages
+        run: cargo run -p cordis-abi --example abi_reactive --locked -- build/native/bin/cordis_abi_reactive_example.dll
+      - run: python examples/package-native.py --build build/native --backend abi --output target/abi-packages
       - run: cargo run -p cordis-abi --features loader --example abi_reload --locked -- target/abi-packages/v1/cordis-package.json target/abi-packages/v2/cordis-package.json
       - run: cargo run -p cordis-abi --features loader --example abi_rolling --locked -- target/abi-packages/v1/cordis-package.json target/abi-packages/v2/cordis-package.json
       - if: runner.os != 'Windows'
-        run: cmake -S sdk/cpp -B target/cpp -DCORDIS_BUILD_EXAMPLES=ON -DBUILD_TESTING=ON && cmake --build target/cpp -j 2
+        run: cargo run -p cordis-remote --example process --locked -- build/native/bin/cordis_calculator http
       - if: runner.os != 'Windows'
-        run: cargo run -p cordis-remote --example process --locked -- target/cpp/cordis_calculator http
-      - if: runner.os != 'Windows'
-        run: python examples/package-native.py --build target/cpp --backend process --output target/process-packages
+        run: python examples/package-native.py --build build/native --backend process --output target/process-packages
       - if: runner.os != 'Windows'
         run: cargo run -p cordis-remote --features loader --example process_reload --locked -- target/process-packages/v1/cordis-package.json target/process-packages/v2/cordis-package.json ipc
       - if: runner.os != 'Windows'
@@ -155,8 +156,6 @@ jobs:
       - run: cargo run -p cordis-remote --example composition --locked -- ts http
       - if: runner.os != 'Windows'
         run: cargo run -p cordis-remote --example composition --locked -- cpp ipc
-      - if: runner.os != 'Windows'
-        run: ctest --test-dir target/cpp --output-on-failure
       - if: runner.os != 'Windows'
         run: cargo run -p cordis-remote --example middleware --locked -- ipc
       - if: runner.os != 'Windows'

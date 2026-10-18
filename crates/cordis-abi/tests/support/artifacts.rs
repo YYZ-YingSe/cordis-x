@@ -1,59 +1,12 @@
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-    sync::OnceLock,
-};
+use std::path::{Path, PathBuf};
 
-fn artifacts() -> &'static Path {
-    static BUILD: OnceLock<PathBuf> = OnceLock::new();
-    BUILD.get_or_init(|| {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let build = root.join("target/abi-conformance");
-        for args in [
-            vec![
-                "-DCORDIS_BUILD_PROCESS=OFF".into(),
-                "-DCORDIS_BUILD_EXAMPLES=ON".into(),
-                "-DBUILD_TESTING=ON".into(),
-                "-S".into(),
-                root.join("sdk/cpp").into_os_string(),
-                "-B".into(),
-                build.clone().into_os_string(),
-            ],
-            vec![
-                "--build".into(),
-                build.clone().into_os_string(),
-                "--config".into(),
-                "Debug".into(),
-                "-j".into(),
-                "2".into(),
-            ],
-        ] {
-            let output = Command::new("cmake")
-                .args(args)
-                .output()
-                .expect("CMake and C++20 compiler required for ABI tests");
-            assert!(
-                output.status.success(),
-                "{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        build
-    })
-}
 pub fn binary(name: &str) -> PathBuf {
     let file = format!(
         "{}{name}{}",
         std::env::consts::DLL_PREFIX,
         std::env::consts::DLL_SUFFIX
     );
-    let path = artifacts().join(&file);
-    if path.exists() {
-        path
-    } else {
-        artifacts().join("Debug").join(file)
-    }
+    cordis_test_contracts::native::all().join(file)
 }
 
 #[cfg(feature = "loader")]

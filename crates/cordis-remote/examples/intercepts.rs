@@ -15,7 +15,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut spec = ProcessSpec::new(if typescript {
         PathBuf::from("node")
     } else {
-        root.join("target/cpp/cordis_calculator")
+        std::path::Path::new(cordis_example_contracts::NATIVE_BIN).join("cordis_calculator")
     });
     if typescript {
         spec.args = vec![

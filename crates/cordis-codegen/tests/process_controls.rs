@@ -23,47 +23,19 @@ fn root() -> PathBuf {
 }
 fn build(language: &str) -> PathBuf {
     let root = root();
-    for (program, args) in [
-        (
-            "cargo",
-            vec![
+    if language == "cpp" {
+        cordis_test_contracts::native::build(&["cordis_workflows"]);
+    } else if language == "rust" {
+        let output = Command::new(env!("CARGO"))
+            .args([
                 "build",
                 "--offline",
+                "--locked",
                 "-p",
                 "cordis-sdk-process",
                 "--example",
                 "process_workflows",
-            ],
-        ),
-        (
-            "cmake",
-            vec![
-                "-S",
-                "sdk/cpp",
-                "-B",
-                "target/cpp",
-                "-DCMAKE_BUILD_TYPE=Debug",
-                "-DCORDIS_BUILD_EXAMPLES=ON",
-                "-DBUILD_TESTING=ON",
-            ],
-        ),
-        (
-            "cmake",
-            vec![
-                "--build",
-                "target/cpp",
-                "--target",
-                "cordis_workflows",
-                "-j",
-                "4",
-            ],
-        ),
-    ] {
-        if (program == "cargo" && language != "rust") || (program == "cmake" && language != "cpp") {
-            continue;
-        }
-        let output = Command::new(program)
-            .args(args)
+            ])
             .current_dir(&root)
             .output()
             .unwrap();
@@ -112,7 +84,9 @@ async fn scenario(root: &Path, language: &str, endpoint: Endpoint, validation: s
             "target/debug/examples/process_workflows{}",
             std::env::consts::EXE_SUFFIX
         ))),
-        "cpp" => ProcessSpec::new(root.join("target/cpp/cordis_workflows")),
+        "cpp" => ProcessSpec::new(
+            Path::new(cordis_example_contracts::NATIVE_BIN).join("cordis_workflows"),
+        ),
         "typescript" => {
             let mut spec = ProcessSpec::new("node");
             spec.args.push(

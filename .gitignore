@@ -1,4 +1,5 @@
 /target/
+/build/
 /docs/
 .DS_Store
 

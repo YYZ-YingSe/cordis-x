@@ -5,7 +5,6 @@ use cordis_remote::{Endpoint, ProcessSpec, RemoteService};
 use cordis_sdk::*;
 use std::{
     path::{Path, PathBuf},
-    process::Command,
     sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
@@ -15,45 +14,11 @@ fn artifacts(process: bool) -> &'static Path {
     static PROCESS: OnceLock<PathBuf> = OnceLock::new();
     let cache = if process { &PROCESS } else { &ABI };
     cache.get_or_init(|| {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let build = root.join(if process {
-            "target/portable-sdk-process"
+        cordis_test_contracts::native::build(&[if process {
+            "cordis_portable_process"
         } else {
-            "target/portable-sdk"
-        });
-        for args in [
-            vec![
-                "-DCORDIS_BUILD_EXAMPLES=ON".into(),
-                "-DBUILD_TESTING=ON".into(),
-                "-S".into(),
-                root.join("sdk/cpp").into_os_string(),
-                "-B".into(),
-                build.clone().into_os_string(),
-            ],
-            vec![
-                "--build".into(),
-                build.clone().into_os_string(),
-                "--config".into(),
-                "Debug".into(),
-                "--target".into(),
-                if process {
-                    "cordis_portable_process".into()
-                } else {
-                    "cordis_portable_abi".into()
-                },
-                "-j".into(),
-                "2".into(),
-            ],
-        ] {
-            let output = Command::new("cmake").args(args).output().unwrap();
-            assert!(
-                output.status.success(),
-                "{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        build
+            "cordis_portable_abi"
+        }])
     })
 }
 

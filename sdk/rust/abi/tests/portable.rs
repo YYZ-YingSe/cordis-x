@@ -193,7 +193,7 @@ fn artifact() -> &'static std::path::Path {
     static BUILD: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     BUILD.get_or_init(|| {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let target = root.join("target/rust-abi-sdk");
+        let target = cordis_test_contracts::native::cargo_target();
         let output = std::process::Command::new("cargo")
             .current_dir(&root)
             .args([

@@ -31,6 +31,7 @@ name = "abi_rolling"
 required-features = ["loader"]
 
 [dev-dependencies]
+cordis-test-contracts.workspace = true
 cordis-example-contracts.workspace = true
 cordis-sdk-core.workspace = true
 cordis-portable-example = { path = "../../sdk/rust/examples/portable" }

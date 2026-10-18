@@ -5,10 +5,12 @@ use std::sync::{Arc, Mutex};
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
-    let executable = args
-        .get(1)
-        .cloned()
-        .unwrap_or_else(|| "target/cpp/cordis_calculator".into());
+    let executable = args.get(1).cloned().unwrap_or_else(|| {
+        std::path::Path::new(cordis_example_contracts::NATIVE_BIN)
+            .join("cordis_calculator")
+            .to_string_lossy()
+            .into_owned()
+    });
     let endpoint = match args.get(2).map(String::as_str).unwrap_or("ipc") {
         "ipc" => Endpoint::Ipc,
         "http" => Endpoint::Http,

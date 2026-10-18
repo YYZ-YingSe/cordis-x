@@ -34,7 +34,9 @@ async fn invoke_json(
 async fn main() -> Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut spec = match std::env::args().nth(1).as_deref() {
-        None | Some("cpp") => ProcessSpec::new(root.join("target/cpp/cordis_subscriptions")),
+        None | Some("cpp") => ProcessSpec::new(
+            std::path::Path::new(cordis_example_contracts::NATIVE_BIN).join("cordis_subscriptions"),
+        ),
         Some("ts") => {
             let mut spec = ProcessSpec::new("node");
             spec.args.push(

@@ -131,11 +131,8 @@ npx --no-install tsc -p sdk/typescript/tsconfig.json
 原生 C++ 修改：
 
 ```sh
-cmake -S sdk/cpp -B target/cpp \
-  -DCMAKE_PREFIX_PATH=/path/to/native/dependencies \
-  -DCORDIS_BUILD_EXAMPLES=ON -DBUILD_TESTING=ON
-cmake --build target/cpp --config Debug --parallel 2
-ctest --test-dir target/cpp -C Debug --output-on-failure
+python tests/build.py --native
+ctest --test-dir build/native -C Debug --output-on-failure
 ```
 
 Windows 默认关闭 C++ 进程适配器。运行 Wasm 测试前，先准备目标编译器与依赖库。`CORDIS_WASM_RUSTC` 可以指定单独的 Rust guest 编译器。[C++ 组件构建工具](sdk/cpp/tools/build-component.py)接受显式的工具链、依赖、源码和输出路径，具体参数可用 `--help` 查看。
@@ -151,7 +148,7 @@ cargo test --workspace \
   --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked
 ```
 
-部分集成测试会构建并启动真实插件，不要同时对同一个输出目录运行其他构建。复用已有构建产物，无需每次测试前清理缓存。
+集成测试会构建并启动真实插件。原生测试产物共用 `build/native/bin`，`tests/build.py --native` 会通过跨进程锁串行执行 CMake 构建并复用已有对象文件。单独构建某个测试目标时使用 `--target <CMake target>`。原生 Rust 测试插件共用 Cargo 目标目录，并遵循显式设置的 `CARGO_TARGET_DIR`。Rust 产物默认保留在 `target`，C++ Wasm 测试产物放在 `build/wasm`，避免 Cargo 缓存维护遍历 CMake 构建目录。复用已有构建产物，无需每次测试前清理缓存。
 
 ## 提交修改
 
