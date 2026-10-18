@@ -375,8 +375,8 @@ struct ContextService {
   virtual Async<void> deactivate(Context) { co_return; }
   virtual Async<std::shared_ptr<ContextResource>> acquire(Context, std::string,
                                                           Message) {
-    co_await corral::noop();
-    throw Refusal("unsupported", "resource kind unsupported");
+    co_return co_await ::cordis::detail::failed<std::shared_ptr<ContextResource>>(
+        Refusal("unsupported", "resource kind unsupported"));
   }
 };
 

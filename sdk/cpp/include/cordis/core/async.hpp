@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <coroutine>
 #include <cstdlib>
 #include <exception>
 #include <functional>
@@ -22,6 +23,18 @@ template <class T = void> using Async = corral::Task<T>;
 // equivalent nested construction inside an await expression.
 
 namespace detail {
+// A ready failure has a result type, so even a coroutine that can only reject
+// can co_return its await expression without a dead return or missing value.
+template <class T, class Error> struct Failed {
+  Error error;
+  bool await_ready() const noexcept { return true; }
+  void await_suspend(std::coroutine_handle<>) const noexcept {}
+  T await_resume() { throw std::move(error); }
+};
+template <class T, class Error> auto failed(Error error) {
+  return Failed<T, Error>{std::move(error)};
+}
+
 // Coroutine lambdas borrow their closure. Keep the operation closure and its
 // arguments in this coroutine frame until its child has actually completed.
 template <class F, class... Args>

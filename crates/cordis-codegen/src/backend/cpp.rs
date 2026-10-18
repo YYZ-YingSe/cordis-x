@@ -137,9 +137,10 @@ fn dispatch(w: &mut Writer, methods: &[Operation], prefix: &str) {
     }
     if !methods.iter().any(|o| o.wire.is_none()) {
         if methods.is_empty() {
-            w.line("co_await corral::noop();");
+            w.line("co_return co_await cordis::detail::failed<cordis::Message>(cordis::Refusal(\"unknown_method\", method));");
+        } else {
+            w.line("throw cordis::Refusal(\"unknown_method\", method);");
         }
-        w.line("throw cordis::Refusal(\"unknown_method\", method);");
     }
     w.close("}");
     w.line("cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }");

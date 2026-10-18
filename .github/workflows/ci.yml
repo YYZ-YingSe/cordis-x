@@ -44,6 +44,8 @@ jobs:
       - run: cargo fmt --all -- --check
       - name: Configure C++ SDK
         run: cmake -S sdk/cpp -B target/abi -DCORDIS_BUILD_EXAMPLES=ON -DBUILD_TESTING=ON -DCORDIS_BUILD_PROCESS=OFF
+      - name: Compile C++ API and generated dispatch
+        run: cmake --build target/abi --config Debug --target cordis_abi_calculator cordis_async_test cordis_codegen_test -j 2
       - name: Build C++ SDK
         run: cmake --build target/abi --config Debug -j 2
       - name: Test C++ SDK

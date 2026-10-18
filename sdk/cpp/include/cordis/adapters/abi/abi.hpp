@@ -34,8 +34,8 @@ struct Service {
   virtual Async<Message> invoke(std::string method, Message args) = 0;
   virtual Async<void> deactivate() { co_return; }
   virtual Async<std::unique_ptr<Resource>> acquire(std::string, Message) {
-    co_await corral::noop();
-    throw Refusal("unsupported", "resource kind unsupported");
+    co_return co_await ::cordis::detail::failed<std::unique_ptr<Resource>>(
+        Refusal("unsupported", "resource kind unsupported"));
   }
 };
 

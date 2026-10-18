@@ -171,8 +171,7 @@ namespace example {
         cordis::Async<void> deactivate(cordis::Context ctx) override { return cordis::typed::deactivate(server_, std::move(ctx)); }
         static cordis::Async<cordis::Message> invoke_impl(std::shared_ptr<CounterServer> server, cordis::Context ctx, std::string method, cordis::Message args) {
             (void)server; (void)ctx; (void)args;
-            co_await corral::noop();
-            throw cordis::Refusal("unknown_method", method);
+            co_return co_await cordis::detail::failed<cordis::Message>(cordis::Refusal("unknown_method", method));
         }
         cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }
         static cordis::Async<std::shared_ptr<cordis::Resource>> acquire_impl(std::shared_ptr<CounterServer> server, cordis::Context ctx, std::string kind, cordis::Message args) {

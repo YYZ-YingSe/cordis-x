@@ -32,8 +32,8 @@ struct JsonService : cordis::abi::Service {
   virtual Async<Value> invoke_json(std::string, Value) = 0;
   virtual Async<std::unique_ptr<cordis::abi::Resource>>
   acquire_json(std::string, Value) {
-    co_await corral::noop();
-    throw cordis::Refusal("unsupported", "no resource");
+    co_return co_await cordis::detail::failed<std::unique_ptr<cordis::abi::Resource>>(
+        cordis::Refusal("unsupported", "no resource"));
   }
   Async<Message> invoke(std::string method, Message args) final {
     co_return body(co_await invoke_json(std::move(method), json(args)));
@@ -57,8 +57,8 @@ struct JsonContextService : cordis::abi::ContextService {
                                    Value) = 0;
   virtual Async<std::shared_ptr<cordis::abi::ContextResource>>
   acquire_json(cordis::abi::Context, std::string, Value) {
-    co_await corral::noop();
-    throw cordis::Refusal("unsupported", "no resource");
+    co_return co_await cordis::detail::failed<std::shared_ptr<cordis::abi::ContextResource>>(
+        cordis::Refusal("unsupported", "no resource"));
   }
   Async<Message> invoke(cordis::abi::Context ctx, std::string method,
                         Message args) final {
