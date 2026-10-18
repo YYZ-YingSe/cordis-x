@@ -355,6 +355,10 @@ impl Drop for PackageStorage {
             let path = self.root.path().join(&member.path);
             if let Ok(metadata) = fs::metadata(&path) {
                 let mut permissions = metadata.permissions();
+                #[expect(
+                    clippy::permissions_set_readonly_false,
+                    reason = "Windows-only: clear FILE_ATTRIBUTE_READONLY on an owned snapshot before deletion; Unix mode bits are never changed"
+                )]
                 permissions.set_readonly(false);
                 let _ = fs::set_permissions(path, permissions);
             }
