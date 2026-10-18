@@ -453,10 +453,12 @@ fn build(source: &str, target: &str, artifact: &str, cmake_target: &str) -> Path
             "2".into(),
         ],
     ] {
-        let output = Command::new("cmake").args(args).output().unwrap();
+        let output = Command::new("cmake").args(&args).output().unwrap();
         assert!(
             output.status.success(),
-            "{}",
+            "cmake {args:?} failed ({}):\n{}\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
     }

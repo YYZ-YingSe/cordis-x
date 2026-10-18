@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
                         .call(|value, _| {
                             Box::pin(async move {
                                 let value=cordis_sdk_core::Message::from_bytes(<cordis_portable_example::lifecycle::data::lifecycle::ApplicationInfo as cordis_sdk_core::typed::Codec>::contract().clone(),value.clone()).map_err(Error::Message)?.to_json().map_err(Error::Message)?;
-                                assert_eq!(value["version"], "1");
+                                assert_eq!(value["version"], 1);
                                 println!("published info: {value}");
                                 Ok(())
                             })

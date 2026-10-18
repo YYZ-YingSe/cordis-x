@@ -69,6 +69,11 @@ await_holding_lock = "deny"
 debug = 1
 incremental = false
 
+# Wasm tests run Cranelift in-process. Optimize external dependencies so cold
+# component compilation remains practical; workspace code keeps debug settings.
+[profile.dev.package."*"]
+opt-level = 2
+
 [profile.test]
 debug = 1
 incremental = false

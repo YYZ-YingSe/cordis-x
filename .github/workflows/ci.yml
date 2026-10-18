@@ -2,6 +2,9 @@ name: Rust
 on: [push, pull_request]
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 # Installation is explicit here; normal project builds only consume these tools.
 env:
   CARGO_BUILD_JOBS: 2
@@ -36,9 +39,20 @@ jobs:
         with:
           path: ${{ runner.temp }}/cordis-tools
           key: ${{ steps.tools.outputs.cache-primary-key }}
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          cache-on-failure: true
+          cache-bin: false
       - name: Test setup helpers
         run: python -m unittest discover -s tests/setup -v
       - run: cargo fmt --all -- --check
+      - name: Configure C++ SDK
+        run: cmake -S sdk/cpp -B target/abi -DCORDIS_BUILD_EXAMPLES=ON -DBUILD_TESTING=ON -DCORDIS_BUILD_PROCESS=OFF
+      - name: Build C++ SDK
+        run: cmake --build target/abi --config Debug -j 2
+      - name: Test C++ SDK
+        run: ctest --test-dir target/abi -C Debug --output-on-failure
       - run: cargo clippy --workspace --all-targets --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked -- -D warnings
       - run: cargo test --workspace --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked
       - run: cargo build -p cordis-wasm-calculator --target wasm32-unknown-unknown --release --locked
@@ -59,9 +73,6 @@ jobs:
       - run: cargo run -p cordis-sdk --example stepwise --locked
       - run: cargo run -p cordis-sdk --example loader --locked
       - run: npm test --prefix sdk/typescript
-      - run: cmake -S sdk/cpp -B target/abi -DCORDIS_BUILD_EXAMPLES=ON -DBUILD_TESTING=ON -DCORDIS_BUILD_PROCESS=OFF
-      - run: cmake --build target/abi --config Debug -j 2
-      - run: ctest --test-dir target/abi -C Debug --output-on-failure
       - if: runner.os == 'Linux'
         run: cargo run -p cordis-abi --example library --locked -- target/abi/libcordis_abi_calculator.so
       - if: runner.os == 'macOS'
@@ -155,4 +166,9 @@ jobs:
           python-version: "3.12"
       - name: Set up host code generation and libclang
         run: python tools/setup/setup.py --prefix "${{ runner.temp }}/cordis-tools-msrv" --only python protoc --github-env
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          cache-on-failure: true
+          cache-bin: false
       - run: cargo check --workspace --all-targets --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked

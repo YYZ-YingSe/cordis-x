@@ -32,7 +32,7 @@ fn build(language: &str) -> PathBuf {
                 "-p",
                 "cordis-sdk-process",
                 "--example",
-                "workflows",
+                "process_workflows",
             ],
         ),
         (
@@ -108,7 +108,10 @@ async fn scenario(root: &Path, language: &str, endpoint: Endpoint, validation: s
         }
     });
     let mut spec = match language {
-        "rust" => ProcessSpec::new(root.join("target/debug/examples/workflows")),
+        "rust" => ProcessSpec::new(root.join(format!(
+            "target/debug/examples/process_workflows{}",
+            std::env::consts::EXE_SUFFIX
+        ))),
         "cpp" => ProcessSpec::new(root.join("target/cpp/cordis_workflows")),
         "typescript" => {
             let mut spec = ProcessSpec::new("node");
@@ -247,6 +250,7 @@ async fn generated_controls_typescript() {
     transports("typescript").await;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[cfg(unix)] // The C++ process adapter uses POSIX I/O; Rust/TypeScript run on Windows too.
 async fn generated_controls_cpp() {
     transports("cpp").await;
 }

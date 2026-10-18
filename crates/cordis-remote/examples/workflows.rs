@@ -24,7 +24,10 @@ async fn main() -> Result<()> {
             spec
         }
         "cpp" => ProcessSpec::new(root.join("target/cpp/cordis_workflows")),
-        "rust" => ProcessSpec::new(root.join("target/debug/examples/workflows")),
+        "rust" => ProcessSpec::new(root.join(format!(
+            "target/debug/examples/process_workflows{}",
+            std::env::consts::EXE_SUFFIX
+        ))),
         _ => {
             return Err(Error::Message(
                 "usage: workflows [ts|cpp|rust] [ipc|http]".into(),
