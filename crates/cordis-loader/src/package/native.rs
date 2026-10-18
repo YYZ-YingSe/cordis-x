@@ -226,6 +226,8 @@ pub(super) fn system_dependencies() -> BTreeMap<String, String> {
             "advapi32.dll",
             "ws2_32.dll",
             "bcrypt.dll",
+            // Windows' debug/symbol APIs, also used by native dependency diagnostics.
+            "dbghelp.dll",
             "ntdll.dll",
             "shell32.dll",
             "ole32.dll",
