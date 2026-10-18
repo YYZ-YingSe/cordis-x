@@ -15,6 +15,7 @@ pub(super) struct Log {
     pub(super) events: Mutex<Vec<(String, u64)>>,
     pub(super) block: Mutex<Option<String>>,
     pub(super) fail: Mutex<Option<String>>,
+    block_releases: AtomicBool,
     pub(super) entered: Semaphore,
     pub(super) release: Semaphore,
 }
@@ -25,6 +26,7 @@ impl Log {
             events: Mutex::default(),
             block: Mutex::default(),
             fail: Mutex::default(),
+            block_releases: AtomicBool::new(false),
             entered: Semaphore::new(0),
             release: Semaphore::new(0),
         })
@@ -88,7 +90,8 @@ async fn record(log: &Log, ctx: Context, method: String, args: Value) -> cordis_
         .lock()
         .unwrap()
         .push((name.clone(), ctx.owner().fiber.0));
-    let block = log.block.lock().unwrap().as_ref() == Some(&name);
+    let block = log.block.lock().unwrap().as_ref() == Some(&name)
+        || (log.block_releases.load(Ordering::SeqCst) && name.starts_with("released:"));
     if block {
         log.entered.add_permits(1);
         log.release.acquire().await.unwrap().forget();
@@ -162,6 +165,59 @@ async fn invoke_json(
     args: Value,
 ) -> Result<Value> {
     bounded(call(handle, endpoint, method, args)).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_owned_cleanup_waits_for_capacity_without_losing_effects() {
+    for &backend in Backend::ALL {
+        let rt = Runtime::new();
+        let log = Log::new();
+        log.block_releases.store(true, Ordering::SeqCst);
+        rt.install(lifecycle_log_plugin(log.clone())).unwrap();
+        let provider = rt
+            .install(spec(backend, Endpoint::Ipc, true).plugin("subscriptions", &subscriptions()))
+            .unwrap();
+        bounded(provider.ready()).await.unwrap();
+        let mut owners = Vec::new();
+        for i in 0..32 {
+            let (owner, handle) = consumer(&rt).await;
+            invoke_json(&handle, Endpoint::Ipc, "subscribe", json!(i.to_string()))
+                .await
+                .unwrap();
+            owners.push(owner);
+        }
+        let mut disposals = tokio::task::JoinSet::new();
+        for owner in owners {
+            disposals.spawn(async move { owner.dispose().await });
+        }
+        // Hold a complete cleanup batch in real reverse calls. Remaining owned
+        // effects must wait, rather than turn a temporary limit into failed cleanup.
+        bounded(log.entered.acquire_many(16))
+            .await
+            .unwrap()
+            .forget();
+        assert_eq!(
+            log.names()
+                .iter()
+                .filter(|s| s.starts_with("released:"))
+                .count(),
+            16
+        );
+        log.release.add_permits(32);
+        while let Some(result) = bounded(disposals.join_next()).await {
+            result
+                .unwrap()
+                .unwrap_or_else(|error| panic!("{backend:?}: {error:?}"));
+        }
+        assert_eq!(
+            log.names()
+                .iter()
+                .filter(|s| s.starts_with("released:"))
+                .count(),
+            32
+        );
+        bounded(rt.shutdown()).await.unwrap();
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

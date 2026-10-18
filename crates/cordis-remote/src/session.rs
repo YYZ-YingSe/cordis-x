@@ -12,7 +12,7 @@ use std::{
 };
 use tokio::{
     process::Command,
-    sync::{mpsc, oneshot, watch},
+    sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch},
     task::JoinSet,
     time::{Instant, timeout},
 };
@@ -34,11 +34,13 @@ fn lane(command: &str) -> u8 {
 }
 type Reply = oneshot::Sender<Result<Payload>>;
 enum CommandMessage {
-    Request(Request, Bytes, Reply),
+    Request(Request, Bytes, Reply, Option<OwnedSemaphorePermit>),
     Abort(Error),
     StopUnactivated,
 }
 struct Pending {
+    // The actor retains capacity until the response, even if its caller stops waiting.
+    _cleanup_permit: Option<OwnedSemaphorePermit>,
     session: String,
     activation: cordis_wire::Identity,
     command: String,
@@ -58,6 +60,7 @@ impl WeakSession {
 struct Client {
     _code: crate::process::CodeLease,
     send: mpsc::Sender<CommandMessage>,
+    cleanup_capacity: Arc<Semaphore>,
     closed: watch::Receiver<Option<Result<()>>>,
     peer_stopped: watch::Receiver<bool>,
     session: String,
@@ -109,6 +112,8 @@ impl Session {
             child.stdout.take().unwrap(),
         );
         let (send, mut commands) = mpsc::channel(CAPACITY);
+        let cleanup_capacity = Arc::new(Semaphore::new(CAPACITY));
+        let worker_cleanup_capacity = cleanup_capacity.clone();
         let (closed_tx, closed) = watch::channel(None);
         let (peer_stopped_tx, peer_stopped) = watch::channel(false);
         let (writes, mut outgoing) = mpsc::channel::<Bytes>(CAPACITY * 10);
@@ -160,14 +165,14 @@ impl Session {
             let termination = loop {
                 tokio::select! {
                     command = commands.recv() => match command {
-                        Some(CommandMessage::Request(request, bytes, reply)) => {
+                        Some(CommandMessage::Request(request, bytes, reply, cleanup_permit)) => {
                             if pending.values().filter(|p| lane(&p.command) == lane(&request.command)).count() >= CAPACITY { let _ = reply.send(Err(Error::Overloaded)); continue; }
                             if stopping.is_some() { let _ = reply.send(Err(Error::Closed)); continue; }
                             let request_timeout = if request.command == "task_cancel" { task_stop_timeout } else if matches!(request.command.as_str(), "hello" | "activate" | "deactivate") { deadline.max(Duration::from_secs(5)) } else { deadline };
                             if request.command == "deactivate" { stopping = Some(Instant::now() + request_timeout); }
                             if writes.try_send(bytes).is_err() { let _ = reply.send(Err(Error::Overloaded)); continue; }
                             let expires = if request.command == "task_call" { None } else { Some(Instant::now() + request_timeout) };
-                            pending.insert(request.operation.clone(), Pending { session: request.session, activation: request.activation, command: request.command, reply, deadline: expires });
+                            pending.insert(request.operation.clone(), Pending { _cleanup_permit: cleanup_permit, session: request.session, activation: request.activation, command: request.command, reply, deadline: expires });
                         }
                         Some(CommandMessage::Abort(error)) => break Err(error),
                         Some(CommandMessage::StopUnactivated) => break Ok(()),
@@ -321,6 +326,7 @@ impl Session {
             // and admitted install/provide operations still drain normally.
             peer_stopped_tx.send_replace(true);
             commands.close();
+            worker_cleanup_capacity.close();
             // Withdraw a lost host promptly. Pending calls still wait for native
             // work below, whose definition/use-site leases prevent early recovery.
             if termination.is_err() {
@@ -346,7 +352,7 @@ impl Session {
                     .send(Err(failure.clone()));
             }
             while let Some(command) = commands.recv().await {
-                if let CommandMessage::Request(_, _, reply) = command {
+                if let CommandMessage::Request(_, _, reply, _) = command {
                     let _ = reply.send(Err(failure.clone()));
                 }
             }
@@ -372,6 +378,7 @@ impl Session {
         let session = Self(Arc::new(Client {
             _code: code,
             send,
+            cleanup_capacity,
             closed,
             peer_stopped,
             session,
@@ -433,15 +440,37 @@ impl Session {
         if let Some(result) = self.0.closed.borrow().clone() {
             return Err(result.err().unwrap_or(Error::Closed));
         }
-        let permit = self.0.send.try_reserve().map_err(|e| match e {
-            mpsc::error::TrySendError::Full(_) => Error::Overloaded,
-            mpsc::error::TrySendError::Closed(_) => Error::Closed,
-        })?;
+        let cleanup = lane(&request.command) == 1;
+        // These operations discharge already-owned work. A busy local queue is
+        // backpressure, not evidence that cleanup has failed. Reserve before
+        // enqueueing and transfer the permit to the actor so dropped waiters do
+        // not release an in-flight slot early.
+        let cleanup_permit = if cleanup {
+            Some(
+                self.0
+                    .cleanup_capacity
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| Error::Closed)?,
+            )
+        } else {
+            None
+        };
+        let permit = if cleanup || matches!(request.command.as_str(), "task_cancel" | "deactivate")
+        {
+            self.0.send.reserve().await.map_err(|_| Error::Closed)?
+        } else {
+            self.0.send.try_reserve().map_err(|e| match e {
+                mpsc::error::TrySendError::Full(_) => Error::Overloaded,
+                mpsc::error::TrySendError::Closed(_) => Error::Closed,
+            })?
+        };
         let bytes = request
             .encode()
             .map_err(|e| Error::InvalidInput(e.to_string()))?;
         let (tx, rx) = oneshot::channel();
-        permit.send(CommandMessage::Request(request, bytes, tx));
+        permit.send(CommandMessage::Request(request, bytes, tx, cleanup_permit));
         rx.await.map_err(|_| Error::Closed)?
     }
     pub fn mark_activation_attempted(&self) {

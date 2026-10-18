@@ -463,15 +463,18 @@ impl RemoteService {
         } else {
             signature.map(|s| &s.errors)
         };
-        let capacity = if command == "resource_release" {
-            &self.cleanup_capacity
+        let permit = if command == "resource_release" {
+            self.cleanup_capacity
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|_| Error::Closed)?
         } else {
-            &self.capacity
+            self.capacity
+                .clone()
+                .try_acquire_owned()
+                .map_err(|_| Error::Overloaded)?
         };
-        let permit = capacity
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| Error::Overloaded)?;
         let (request, _scope) =
             self.session
                 .scoped_envelope(context, command, payload.into_wire())?;
