@@ -191,6 +191,7 @@ fn artifact() -> &'static std::path::Path {
     static BUILD: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     BUILD.get_or_init(|| {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let core_output = root.join("target/cpp-component/portable-core.wasm");
         let output = root.join("target/cpp-component/portable.wasm");
         let build = std::process::Command::new(
             std::env::var_os("PYTHON")
@@ -210,7 +211,7 @@ fn artifact() -> &'static std::path::Path {
             "portable.proto",
             "sdk/cpp/examples/portable/component.cpp",
         ])
-        .arg(&output)
+        .arg(&core_output)
         .output()
         .unwrap();
         assert!(
@@ -219,7 +220,8 @@ fn artifact() -> &'static std::path::Path {
             String::from_utf8_lossy(&build.stdout),
             String::from_utf8_lossy(&build.stderr)
         );
-        let core = std::fs::read(&output).unwrap();
+        // Keep CMake's core module intact so an incremental rebuild can reuse it.
+        let core = std::fs::read(&core_output).unwrap();
         let component = wit_component::ComponentEncoder::default()
             .module(&core)
             .unwrap()
