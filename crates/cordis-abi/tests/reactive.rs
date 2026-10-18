@@ -131,15 +131,15 @@ async fn event_callback_uses_registration_owner_and_emitter_caller() {
 async fn dispatch_handle_outlives_method_and_caches_outcome() {
     let files = Files::new("cordis_abi_reactive");
     let rig = rig(&files, cordis_wire::json!({}), reactive_caps()).await;
-    invoke_json(&rig.handle, "on", json!({"hold":true}))
+    bounded(invoke_json(&rig.handle, "on", json!({"hold":true})))
         .await
         .unwrap();
-    let id = invoke_json(&rig.handle, "emit", json!({"input":12}))
+    let id = bounded(invoke_json(&rig.handle, "emit", json!({"input":12})))
         .await
         .unwrap();
     entered(&rig.logger).await;
     assert_eq!(
-        invoke_json(&rig.handle, "status", id.clone())
+        bounded(invoke_json(&rig.handle, "status", id.clone()))
             .await
             .unwrap()["outcome"],
         Value::Null
@@ -163,7 +163,9 @@ async fn dispatch_handle_outlives_method_and_caches_outcome() {
         result
     );
     assert_eq!(
-        invoke_json(&rig.handle, "status", id).await.unwrap()["outcome"]["kind"],
+        bounded(invoke_json(&rig.handle, "status", id))
+            .await
+            .unwrap()["outcome"]["kind"],
         "success"
     );
     bounded(rig.rt.shutdown()).await.unwrap();

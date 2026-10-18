@@ -23,6 +23,7 @@ prost-build = { version = "0.14.4", default-features = false, features = ["forma
 base64.workspace = true
 sha2 = "0.10"
 tempfile = "3"
+dunce = "1.0.5"
 
 [dev-dependencies]
 cordis-test-contracts.workspace = true

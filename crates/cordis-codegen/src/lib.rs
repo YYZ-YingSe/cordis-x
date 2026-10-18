@@ -2,6 +2,7 @@
 pub mod backend;
 pub mod model;
 pub mod output;
+mod paths;
 mod protobuf;
 mod source;
 pub mod symbols;

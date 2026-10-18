@@ -116,12 +116,9 @@ fn walk(root: &Path, at: &Path, files: &mut Vec<String>) -> Result<()> {
         if path.is_dir() {
             walk(root, &path, files)?;
         } else {
-            files.push(
-                path.strip_prefix(root)
-                    .unwrap()
-                    .to_string_lossy()
-                    .into_owned(),
-            );
+            files.push(crate::paths::relative_name(
+                path.strip_prefix(root).unwrap(),
+            )?);
         }
     }
     Ok(())

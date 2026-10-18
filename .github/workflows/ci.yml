@@ -30,9 +30,23 @@ jobs:
         id: tools
         with:
           path: ${{ runner.temp }}/cordis-tools
-          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('tools/setup/**', 'sdk/cpp/tools/protobuf/**', 'tools/codegen/requirements.txt', 'tests/requirements.txt', 'package-lock.json', 'Cargo.lock', 'crates/cordis-component-pack/**') }}
-      - name: Set up all development toolchains
-        run: python tools/setup/setup.py --prefix "${{ runner.temp }}/cordis-tools" --jobs 2 --github-env
+          # Rust dependency changes can reuse the same native toolchains. Setup
+          # still rebuilds the component packer against the current lockfile.
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('tools/setup/**', 'sdk/cpp/tools/protobuf/**', 'tools/codegen/requirements.txt', 'tests/requirements.txt', 'package-lock.json') }}-${{ hashFiles('Cargo.lock', 'crates/cordis-component-pack/**') }}
+          restore-keys: tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('tools/setup/**', 'sdk/cpp/tools/protobuf/**', 'tools/codegen/requirements.txt', 'tests/requirements.txt', 'package-lock.json') }}-
+      - name: Set up generator toolchains
+        run: python tools/setup/setup.py --prefix "${{ runner.temp }}/cordis-tools" --only rust python typescript protoc --jobs 2 --github-env
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          key: native-fixtures-separated
+          cache-on-failure: true
+          cache-bin: false
+      - name: Test generator paths and output ownership
+        timeout-minutes: 15
+        run: cargo test -p cordis-codegen --test compiler --locked
+      - name: Set up C++ and Wasm toolchains
+        run: python tools/setup/setup.py --prefix "${{ runner.temp }}/cordis-tools" --only cpp wasm --jobs 2 --github-env
       - name: Cache prepared toolchains
         if: steps.tools.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -50,18 +64,14 @@ jobs:
         run: python tests/build.py --native
       - name: Test C++ SDK
         run: ctest --test-dir build/native -C Debug --output-on-failure
-      # Start the Rust cache only after native build prerequisites pass, so a
-      # C++ failure cannot publish a cache with no compiled Rust dependencies.
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
-        with:
-          key: native-fixtures-separated
-          cache-on-failure: true
-          cache-bin: false
+      - name: Test asynchronous ABI dispatch progress
+        timeout-minutes: 20
+        run: cargo test -p cordis-abi --features loader --test reactive dispatch_handle_outlives_method_and_caches_outcome --locked
       - run: cargo clippy --workspace --all-targets --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked -- -D warnings
       - name: Compile Rust tests
         run: cargo test --workspace --no-run --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked
       - name: Run workspace tests
+        timeout-minutes: 60
         run: cargo test --workspace --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked
       - run: cargo build -p cordis-wasm-calculator --target wasm32-unknown-unknown --release --locked
       - run: cargo run -p cordis-component-pack --locked -- target/wasm32-unknown-unknown/release/cordis_wasm_calculator.wasm target/calculator.component.wasm

@@ -21,9 +21,11 @@ struct Callback {
       throw Refusal("busy", "callback already running");
     running = true;
     try {
-      Payload value =
-          wire_run ? co_await wire_run(std::move(ctx), std::move(args))
-                   : Payload(co_await run(std::move(ctx), args.control_only()));
+      Payload value;
+      if (wire_run)
+        value = co_await wire_run(std::move(ctx), std::move(args));
+      else
+        value = Payload(co_await run(std::move(ctx), args.control_only()));
       running = false;
       if (once) {
         result = value;

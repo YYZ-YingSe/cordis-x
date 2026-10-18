@@ -260,8 +260,13 @@ struct Fixture : fixture::JsonContextService {
         std::lock_guard<std::mutex> lock(state->mutex);
         dispatch = state->dispatches.at(args.get<size_t>());
       }
-      co_return method == "join" ? fixture::flows_json(co_await dispatch.join())
-                                 : (co_await dispatch.snapshot());
+      // GCC 13 can start the unselected co_await in a conditional expression.
+      // Select the operation before awaiting so a snapshot never waits for join.
+      if (method == "join") {
+        auto flows = co_await dispatch.join();
+        co_return fixture::flows_json(flows);
+      }
+      co_return co_await dispatch.snapshot();
     }
     if (method == "expired") {
       std::optional<Context> saved;

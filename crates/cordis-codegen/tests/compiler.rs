@@ -25,6 +25,23 @@ service Test {{option(cordis.schema.contract)={{name:"test.probe" revision:"1" c
         body
     )
 }
+
+#[test]
+fn nested_proto_paths_work_with_spaces_and_unicode() {
+    let directory = tempfile::tempdir().unwrap();
+    let include = directory.path().join("合同 sources");
+    std::fs::create_dir_all(include.join("nested")).unwrap();
+    let input = include.join("nested/test.proto");
+    std::fs::write(&input, proto("message Data {}")).unwrap();
+    let module = compile(&input, &[include], &GeneratorTools::default()).unwrap();
+    assert!(module.services().contains_key("Test"));
+    let output = backend::generate(&module, &[&Cpp], &GeneratorTools::default()).unwrap();
+    assert!(
+        output
+            .iter()
+            .any(|(name, _)| name == "cpp/proto/nested/test.pb.cc")
+    );
+}
 #[test]
 fn rejects_invalid_types_constraints_and_nonproductive_recursion() {
     for body in [
@@ -131,6 +148,11 @@ fn generators_are_deterministic_and_use_library_messages() {
             .any(|(name, text)| name.ends_with("example.rs") && text.contains("::prost::Message"))
     );
     assert!(a.iter().any(|(name, _)| name.ends_with("examples_pb.ts")));
+    assert!(a.iter().all(|(name, _)| {
+        ["rust/", "cpp/", "typescript/", "resources/"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+    }));
 }
 #[test]
 fn generated_outputs_are_owned_and_replaced_as_a_set() {

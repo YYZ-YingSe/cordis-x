@@ -28,7 +28,7 @@ impl GeneratorTools {
     pub(crate) fn es_plugin(&self) -> Result<PathBuf> {
         let path = &self.protoc_gen_es;
         if path.components().count() > 1 || path.is_absolute() {
-            return std::fs::canonicalize(path)
+            return dunce::canonicalize(path)
                 .map_err(|e| Diagnostic::new(path.display().to_string(), e));
         }
         for directory in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
@@ -37,12 +37,12 @@ impl GeneratorTools {
             for extension in ["exe", "cmd", "bat"] {
                 let candidate = candidate.with_extension(extension);
                 if candidate.is_file() {
-                    return std::fs::canonicalize(candidate)
+                    return dunce::canonicalize(candidate)
                         .map_err(|e| Diagnostic::new("protoc-gen-es", e));
                 }
             }
             if candidate.is_file() {
-                return std::fs::canonicalize(candidate)
+                return dunce::canonicalize(candidate)
                     .map_err(|e| Diagnostic::new("protoc-gen-es", e));
             }
         }
@@ -67,12 +67,7 @@ impl GeneratorTools {
             let directory = temporary.join("es-plugin");
             std::fs::create_dir_all(&directory)
                 .map_err(|e| Diagnostic::new("protoc-gen-es launcher", e))?;
-            let path = plugin.to_string_lossy();
-            let path = if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
-                format!(r"\\{unc}")
-            } else {
-                path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned()
-            };
+            let path = dunce::simplified(&plugin);
             std::fs::write(
                 directory.join("protoc-gen-es.cmd"),
                 "@echo off\r\n@setlocal DisableDelayedExpansion\r\n@\"%CORDIS_PROTOC_ES_SCRIPT%\"\r\n",

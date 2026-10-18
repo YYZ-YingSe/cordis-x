@@ -12,10 +12,7 @@ fn collect(root: &Path, path: &Path, files: &mut Files) -> Result<()> {
             collect(root, &path, files)?;
         } else {
             files.add(
-                path.strip_prefix(root)
-                    .unwrap()
-                    .to_string_lossy()
-                    .replace('\\', "/"),
+                crate::paths::relative_name(path.strip_prefix(root).unwrap())?,
                 std::fs::read_to_string(&path)
                     .map_err(|e| Diagnostic::new(path.display().to_string(), e))?,
             )?;
@@ -29,9 +26,11 @@ pub fn generate(
     tools: &crate::GeneratorTools,
 ) -> Result<Files> {
     let temp = tempfile::tempdir().map_err(|e| Diagnostic::new("temporary directory", e))?;
+    let generated = temp.path().join("generated");
+    std::fs::create_dir(&generated).map_err(|e| Diagnostic::new("generated files", e))?;
     for backend in backends {
         let name = backend.name();
-        let output = temp.path().join(name).join("proto");
+        let output = generated.join(name).join("proto");
         std::fs::create_dir_all(&output).map_err(|e| Diagnostic::new(name, e))?;
         if name == "rust" {
             let mut fds = prost_types::FileDescriptorSet::decode(module.descriptor.as_slice())
@@ -79,7 +78,7 @@ pub fn generate(
         }
     }
     if backends.iter().any(|b| b.name() == "rust") {
-        let directory = temp.path().join("rust/proto");
+        let directory = generated.join("rust/proto");
         for entry in
             std::fs::read_dir(&directory).map_err(|e| Diagnostic::new("rust visitor", e))?
         {
@@ -108,7 +107,7 @@ pub fn generate(
         }
     }
     let mut files = Files::default();
-    collect(temp.path(), temp.path(), &mut files)?;
+    collect(&generated, &generated, &mut files)?;
     files.add(
         "resources/schema.base64",
         STANDARD.encode(&module.descriptor) + "\n",

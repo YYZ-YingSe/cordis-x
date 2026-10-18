@@ -146,11 +146,11 @@ pub fn compile(
     includes: &[PathBuf],
     tools: &crate::GeneratorTools,
 ) -> Result<Module> {
-    let input = std::fs::canonicalize(input)
-        .map_err(|e| Diagnostic::new(input.display().to_string(), e))?;
+    let input =
+        dunce::canonicalize(input).map_err(|e| Diagnostic::new(input.display().to_string(), e))?;
     let mut dirs = includes
         .iter()
-        .map(|p| std::fs::canonicalize(p).map_err(|e| Diagnostic::new(p.display().to_string(), e)))
+        .map(|p| dunce::canonicalize(p).map_err(|e| Diagnostic::new(p.display().to_string(), e)))
         .collect::<Result<Vec<_>>>()?;
     if dirs.is_empty() {
         dirs.push(input.parent().unwrap().to_owned());
@@ -165,6 +165,7 @@ pub fn compile(
             )
         })?
         .to_owned();
+    let relative = crate::paths::relative_name(&relative)?;
     let temp = tempfile::tempdir().map_err(|e| Diagnostic::new("temporary directory", e))?;
     let resources = tempfile::tempdir().map_err(|e| Diagnostic::new("protocol resources", e))?;
     let cordis = resources.path().join("cordis");
@@ -208,7 +209,7 @@ pub fn compile(
         .map_err(|e| Diagnostic::new("descriptor", e))?;
     protobuf::check_schema(&pool).map_err(|e| Diagnostic::new("schema", e))?;
     let main = pool
-        .get_file_by_name(&relative.to_string_lossy())
+        .get_file_by_name(&relative)
         .ok_or_else(|| Diagnostic::new("input", "missing descriptor"))?;
     let package = main.package_name().to_owned();
     if package.is_empty() {
