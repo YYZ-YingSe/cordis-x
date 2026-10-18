@@ -65,9 +65,8 @@ pub fn generate(
             } else {
                 return Err(Diagnostic::new(name, "unsupported protobuf generator"));
             }
-            let result = command
-                .args(&module.files)
-                .output()
+            command.args(&module.files);
+            let result = crate::tools::protoc_output(&command, temp.path())
                 .map_err(|e| Diagnostic::new(name, e))?;
             if !result.status.success() {
                 return Err(Diagnostic::new(

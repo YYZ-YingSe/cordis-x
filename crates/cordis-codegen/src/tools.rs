@@ -1,9 +1,52 @@
 //! Explicit build tools. Resolving tools never installs or changes their environment.
 use crate::{Diagnostic, Result};
 use std::{
+    io,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Output},
 };
+
+/// Keep UTF-8 arguments out of the Windows executable's narrow argv conversion.
+/// protoc accepts one literal argument per line in an argument file.
+pub(crate) fn protoc_output(command: &Command, temporary: &Path) -> io::Result<Output> {
+    let mut arguments = String::new();
+    for argument in command.get_args() {
+        let argument = argument.to_str().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "protoc arguments must be UTF-8",
+            )
+        })?;
+        if argument.contains(['\r', '\n']) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "protoc arguments cannot contain line breaks",
+            ));
+        }
+        arguments.push_str(argument);
+        arguments.push('\n');
+    }
+    std::fs::write(temporary.join("protoc.args"), arguments)?;
+    let program = Path::new(command.get_program());
+    let program = if program.components().count() > 1 {
+        dunce::canonicalize(program)?
+    } else {
+        program.to_owned()
+    };
+    let mut invocation = Command::new(program);
+    for (key, value) in command.get_envs() {
+        match value {
+            Some(value) => invocation.env(key, value),
+            None => invocation.env_remove(key),
+        };
+    }
+    // CreateProcess receives this working directory as UTF-16. The argument
+    // file's ASCII name also works when the temporary directory is non-ASCII.
+    invocation
+        .current_dir(temporary)
+        .arg("@protoc.args")
+        .output()
+}
 
 #[derive(Clone, Debug)]
 pub struct GeneratorTools {

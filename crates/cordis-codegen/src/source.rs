@@ -183,20 +183,19 @@ pub fn compile(
     for path in &dirs {
         command.arg("-I").arg(path);
     }
-    let output = command
+    command
         .arg("--include_imports")
         .arg(format!(
             "--descriptor_set_out={}",
             descriptor_path.display()
         ))
-        .arg(&relative)
-        .output()
-        .map_err(|e| {
-            Diagnostic::new(
-                tools.protoc.display().to_string(),
-                format!("{e}; provide --protoc or PROTOC"),
-            )
-        })?;
+        .arg(&relative);
+    let output = crate::tools::protoc_output(&command, temp.path()).map_err(|e| {
+        Diagnostic::new(
+            tools.protoc.display().to_string(),
+            format!("{e}; provide --protoc or PROTOC"),
+        )
+    })?;
     if !output.status.success() {
         return Err(Diagnostic::new(
             "protoc",
