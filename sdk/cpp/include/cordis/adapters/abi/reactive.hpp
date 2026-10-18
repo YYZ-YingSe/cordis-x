@@ -181,9 +181,10 @@ inline Async<Dispatch> Context::emit(std::string alias, Message input,
   return cordis::detail::invoke_owned(
       [*this](std::string alias, Message input,
               bool serial) -> Async<Dispatch> {
-        auto id = (co_await detail::reactive_call(
-                       raw_, reactive_, CORDIS_ABI_EVENT_EMIT, 0, 0, alias,
-                       Payload(Value{{"serial", serial}}, input)))
+        Payload args(Value{{"serial", serial}}, input);
+        auto id = (co_await detail::reactive_call(raw_, reactive_,
+                                                  CORDIS_ABI_EVENT_EMIT, 0, 0,
+                                                  alias, std::move(args)))
                       .second;
         co_return Dispatch(raw_, reactive_, id);
       },

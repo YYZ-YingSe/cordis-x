@@ -71,11 +71,6 @@ def dependencies(setup, *, wasm=False, toolchain=None):
 def install(setup):
     setup.require("python")
     setup.require("protoc")
-    if setup.host.startswith("linux"):
-        # GCC 13 crashes while lowering several C++20 coroutine expressions.
-        # Select Clang for the prepared environment; explicit CC/CXX still win.
-        environment = setup.environment()
-        setup.set(CC=environment.get("CC", "clang"), CXX=environment.get("CXX", "clang++"))
     prefix = dependencies(setup)
     setup.set(CMAKE_PREFIX_PATH=prefix)
     if setup.host.startswith("macos"):

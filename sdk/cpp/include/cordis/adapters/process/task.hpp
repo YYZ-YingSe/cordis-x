@@ -10,8 +10,8 @@ class Task {
   Async<Json> request(std::string command) const {
     return cordis::detail::invoke_owned(
         [*this](std::string command) -> Async<Json> {
-          co_return (co_await channel->request(
-              command, {{"task", id}, {"grant", grant}}));
+          Json args = {{"task", id}, {"grant", grant}};
+          co_return co_await channel->request(command, std::move(args));
         },
         std::move(command));
   }
@@ -61,9 +61,9 @@ public:
       // reply.
       entries.emplace(id, entry);
     }
-    const auto reply = (co_await channel->request(
-        "task_register",
-        {{"context", context}, {"task", id}, {"label", label}}));
+    Json args = {{"context", context}, {"task", id}, {"label", label}};
+    const auto reply =
+        co_await channel->request("task_register", std::move(args));
     const auto grant = reply.at("grant").get<std::string>();
     if (reply.at("task") != id || grant.size() != 32 ||
         !std::all_of(grant.begin(), grant.end(), [](char c) {

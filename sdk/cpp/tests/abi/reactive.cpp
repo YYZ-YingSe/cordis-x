@@ -61,16 +61,17 @@ struct Fixture : fixture::JsonContextService {
   Async<void> activate(Context ctx) override {
     trace(config, "activate");
     if (config.value("startup", false)) {
-      (co_await invoke_json(ctx, "on",
-                            {{"id", "startup"}, {"initializing", true}}));
-      (co_await invoke_json(ctx, "use", {{"id", "startup-middleware"}}));
+      Value listener = {{"id", "startup"}, {"initializing", true}};
+      co_await invoke_json(ctx, "on", std::move(listener));
+      Value middleware = {{"id", "startup-middleware"}};
+      co_await invoke_json(ctx, "use", std::move(middleware));
       (co_await invoke_json(ctx, "parallel", nullptr));
       throw Rejected("startup", "startup failed");
     }
     if (config.contains("initializing")) {
-      (co_await invoke_json(
-          ctx, "on",
-          {{"id", "initializing"}, {"initializing", config["initializing"]}}));
+      Value listener = {{"id", "initializing"},
+                        {"initializing", config["initializing"]}};
+      co_await invoke_json(ctx, "on", std::move(listener));
       (co_await invoke_json(ctx, "parallel", nullptr));
     }
 
@@ -117,11 +118,11 @@ struct Fixture : fixture::JsonContextService {
                 std::lock_guard<std::mutex> lock(state->mutex);
                 state->saved = callback;
               }
-              (co_await fixture::invoke_json(
-                  callback, "example.logger", "event",
-                  {{"version", CORDIS_ABI_CODE_VERSION},
-                   {"label", label},
-                   {"input", input}}));
+              Value event = {{"version", CORDIS_ABI_CODE_VERSION},
+                             {"label", label},
+                             {"input", input}};
+              co_await fixture::invoke_json(callback, "example.logger", "event",
+                                            std::move(event));
               if (args.value("hold", false))
                 (co_await fixture::invoke_json(callback, "example.logger",
                                                "hold", label));

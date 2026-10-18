@@ -142,10 +142,9 @@ inline Context context(std::shared_ptr<Frame> frame,
   ops.validation = callbacks->validation;
   ops.acquire = [binary, callbacks](std::string dependency, std::string kind,
                                     Message args) -> Async<ResourceHandle> {
+    Payload payload(Value{{"dependency", dependency}, {"kind", kind}}, args);
     auto id = grant(
-        (co_await binary(
-             "dependency-resource-acquire",
-             Payload(Value{{"dependency", dependency}, {"kind", kind}}, args)))
+        (co_await binary("dependency-resource-acquire", std::move(payload)))
             .control_only());
     co_return cordis::detail::ResourceAccess::make(
         ResourceCapability{id, callbacks});
@@ -153,26 +152,23 @@ inline Context context(std::shared_ptr<Frame> frame,
   ops.resource_invoke = [binary, callbacks](std::any state, std::string method,
                                             Message args) -> Async<Message> {
     const auto &resource = resource_capability(state, callbacks);
-    co_return (co_await binary(
-                   "dependency-resource-invoke",
-                   Payload(Value{{"grant", resource.grant}, {"method", method}},
-                           args)))
+    Payload payload(Value{{"grant", resource.grant}, {"method", method}}, args);
+    co_return (
+        co_await binary("dependency-resource-invoke", std::move(payload)))
         .one();
   };
   ops.resource_dispose = [req, callbacks](std::any state) -> Async<void> {
     const auto &resource = resource_capability(state, callbacks);
-    if (!(co_await req("dependency-resource-dispose",
-                       {{"grant", resource.grant}}))
+    Value args = {{"grant", resource.grant}};
+    if (!(co_await req("dependency-resource-dispose", std::move(args)))
              .is_null())
       throw Unknown("invalid resource disposal acknowledgement");
   };
   ops.invoke = [binary](std::string dependency, std::string method,
                         Message args) -> Async<Message> {
-    co_return (
-        co_await binary("invoke", Payload(Value{{"dependency", dependency},
-                                                {"method", method}},
-                                          args)))
-        .one();
+    Payload payload(Value{{"dependency", dependency}, {"method", method}},
+                    args);
+    co_return (co_await binary("invoke", std::move(payload))).one();
   };
   ops.metadata = [req](std::string name, std::string revision) {
     return req("metadata", {{"name", name}, {"revision", revision}});
@@ -181,8 +177,9 @@ inline Context context(std::shared_ptr<Frame> frame,
       [registration](
           std::string label,
           std::function<Async<void>(Context)> cleanup) -> Async<Effect> {
+    Value args = {{"label", label}};
     auto id = co_await registration(
-        "defer", {{"label", label}},
+        "defer", std::move(args),
         [cleanup = std::move(cleanup)](Context ctx, Value) -> Async<Value> {
           co_await cleanup(std::move(ctx));
           co_return nullptr;
@@ -195,8 +192,9 @@ inline Context context(std::shared_ptr<Frame> frame,
                 callbacks](std::string label,
                            std::function<Async<EffectStep>(Context)> next)
       -> Async<EffectSequence> {
+    Value args = {{"label", label}};
     auto id = co_await registration(
-        "effect", {{"label", label}},
+        "effect", std::move(args),
         [next = std::move(next), callbacks](Context ctx,
                                             Value) -> Async<Value> {
           // Reserve cleanup storage before the producer can acquire anything.
@@ -240,7 +238,8 @@ inline Context context(std::shared_ptr<Frame> frame,
         [id] { return control("effect-status", id); });
   };
   ops.scope = [req, callbacks](std::string label) -> Async<Scope> {
-    auto id = grant(co_await req("scope", {{"label", label}}));
+    Value args = {{"label", label}};
+    auto id = grant(co_await req("scope", std::move(args)));
     co_return Scope(
         [id]() -> Async<void> { co_await control("scope-ready", id); },
         [id]() -> Async<void> { co_await control("scope-dispose", id); },
@@ -253,8 +252,8 @@ inline Context context(std::shared_ptr<Frame> frame,
               },
               true);
           try {
-            auto value =
-                co_await control("scope-run", id, {{"callback", callback}});
+            Value args = {{"callback", callback}};
+            auto value = co_await control("scope-run", id, std::move(args));
             callbacks->remove(callback);
             co_return value;
           } catch (const RpcError &) {
@@ -266,8 +265,9 @@ inline Context context(std::shared_ptr<Frame> frame,
   ops.spawn =
       [registration](std::string label,
                      std::function<Async<void>(Context)> run) -> Async<Task> {
+    Value args = {{"label", label}};
     auto id = co_await registration(
-        "spawn", {{"label", label}},
+        "spawn", std::move(args),
         [run = std::move(run)](Context ctx, Value) -> Async<Value> {
           co_await run(std::move(ctx));
           co_return nullptr;
@@ -286,8 +286,9 @@ inline Context context(std::shared_ptr<Frame> frame,
       [registration](
           std::string event,
           std::function<Async<Flow>(Context, Message)> run) -> Async<Effect> {
+    Value args = {{"event", event}};
     auto id = co_await registration(
-        "on", Value{{"event", event}},
+        "on", std::move(args),
         WireCallback([run = std::move(run)](Context ctx,
                                             Payload input) -> Async<Payload> {
           co_return session::flow_payload(
@@ -297,22 +298,22 @@ inline Context context(std::shared_ptr<Frame> frame,
         [id]() -> Async<void> { co_await control("dispose", id); });
   };
   ops.emit = [binary](std::string event, Message args) -> Async<Dispatch> {
+    Payload payload(Value{{"event", event}}, args);
     auto id = grant(
-        (co_await binary("event-emit", Payload(Value{{"event", event}}, args)))
-            .control_only());
+        (co_await binary("event-emit", std::move(payload))).control_only());
     co_return Dispatch(
         [id]() -> Async<std::vector<Flow>> {
           if (!current())
             throw Refusal("closed", "operation requires live callback");
+          Payload payload(Value{{"grant", id}});
           co_return decode_flows(co_await request_payload(
-              current()->shared_from_this(), "event-join",
-              Payload(Value{{"grant", id}})));
+              current()->shared_from_this(), "event-join", std::move(payload)));
         },
         [id] { return control("event-status", id); });
   };
   ops.serial = [binary](std::string event, Message args) -> Async<Flow> {
-    auto flows = decode_flows(co_await binary(
-        "emit", Payload(Value{{"event", event}, {"serial", true}}, args)));
+    Payload payload(Value{{"event", event}, {"serial", true}}, args);
+    auto flows = decode_flows(co_await binary("emit", std::move(payload)));
     for (auto &flow : flows)
       if (flow.value)
         co_return flow;
@@ -322,8 +323,9 @@ inline Context context(std::shared_ptr<Frame> frame,
       [registration](std::string name,
                      std::function<Async<Message>(Context, Message, Next)> run)
       -> Async<Effect> {
+    Value args = {{"name", name}};
     auto id = co_await registration(
-        "middleware", Value{{"name", name}},
+        "middleware", std::move(args),
         WireCallback([run = std::move(run)](Context ctx,
                                             Payload input) -> Async<Payload> {
           auto next = grant(input.control.at("next"));
@@ -332,9 +334,10 @@ inline Context context(std::shared_ptr<Frame> frame,
               Next([next](Message value) -> Async<Message> {
                 if (!current())
                   throw Refusal("closed", "operation requires live callback");
-                co_return (co_await request_payload(
-                               current()->shared_from_this(), "next",
-                               Payload(Value{{"grant", next}}, value)))
+                Payload payload(Value{{"grant", next}}, value);
+                co_return (
+                    co_await request_payload(current()->shared_from_this(),
+                                             "next", std::move(payload)))
                     .one();
               }));
           co_return Payload(value);
@@ -353,8 +356,8 @@ inline Context context(std::shared_ptr<Frame> frame,
         }),
         true);
     try {
-      auto result = co_await binary(
-          "run", Payload(Value{{"name", name}, {"callback", id}}, args));
+      Payload payload(Value{{"name", name}, {"callback", id}}, args);
+      auto result = co_await binary("run", std::move(payload));
       callbacks->remove(id);
       co_return result.one();
     } catch (const RpcError &) {
@@ -363,10 +366,9 @@ inline Context context(std::shared_ptr<Frame> frame,
     }
   };
   ops.install = [binary](std::string factory, Message config) -> Async<Child> {
+    Payload payload(Value{{"factory", factory}}, config);
     auto id =
-        grant((co_await binary("install",
-                               Payload(Value{{"factory", factory}}, config)))
-                  .control_only());
+        grant((co_await binary("install", std::move(payload))).control_only());
     co_return Child(
         [id] { return control("plugin-ready", id); },
         [id] { return control("plugin-settled", id); },
@@ -374,8 +376,8 @@ inline Context context(std::shared_ptr<Frame> frame,
         [id]() -> Async<void> { co_await control("plugin-dispose", id); });
   };
   ops.provide = [binary](std::string service, Message value) -> Async<void> {
-    (co_await binary("provide", Payload(Value{{"service", service}}, value)))
-        .control_only();
+    Payload payload(Value{{"service", service}}, value);
+    (co_await binary("provide", std::move(payload))).control_only();
   };
   return Context(std::move(ops));
 }

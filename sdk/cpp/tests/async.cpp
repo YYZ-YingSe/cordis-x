@@ -77,8 +77,8 @@ cordis::Async<void> check(Loop &loop) {
     // Both the Context and argument temporaries are gone before execution
     // starts.
     assert(!weak.expired());
-    assert(test::json(co_await std::move(invocation)) ==
-           Value({{"answer", 42}}));
+    auto result = co_await std::move(invocation);
+    assert(test::json(result) == Value({{"answer", 42}}));
     assert(test::json(*(co_await std::move(dispatch)).at(0).value) == 7);
   }
   assert(weak.expired());

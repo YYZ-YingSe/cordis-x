@@ -72,12 +72,13 @@ public:
       std::lock_guard lock(mutex);
       reserved = cleanup_calls;
     }
+    Payload payload(Json{{"context", context},
+                         {"dependency", dependency},
+                         {"method", method}},
+                    std::move(args));
     auto result = co_await request_payload(
         cleanup && reserved ? "cleanup_call" : "dependency_call",
-        Payload(Json{{"context", context},
-                     {"dependency", dependency},
-                     {"method", method}},
-                std::move(args)));
+        std::move(payload));
     co_return result.one();
   }
   Async<Json> request(std::string command, Json value) {

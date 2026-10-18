@@ -17,6 +17,10 @@
 namespace cordis {
 template <class T = void> using Async = corral::Task<T>;
 
+// Construct initializer-list request values in a statement before co_await.
+// Their backing arrays then die before suspension; GCC 13 cannot lower the
+// equivalent nested construction inside an await expression.
+
 namespace detail {
 // Coroutine lambdas borrow their closure. Keep the operation closure and its
 // arguments in this coroutine frame until its child has actually completed.

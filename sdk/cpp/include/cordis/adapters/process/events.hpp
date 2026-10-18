@@ -22,8 +22,8 @@ public:
         grant(std::move(grant)) {}
   Async<void> dispose() const {
     return cordis::detail::invoke_owned([*this]() -> Async<void> {
-      (co_await channel->request("event_dispose",
-                                 {{"listener", id}, {"grant", grant}}));
+      Json args = {{"listener", id}, {"grant", grant}};
+      co_await channel->request("event_dispose", std::move(args));
     });
   }
 };
@@ -39,8 +39,9 @@ public:
   Async<std::vector<cordis::Flow>> join() const {
     return cordis::detail::invoke_owned(
         [*this]() -> Async<std::vector<cordis::Flow>> {
-          const auto reply = co_await channel->request_payload(
-              "event_join", Payload(Json{{"dispatch", id}, {"grant", grant}}));
+          Payload args(Json{{"dispatch", id}, {"grant", grant}});
+          const auto reply =
+              co_await channel->request_payload("event_join", std::move(args));
           const auto &result = reply.control;
           if (result.value("kind", "") == "success" &&
               result.at("flows").is_array()) {
@@ -74,8 +75,8 @@ public:
   }
   Async<Json> snapshot() const {
     return cordis::detail::invoke_owned([*this]() -> Async<Json> {
-      co_return (co_await channel->request(
-          "event_status", {{"dispatch", id}, {"grant", grant}}));
+      Json args = {{"dispatch", id}, {"grant", grant}};
+      co_return co_await channel->request("event_status", std::move(args));
     });
   }
 };
@@ -119,9 +120,8 @@ public:
       entries.emplace(id,
                       std::make_shared<Entry>(Entry{std::move(callback), 0}));
     }
-    auto reply = (co_await channel->request(
-        "event_register",
-        {{"context", context}, {"event", event}, {"listener", id}}));
+    Json args = {{"context", context}, {"event", event}, {"listener", id}};
+    auto reply = co_await channel->request("event_register", std::move(args));
     co_return Subscription(channel, id, grant(reply, "listener", id));
   }
   Async<Dispatch> emit(std::shared_ptr<DependencyChannel> channel,
@@ -135,12 +135,13 @@ public:
         throw Refusal("events_exhausted", "dispatch history full");
       id = "d" + std::to_string(++next_dispatch);
     }
-    auto received = co_await channel->request_payload(
-        "event_emit", Payload(Json{{"context", context},
-                                   {"event", event},
-                                   {"mode", serial ? "serial" : "parallel"},
-                                   {"dispatch", id}},
-                              args));
+    Payload payload(Json{{"context", context},
+                         {"event", event},
+                         {"mode", serial ? "serial" : "parallel"},
+                         {"dispatch", id}},
+                    args);
+    auto received =
+        co_await channel->request_payload("event_emit", std::move(payload));
     auto reply = received.control_only();
     co_return Dispatch(channel, id, grant(reply, "dispatch", id));
   }

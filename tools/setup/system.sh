@@ -17,13 +17,13 @@ case "$(uname -s)" in
     ;;
   Linux)
     if ! command -v apt-get >/dev/null 2>&1; then
-      echo 'This recipe supports Ubuntu 24.04+ / Debian 13+. Install Python 3.12+, venv, Clang with C++20 support, make, git, patch and CA certificates with your package manager.' >&2
+      echo 'This recipe supports Ubuntu 24.04+ / Debian 13+. Install Python 3.12+, venv, a C++20 compiler, make, git, patch and CA certificates with your package manager.' >&2
       exit 1
     fi
     elevate=()
     if [ "$(id -u)" -ne 0 ]; then elevate=(sudo); fi
     "${elevate[@]}" apt-get update
-    "${elevate[@]}" apt-get install -y build-essential clang python3 python3-venv python3-pip git patch ca-certificates curl pkg-config
+    "${elevate[@]}" apt-get install -y build-essential python3 python3-venv python3-pip git patch ca-certificates curl pkg-config
     echo 'Next: python3 tools/setup/setup.py --prefix <tool-directory>'
     ;;
   *) echo 'On Windows, run tools/setup/system.ps1 in PowerShell.' >&2; exit 1 ;;

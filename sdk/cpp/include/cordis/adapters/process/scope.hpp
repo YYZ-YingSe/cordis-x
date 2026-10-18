@@ -11,8 +11,8 @@ class Scope {
   Async<Json> request(std::string command) const {
     return cordis::detail::invoke_owned(
         [*this](std::string command) -> Async<Json> {
-          co_return (co_await channel->request(
-              command, {{"scope", id}, {"grant", grant}}));
+          Json args = {{"scope", id}, {"grant", grant}};
+          co_return co_await channel->request(command, std::move(args));
         },
         std::move(command));
   }
@@ -61,9 +61,9 @@ public:
         throw Refusal("scopes_exhausted", "scope history full");
       id = "c" + std::to_string(++next_scope);
     }
-    const auto reply = (co_await channel->request(
-        "scope_register",
-        {{"context", context}, {"scope", id}, {"label", label}}));
+    Json args = {{"context", context}, {"scope", id}, {"label", label}};
+    const auto reply =
+        co_await channel->request("scope_register", std::move(args));
     const auto grant = reply.at("grant").get<std::string>();
     if (reply.at("scope") != id || grant.size() != 32 ||
         !std::all_of(grant.begin(), grant.end(), [](char c) {
@@ -93,8 +93,8 @@ public:
         entry->callback = {};
       }
     } guard{*this, entry};
-    co_return (co_await channel->request(
-        "scope_run", {{"scope", scope}, {"grant", grant}, {"run", run}}));
+    Json args = {{"scope", scope}, {"grant", grant}, {"run", run}};
+    co_return co_await channel->request("scope_run", std::move(args));
   }
   Async<Json> invoke(std::string scope, std::string run, Context ctx) {
     std::shared_ptr<Run> entry;

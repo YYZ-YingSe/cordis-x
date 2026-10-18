@@ -43,11 +43,12 @@ public:
               frame->drained.trigger();
             }
           } guard{frame};
+          Payload payload(Json{{"context", frame->context},
+                               {"call", frame->call},
+                               {"grant", frame->grant}},
+                          args);
           auto value = co_await frame->channel->request_payload(
-              "middleware_next", Payload(Json{{"context", frame->context},
-                                              {"call", frame->call},
-                                              {"grant", frame->grant}},
-                                         args));
+              "middleware_next", std::move(payload));
           co_return value.one();
         },
         std::move(args));
@@ -81,8 +82,8 @@ public:
         grant(std::move(grant)) {}
   Async<void> dispose() const {
     return cordis::detail::invoke_owned([*this]() -> Async<void> {
-      (co_await channel->request("middleware_dispose",
-                                 {{"handler", handler}, {"grant", grant}}));
+      Json args = {{"handler", handler}, {"grant", grant}};
+      co_await channel->request("middleware_dispose", std::move(args));
     });
   }
 };
@@ -135,9 +136,10 @@ public:
       handlers.emplace(id,
                        std::make_shared<Entry>(Entry{std::move(callback), 0}));
     }
-    auto reply = (co_await channel->request(
-        "middleware_register",
-        {{"context", context}, {"middleware", middleware}, {"handler", id}}));
+    Json args = {
+        {"context", context}, {"middleware", middleware}, {"handler", id}};
+    auto reply =
+        co_await channel->request("middleware_register", std::move(args));
     const auto grant = reply.at("grant").get<std::string>();
     if (reply.at("handler") != id || grant.size() != 32 ||
         !std::all_of(grant.begin(), grant.end(), [](char c) {
@@ -175,11 +177,11 @@ public:
       }
     } guard{*this, id};
     try {
-      auto value = co_await channel->request_payload(
-          "middleware_run", Payload(Json{{"context", context},
-                                         {"middleware", middleware},
-                                         {"run", id}},
-                                    args));
+      Payload payload(
+          Json{{"context", context}, {"middleware", middleware}, {"run", id}},
+          args);
+      auto value = co_await channel->request_payload("middleware_run",
+                                                     std::move(payload));
       auto message = value.one();
       guard.known = true;
       co_return message;

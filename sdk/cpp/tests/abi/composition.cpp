@@ -46,8 +46,10 @@ struct Fixture : fixture::JsonContextService {
       if (config.value("ready", true))
         (co_await c.ready());
     }
-    if (!config.value("missing", false))
-      (co_await fixture::provide_json(ctx, "info", {{"version", 1}}));
+    if (!config.value("missing", false)) {
+      Value info = {{"version", 1}};
+      co_await fixture::provide_json(ctx, "info", std::move(info));
+    }
     if (config.value("duplicate", false))
       (co_await fixture::provide_json(ctx, "info", 2));
     if (config.value("hold", false))

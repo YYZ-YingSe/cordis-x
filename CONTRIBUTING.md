@@ -58,7 +58,7 @@ Every toolchain has its own entry point, accepting the same `--prefix` and `--jo
 
 For example, `python3 tools/setup/setup.py --prefix /path/to/tools --only rust protoc` prepares the Rust/protoc path. Add `python typescript` for generation and TypeScript work; add `cpp wasm` for the full integration suite. Native C++ needs the system compiler from the prerequisite step. Windows builds install both Debug and Release dependencies to match the MSVC runtime used by consumers.
 
-On Linux, setup selects Clang for native C++ and exports `CC`/`CXX` for subsequent builds; GCC 13 crashes on coroutine expressions used by the SDK. Explicit `CC`/`CXX` settings select your own compiler. On Windows, CMake selects the installed Visual Studio instance, including VS 2026, instead of assuming a specific IDE release.
+Native C++ uses the system compiler, or the compiler explicitly selected through `CC`/`CXX`. On Windows, CMake selects the installed Visual Studio instance, including VS 2026, instead of assuming a specific IDE release.
 
 [versions.json](tools/setup/versions.json) pins official binary/source archives and their SHA-256 checksums. Python tools are pinned in [requirements.txt](tools/setup/requirements.txt); npm and Cargo dependencies use their lockfiles. OS compiler and Python patch versions follow the selected system package source. The binary recipes cover Linux/macOS x64 and ARM64, and Windows x64. Cross-platform validation is still performed by CI; having an installer recipe does not establish backend support on its own.
 

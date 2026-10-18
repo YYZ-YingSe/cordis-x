@@ -89,10 +89,10 @@ inline Async<Child> Context::install(std::string factory,
           ++frame->calls;
         }
         Guard guard{frame};
+        Payload payload(Json{{"context", frame->token}, {"factory", factory}},
+                        config);
         auto reply = co_await frame->channel->request_payload(
-            "child_install",
-            Payload(Json{{"context", frame->token}, {"factory", factory}},
-                    config));
+            "child_install", std::move(payload));
         co_return Child(frame->channel,
                         operation_outcome(reply.control_only()));
       },
@@ -113,10 +113,10 @@ inline Async<void> Context::provide(std::string service, Message value) const {
           ++frame->calls;
         }
         Guard guard{frame};
-        (co_await frame->channel->request_payload(
-             "value_provide",
-             Payload(Json{{"context", frame->token}, {"service", service}},
-                     value)))
+        Payload payload(Json{{"context", frame->token}, {"service", service}},
+                        value);
+        (co_await frame->channel->request_payload("value_provide",
+                                                  std::move(payload)))
             .control_only();
       },
       std::move(service), std::move(value));

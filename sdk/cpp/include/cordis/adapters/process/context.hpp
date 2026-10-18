@@ -28,8 +28,8 @@ public:
   // registration.
   Async<void> dispose() const {
     return cordis::detail::invoke_owned([*this]() -> Async<void> {
-      (co_await channel->request("effect_dispose",
-                                 {{"effect", effect}, {"grant", grant}}));
+      Json args = {{"effect", effect}, {"grant", grant}};
+      co_await channel->request("effect_dispose", std::move(args));
     });
   }
 };
@@ -59,8 +59,8 @@ class EffectSequence {
   Async<Json> request(std::string command) const {
     return cordis::detail::invoke_owned(
         [*this](std::string command) -> Async<Json> {
-          co_return (co_await channel->request(
-              command, {{"sequence", sequence}, {"grant", grant}}));
+          Json args = {{"sequence", sequence}, {"grant", grant}};
+          co_return co_await channel->request(command, std::move(args));
         },
         std::move(command));
   }
@@ -191,13 +191,13 @@ public:
           }
           Guard guard{frame};
           const auto id = frame->channel->resource_id();
+          Payload payload(Json{{"context", frame->token},
+                               {"dependency", dependency},
+                               {"kind", kind},
+                               {"resource", id}},
+                          args);
           const auto received = co_await frame->channel->request_payload(
-              "dependency_resource_acquire",
-              Payload(Json{{"context", frame->token},
-                           {"dependency", dependency},
-                           {"kind", kind},
-                           {"resource", id}},
-                      args));
+              "dependency_resource_acquire", std::move(payload));
           const auto reply = operation_outcome(received.control_only());
           if (!reply.is_object() || reply.size() != 2 ||
               !reply.contains("resource") || reply["resource"] != id ||
@@ -451,9 +451,8 @@ public:
     // Retain on any failed/unknown registration: deactivation must not claim it
     // was cleaned. A release can arrive before the registration
     // acknowledgement.
-    auto reply = (co_await channel->request(
-        "effect_register",
-        {{"context", context}, {"effect", id}, {"label", label}}));
+    Json args = {{"context", context}, {"effect", id}, {"label", label}};
+    auto reply = co_await channel->request("effect_register", std::move(args));
     const auto grant = reply.at("grant").get<std::string>();
     if (reply.at("effect") != id || grant.size() != 32 ||
         !std::all_of(grant.begin(), grant.end(), [](char c) {
@@ -561,9 +560,9 @@ public:
       id = "s" + std::to_string(++next_id);
       entries.emplace(id, entry);
     }
-    const auto reply = (co_await channel->request(
-        "sequence_register",
-        {{"context", context}, {"sequence", id}, {"label", label}}));
+    Json args = {{"context", context}, {"sequence", id}, {"label", label}};
+    const auto reply =
+        co_await channel->request("sequence_register", std::move(args));
     const auto grant = reply.at("grant").get<std::string>();
     if (reply.at("sequence") != id || grant.size() != 32 ||
         !std::all_of(grant.begin(), grant.end(), [](char c) {
