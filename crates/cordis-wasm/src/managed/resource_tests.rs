@@ -1,8 +1,6 @@
 use super::*;
 use crate::json;
 use cordis_runtime::Runtime;
-use wasmtime::component::Component;
-use wasmtime::{Config, Engine};
 #[cfg(unix)]
 #[path = "../../tests/support/cpp_resources.rs"]
 mod cpp_guest;
@@ -158,6 +156,7 @@ async fn store_recovery(cpp: bool) {
 async fn cpp_cleanup_capacity_survives_saturated_ordinary_calls() {
     use futures_util::{StreamExt, stream::FuturesUnordered};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use wasmtime::{Config, Engine, component::Component};
     struct Host {
         wasi: crate::wasi::State,
         gate: Arc<Semaphore>,
