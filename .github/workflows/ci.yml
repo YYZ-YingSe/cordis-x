@@ -5,10 +5,34 @@ permissions:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-# Installation is explicit here; normal project builds only consume these tools.
-env:
-  CARGO_BUILD_JOBS: 2
+# Each lane owns its runner, build directory and cache. Independent compilers
+# can run concurrently without contending for one Cargo/CMake build lock.
 jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/prepare
+        with:
+          tools: rust python typescript protoc
+      - name: Test setup helpers
+        run: python -m unittest discover -s tests/setup -v
+      - run: cargo fmt --all -- --check
+      - name: Test TypeScript SDK
+        run: npm test --prefix sdk/typescript
+      - name: Test generator paths and output ownership
+        timeout-minutes: 15
+        run: cargo test -p cordis-codegen --test compiler --features cordis-remote/loader --locked
+      - name: Test TypeScript process startup and controls
+        timeout-minutes: 15
+        run: cargo test -p cordis-codegen --test process_controls generated_controls_typescript --features cordis-remote/loader --locked -- --exact --nocapture
+      - name: Test script package startup from staging
+        timeout-minutes: 15
+        run: cargo test -p cordis-remote --features loader --test conformance updates::script_packages_start_from_unicode_staging --locked -- --exact --nocapture
   native:
     strategy:
       fail-fast: false
@@ -17,45 +41,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Select GCC 13 on Linux
-        if: runner.os == 'Linux'
-        run: |
-          echo "CC=gcc-13" >> "$GITHUB_ENV"
-          echo "CXX=g++-13" >> "$GITHUB_ENV"
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        id: python
+      - uses: ./.github/actions/prepare
         with:
-          python-version: "3.12"
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: tools
-        with:
-          path: ${{ runner.temp }}/cordis-tools
-          # Rust dependency changes can reuse the same native toolchains. Setup
-          # still rebuilds the component packer against the current lockfile.
-          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('tools/setup/**', 'sdk/cpp/tools/protobuf/**', 'tools/codegen/requirements.txt', 'tests/requirements.txt', 'package-lock.json') }}-${{ hashFiles('Cargo.lock', 'crates/cordis-component-pack/**') }}
-          restore-keys: tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('tools/setup/**', 'sdk/cpp/tools/protobuf/**', 'tools/codegen/requirements.txt', 'tests/requirements.txt', 'package-lock.json') }}-
-      - name: Set up generator toolchains
-        run: python tools/setup/setup.py --prefix "${{ runner.temp }}/cordis-tools" --only rust python typescript protoc --jobs 2 --github-env
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
-        with:
-          key: native-fixtures-separated
-          cache-on-failure: true
-          cache-bin: false
-      - name: Test generator paths and output ownership
-        timeout-minutes: 15
-        run: cargo test -p cordis-codegen --test compiler --locked
-      - name: Set up C++ and Wasm toolchains
-        run: python tools/setup/setup.py --prefix "${{ runner.temp }}/cordis-tools" --only cpp wasm --jobs 2 --github-env
-      - name: Cache prepared toolchains
-        if: steps.tools.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/cordis-tools
-          key: ${{ steps.tools.outputs.cache-primary-key }}
-      - name: Test setup helpers
-        run: python -m unittest discover -s tests/setup -v
-      - run: cargo fmt --all -- --check
+          tools: rust python typescript protoc cpp
       - name: Configure C++ SDK
         run: python tests/build.py --native --configure-only
       - name: Compile C++ API and generated dispatch
@@ -67,30 +55,17 @@ jobs:
       - name: Test asynchronous ABI dispatch progress
         timeout-minutes: 20
         run: cargo test -p cordis-abi --features loader --test reactive dispatch_handle_outlives_method_and_caches_outcome --locked
-      - run: cargo clippy --workspace --all-targets --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked -- -D warnings
-      - name: Compile Rust tests
-        run: cargo test --workspace --no-run --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked
-      - name: Run workspace tests
+      - name: Lint native Rust targets
+        run: cargo clippy --workspace --exclude cordis-wasm --all-targets --features cordis-abi/loader,cordis-remote/loader --locked -- -D warnings
+      - name: Compile native Rust tests
+        run: cargo test --workspace --exclude cordis-wasm --no-run --features cordis-abi/loader,cordis-remote/loader --locked
+      - name: Run native workspace tests
         timeout-minutes: 60
-        run: cargo test --workspace --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked
-      - run: cargo build -p cordis-wasm-calculator --target wasm32-unknown-unknown --release --locked
-      - run: cargo run -p cordis-component-pack --locked -- target/wasm32-unknown-unknown/release/cordis_wasm_calculator.wasm target/calculator.component.wasm
-      - run: cargo run -p cordis-wasm --example component --locked -- target/calculator.component.wasm
-      - run: cargo build -p cordis-wasm-context-example --target wasm32-unknown-unknown --release --locked
-      - run: cargo run -p cordis-component-pack --locked -- target/wasm32-unknown-unknown/release/cordis_wasm_context_example.wasm target/context.component.wasm
-      - run: cargo run -p cordis-wasm --example context --locked -- target/context.component.wasm
-      - run: cargo build -p cordis-wasm-context-example --target wasm32-unknown-unknown --release --features version-v2 --target-dir target/wasm-context-v2 --locked
-      - run: cargo run -p cordis-component-pack --locked -- target/wasm-context-v2/wasm32-unknown-unknown/release/cordis_wasm_context_example.wasm target/context-v2.component.wasm
-      - run: cargo run -p cordis-wasm --example context_rolling --locked -- target/context.component.wasm target/context-v2.component.wasm
-      - run: cargo build -p cordis-wasm-calculator --target wasm32-unknown-unknown --release --features version-v2 --target-dir target/wasm-v2 --locked
-      - run: cargo run -p cordis-component-pack --locked -- target/wasm-v2/wasm32-unknown-unknown/release/cordis_wasm_calculator.wasm target/calculator-v2.component.wasm
-      - run: cargo run -p cordis-wasm --features loader --example reload --locked -- target/calculator.component.wasm target/calculator-v2.component.wasm
-      - run: cargo run -p cordis-wasm --features loader --example rolling --locked -- target/calculator.component.wasm target/calculator-v2.component.wasm
+        run: cargo test --workspace --exclude cordis-wasm --features cordis-abi/loader,cordis-remote/loader --locked
       - run: cargo run -p cordis-sdk --example broker --locked
       - run: cargo run -p cordis-sdk --example lifecycle --locked
       - run: cargo run -p cordis-sdk --example stepwise --locked
       - run: cargo run -p cordis-sdk --example loader --locked
-      - run: npm test --prefix sdk/typescript
       - if: runner.os == 'Linux'
         run: cargo run -p cordis-abi --example library --locked -- build/native/bin/libcordis_abi_calculator.so
       - if: runner.os == 'macOS'
@@ -170,19 +145,47 @@ jobs:
         run: cargo run -p cordis-remote --example middleware --locked -- ipc
       - if: runner.os != 'Windows'
         run: cargo run -p cordis-remote --example middleware --locked -- http
+  wasm:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/prepare
+        with:
+          tools: rust python protoc cpp wasm
+      # The cross-backend control test also exercises one native ABI fixture.
+      - name: Prepare ABI control comparison fixture
+        run: python tests/build.py --native --target cordis_workflows_abi
+      - name: Lint Wasm Rust targets
+        run: cargo clippy -p cordis-wasm --all-targets --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked -- -D warnings
+      - name: Compile Wasm tests
+        run: cargo test -p cordis-wasm --no-run --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked
+      - name: Run Wasm tests
+        timeout-minutes: 60
+        run: cargo test -p cordis-wasm --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked
+      - run: cargo build -p cordis-wasm-calculator --target wasm32-unknown-unknown --release --locked
+      - run: cargo run -p cordis-component-pack --locked -- target/wasm32-unknown-unknown/release/cordis_wasm_calculator.wasm target/calculator.component.wasm
+      - run: cargo run -p cordis-wasm --example component --locked -- target/calculator.component.wasm
+      - run: cargo build -p cordis-wasm-context-example --target wasm32-unknown-unknown --release --locked
+      - run: cargo run -p cordis-component-pack --locked -- target/wasm32-unknown-unknown/release/cordis_wasm_context_example.wasm target/context.component.wasm
+      - run: cargo run -p cordis-wasm --example context --locked -- target/context.component.wasm
+      - run: cargo build -p cordis-wasm-context-example --target wasm32-unknown-unknown --release --features version-v2 --target-dir target/wasm-context-v2 --locked
+      - run: cargo run -p cordis-component-pack --locked -- target/wasm-context-v2/wasm32-unknown-unknown/release/cordis_wasm_context_example.wasm target/context-v2.component.wasm
+      - run: cargo run -p cordis-wasm --example context_rolling --locked -- target/context.component.wasm target/context-v2.component.wasm
+      - run: cargo build -p cordis-wasm-calculator --target wasm32-unknown-unknown --release --features version-v2 --target-dir target/wasm-v2 --locked
+      - run: cargo run -p cordis-component-pack --locked -- target/wasm-v2/wasm32-unknown-unknown/release/cordis_wasm_calculator.wasm target/calculator-v2.component.wasm
+      - run: cargo run -p cordis-wasm --features loader --example reload --locked -- target/calculator.component.wasm target/calculator-v2.component.wasm
+      - run: cargo run -p cordis-wasm --features loader --example rolling --locked -- target/calculator.component.wasm target/calculator-v2.component.wasm
   msrv:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@1.96.0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: ./.github/actions/prepare
         with:
-          python-version: "3.12"
-      - name: Set up host code generation and libclang
-        run: python tools/setup/setup.py --prefix "${{ runner.temp }}/cordis-tools-msrv" --only python protoc --github-env
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
-        with:
-          cache-on-failure: true
-          cache-bin: false
+          # Keep the MSRV toolchain selected above; only install host tools.
+          tools: python protoc
       - run: cargo check --workspace --all-targets --features cordis-wasm/loader,cordis-abi/loader,cordis-remote/loader --locked

@@ -1,0 +1,71 @@
+name: Prepare CI environment
+description: Install the selected tools and reuse caches for this job and platform.
+inputs:
+  tools:
+    description: Space-separated components accepted by tools/setup/setup.py.
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      id: python
+      with:
+        python-version: "3.12"
+    - name: Configure build parallelism and compiler
+      id: configure
+      shell: python
+      env:
+        CORDIS_SETUP_COMPONENTS: ${{ inputs.tools }}
+      run: |
+        import hashlib
+        import os
+        jobs = os.cpu_count() or 1
+        with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+            for name in ("CARGO_BUILD_JOBS", "CMAKE_BUILD_PARALLEL_LEVEL", "CTEST_PARALLEL_LEVEL"):
+                output.write(f"{name}={jobs}\n")
+            if os.environ["RUNNER_OS"] == "Linux":
+                output.write("CC=gcc-13\nCXX=g++-13\n")
+            if os.environ["RUNNER_OS"] == "Windows":
+                # MSBuild /m schedules projects; MTT also parallelizes sources
+                # within a large project, with one shared compiler-process cap.
+                output.write("UseMultiToolTask=true\nEnforceProcessCountAcrossBuilds=true\n")
+                output.write(f"CL_MPCount={jobs}\n")
+        print(f"Build parallelism: {jobs} jobs per runner")
+        tools = " ".join(sorted(os.environ["CORDIS_SETUP_COMPONENTS"].split()))
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"tools={hashlib.sha256(tools.encode()).hexdigest()[:16]}\n")
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      id: tools
+      with:
+        path: ${{ runner.temp }}/cordis-tools
+        # Job-specific caches keep partial tool sets from replacing complete ones.
+        # Setup still checks dependencies and rebuilds the component packer.
+        key: tools-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.python.outputs.python-version }}-${{ steps.configure.outputs.tools }}-${{ hashFiles('.github/actions/prepare/**', 'tools/setup/**', 'sdk/cpp/tools/protobuf/**', 'tools/codegen/requirements.txt', 'tests/requirements.txt', 'package-lock.json') }}-${{ hashFiles('Cargo.lock', 'crates/cordis-component-pack/**') }}
+        restore-keys: tools-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.python.outputs.python-version }}-${{ steps.configure.outputs.tools }}-${{ hashFiles('.github/actions/prepare/**', 'tools/setup/**', 'sdk/cpp/tools/protobuf/**', 'tools/codegen/requirements.txt', 'tests/requirements.txt', 'package-lock.json') }}-
+    - name: Set up selected toolchains
+      shell: python
+      env:
+        CORDIS_SETUP_COMPONENTS: ${{ inputs.tools }}
+      run: |
+        import os
+        from pathlib import Path
+        import subprocess
+        import sys
+        subprocess.run([
+            sys.executable, "tools/setup/setup.py",
+            "--prefix", str(Path(os.environ["RUNNER_TEMP"]) / "cordis-tools"),
+            "--only", *os.environ["CORDIS_SETUP_COMPONENTS"].split(),
+            "--jobs", os.environ["CARGO_BUILD_JOBS"], "--github-env",
+        ], check=True)
+    - name: Cache prepared toolchains
+      if: steps.tools.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/cordis-tools
+        key: ${{ steps.tools.outputs.cache-primary-key }}
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      with:
+        # The action includes the job ID, OS and Rust toolchain in the key.
+        cache-on-failure: true
+        cache-bin: false

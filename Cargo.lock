@@ -359,6 +359,7 @@ dependencies = [
  "cordis-sdk-core",
  "cordis-test-contracts",
  "cordis-wire",
+ "dunce",
  "getrandom 0.4.3",
  "prost",
  "reqwest",

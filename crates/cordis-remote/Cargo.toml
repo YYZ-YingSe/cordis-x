@@ -8,7 +8,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
-loader = ["dep:cordis-loader"]
+loader = ["dep:cordis-loader", "dep:dunce"]
 
 [dependencies]
 cordis-wire.workspace = true
@@ -21,6 +21,7 @@ tokio = { workspace = true, features = ["process", "io-util", "net"] }
 reqwest = { version = "0.13", default-features = false, features = ["stream"] }
 getrandom = "0.4"
 cordis-loader = { workspace = true, optional = true }
+dunce = { version = "1.0.5", optional = true }
 
 [[example]]
 name = "process_reload"

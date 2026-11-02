@@ -16,10 +16,7 @@ use std::{
 };
 
 fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .unwrap()
+    dunce::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 fn build(language: &str) -> PathBuf {
     let root = root();

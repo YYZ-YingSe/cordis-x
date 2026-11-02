@@ -329,6 +329,47 @@ impl Rolling {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn script_packages_start_from_unicode_staging() {
+    let files = Files::new();
+    let reference = files.artifact(Backend::TypeScript, "v1");
+    let mut options = files.options(Backend::TypeScript);
+    // Keep the staging tree under Files' normal ownership/cleanup directory.
+    options.package.staging_dir = files.0.join("staged/脚本 packages");
+    let code = ProcessArtifact::prepare(&reference, &options).unwrap();
+    for endpoint in [Endpoint::Ipc, Endpoint::Http] {
+        let rt = Runtime::new();
+        let mut spec = ProcessSpec::new("ignored");
+        spec.endpoint = endpoint;
+        let provider = rt
+            .install(code.plugin("script", &calculator(), spec).unwrap())
+            .unwrap();
+        bounded(provider.ready()).await.unwrap();
+        let (consumer, saved) = client(&rt, &calculator()).await;
+        let handle = saved.lock().unwrap().as_ref().unwrap().clone();
+        assert_eq!(
+            call(&handle, endpoint, "code-version", json!({}))
+                .await
+                .unwrap(),
+            "v1"
+        );
+        bounded(rt.shutdown()).await.unwrap();
+        drop((handle, saved, provider, consumer, rt));
+    }
+    drop(code);
+    bounded(async {
+        while std::fs::read_dir(&options.package.staging_dir)
+            .unwrap()
+            .next()
+            .is_some()
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    std::fs::remove_dir(&options.package.staging_dir).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn executable_and_script_packages_restart_pin_the_verified_bytes_and_imports() {
     for &backend in Backend::ALL {
         let files = Files::new();

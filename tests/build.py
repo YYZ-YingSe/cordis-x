@@ -70,7 +70,8 @@ def main():
     mode.add_argument("--native", action="store_true", help="prepare shared C++ fixtures; tools must already be installed")
     parser.add_argument("--target", nargs="+", help="native CMake targets; omit to prepare the full integration suite")
     parser.add_argument("--configure-only", action="store_true")
-    parser.add_argument("--jobs", type=int, default=2)
+    parser.add_argument("--jobs", type=int, default=os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL") or 2,
+                        help="parallel compiler jobs; defaults to CMAKE_BUILD_PARALLEL_LEVEL or 2")
     args = parser.parse_args()
     if args.jobs < 1:
         parser.error("--jobs must be positive")

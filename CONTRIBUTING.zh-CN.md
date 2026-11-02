@@ -150,6 +150,10 @@ cargo test --workspace \
 
 集成测试会构建并启动真实插件。原生测试产物共用 `build/native/bin`，`tests/build.py --native` 会通过跨进程锁串行执行 CMake 构建并复用已有对象文件。单独构建某个测试目标时使用 `--target <CMake target>`。原生 Rust 测试插件共用 Cargo 目标目录，并遵循显式设置的 `CARGO_TARGET_DIR`。Rust 产物默认保留在 `target`，C++ Wasm 测试产物放在 `build/wasm`，避免 Cargo 缓存维护遍历 CMake 构建目录。复用已有构建产物，无需每次测试前清理缓存。
 
+CI 在 Linux、macOS、Windows 上分别并发运行快速检查、原生集成和 Wasm 集成，另设独立 MSRV job。快速检查先验证安装辅助脚本、格式、TypeScript SDK、生成器及脚本进程启动，不等待 C++/Wasm 工具准备。原生组运行除 `cordis-wasm` 外的工作区 Clippy/测试及原生、进程示例；Wasm 组承担 `cordis-wasm` 的 Clippy/测试和组件示例，并准备跨后端对照所需的 C++ ABI fixture。各组拥有独立 runner 和缓存，同组内复用编译产物；原有三平台覆盖保留。
+
+CI 按 runner 的逻辑 CPU 数设置 `CARGO_BUILD_JOBS`、`CMAKE_BUILD_PARALLEL_LEVEL` 和 `CTEST_PARALLEL_LEVEL`，工具链安装也使用同一并行度。Windows 另启用 MSBuild MultiToolTask，让单个大型 C++ target 的源文件也能并行编译，并用 `CL_MPCount` 和 `EnforceProcessCountAcrossBuilds` 限制跨项目的编译器进程总数。原生 fixture 与 C++ 组件构建入口优先采用显式 `--jobs`，否则读取 `CMAKE_BUILD_PARALLEL_LEVEL`；未设置时仍分别默认 2、4。嵌套 Cargo 构建继承 Cargo 环境变量。并行构建通过独立 runner 展开；同一 Cargo/CMake 输出目录的写锁继续保留。
+
 ## 提交修改
 
 说明要解决的问题、修改后的行为和验证方法。涉及生命周期时，说明已经进入的工作和已有资源如何处理。现有测试不能覆盖新增行为时，补充相应回归测试；纯文档修改不需要运行无关测试。

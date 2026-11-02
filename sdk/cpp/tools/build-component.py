@@ -32,7 +32,8 @@ def main():
     parser.add_argument('--proto-path', action='append', default=[], type=Path)
     parser.add_argument('--include', action='append', default=[], type=Path, help='consumer generated/source include directories')
     parser.add_argument('--build-dir', type=Path)
-    parser.add_argument('--jobs', type=int, default=4)
+    parser.add_argument('--jobs', type=int, default=os.environ.get('CMAKE_BUILD_PARALLEL_LEVEL') or 4,
+                        help='parallel compiler jobs; defaults to CMAKE_BUILD_PARALLEL_LEVEL or 4')
     args = parser.parse_args()
     toolchain = args.toolchain or (args.wasi_sdk / 'share/cmake/wasi-sdk-p1.cmake' if args.wasi_sdk else None)
     if toolchain is None or not toolchain.is_file():

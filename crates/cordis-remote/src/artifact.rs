@@ -61,8 +61,10 @@ impl ProcessArtifact {
                     return Err(invalid("interpreter entry must be a data file"));
                 }
                 let mut args = args.clone();
+                // Interpreter arguments cross an application boundary. Keep the
+                // verified snapshot, but use a normal Windows path when possible.
                 args.push(
-                    code.entry()
+                    dunce::simplified(&code.entry())
                         .to_str()
                         .ok_or_else(|| invalid("staging path must be UTF-8"))?
                         .into(),
