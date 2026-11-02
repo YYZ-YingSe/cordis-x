@@ -28,8 +28,11 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::new_in(&std::env::temp_dir())
+    }
+    fn new_in(parent: &Path) -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let dir = std::env::temp_dir().join(format!(
+        let dir = parent.join(format!(
             "cordis-abi-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
@@ -77,6 +80,15 @@ impl Drop for Fixture {
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
+
+#[test]
+fn relative_library_path_loads_the_selected_module() {
+    let files = Fixture::new_in(Path::new("."));
+    assert!(files.binary.is_relative());
+    let library = load(&files.binary).unwrap();
+    assert_eq!(library.contract().name.as_ref(), "example.calculator");
+}
+
 async fn bounded<T>(future: impl std::future::Future<Output = T>) -> T {
     tokio::time::timeout(Duration::from_secs(15), future)
         .await

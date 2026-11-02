@@ -109,6 +109,11 @@ pub(crate) unsafe fn open_library(path: &Path) -> Result<libloading::Library> {
         use libloading::os::windows::{
             LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, Library,
         };
+        // LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR requires a fully qualified path.
+        // Resolve host-selected relative paths without widening dependency lookup.
+        let path = path
+            .canonicalize()
+            .map_err(|e| Error::Load(e.to_string()))?;
         // SAFETY: delegated native-code contract; path is selected by the host.
         unsafe {
             Library::load_with_flags(
