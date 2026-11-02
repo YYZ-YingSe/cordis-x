@@ -39,6 +39,7 @@ name = "preparation"
 required-features = ["loader"]
 
 [dev-dependencies]
+dunce = "1.0.5"
 cordis-example-contracts.workspace = true
 cordis-test-contracts.workspace = true
 cordis-sdk-core.workspace = true

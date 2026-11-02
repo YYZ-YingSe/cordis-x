@@ -480,6 +480,7 @@ dependencies = [
  "cordis-sdk-runtime",
  "cordis-test-contracts",
  "cordis-wire",
+ "dunce",
  "futures-util",
  "getrandom 0.3.4",
  "prost",

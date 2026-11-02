@@ -14,10 +14,8 @@ use std::{
     },
 };
 fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .unwrap()
+    // CMake invokes cmd.exe on Windows, which rejects verbatim UNC working paths.
+    dunce::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 fn run(command: &mut Command) {
     let output = command.current_dir(root()).output().unwrap();
