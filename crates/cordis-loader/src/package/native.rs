@@ -226,6 +226,8 @@ pub(super) fn system_dependencies() -> BTreeMap<String, String> {
             "advapi32.dll",
             "ws2_32.dll",
             "bcrypt.dll",
+            // ProcessPrng, used by Rust's system random number generator.
+            "bcryptprimitives.dll",
             // Windows' debug/symbol APIs, also used by native dependency diagnostics.
             "dbghelp.dll",
             "ntdll.dll",

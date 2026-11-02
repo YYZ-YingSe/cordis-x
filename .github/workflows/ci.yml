@@ -96,23 +96,24 @@ jobs:
         run: cargo run -p cordis-abi --example abi_reactive --locked -- build/native/bin/libcordis_abi_reactive_example.dylib
       - if: runner.os == 'Windows'
         run: cargo run -p cordis-abi --example abi_reactive --locked -- build/native/bin/cordis_abi_reactive_example.dll
-      - run: python examples/package-native.py --build build/native --backend abi --output target/abi-packages
-      - run: cargo run -p cordis-abi --features loader --example abi_reload --locked -- target/abi-packages/v1/cordis-package.json target/abi-packages/v2/cordis-package.json
-      - run: cargo run -p cordis-abi --features loader --example abi_rolling --locked -- target/abi-packages/v1/cordis-package.json target/abi-packages/v2/cordis-package.json
+      # Installed packages need fresh roots; keep them outside the cached target tree.
+      - run: python examples/package-native.py --build build/native --backend abi --output "${{ runner.temp }}/cordis-packages/abi"
+      - run: cargo run -p cordis-abi --features loader --example abi_reload --locked -- "${{ runner.temp }}/cordis-packages/abi/v1/cordis-package.json" "${{ runner.temp }}/cordis-packages/abi/v2/cordis-package.json"
+      - run: cargo run -p cordis-abi --features loader --example abi_rolling --locked -- "${{ runner.temp }}/cordis-packages/abi/v1/cordis-package.json" "${{ runner.temp }}/cordis-packages/abi/v2/cordis-package.json"
       - if: runner.os != 'Windows'
         run: cargo run -p cordis-remote --example process --locked -- build/native/bin/cordis_calculator http
       - if: runner.os != 'Windows'
-        run: python examples/package-native.py --build build/native --backend process --output target/process-packages
+        run: python examples/package-native.py --build build/native --backend process --output "${{ runner.temp }}/cordis-packages/process"
       - if: runner.os != 'Windows'
-        run: cargo run -p cordis-remote --features loader --example process_reload --locked -- target/process-packages/v1/cordis-package.json target/process-packages/v2/cordis-package.json ipc
+        run: cargo run -p cordis-remote --features loader --example process_reload --locked -- "${{ runner.temp }}/cordis-packages/process/v1/cordis-package.json" "${{ runner.temp }}/cordis-packages/process/v2/cordis-package.json" ipc
       - if: runner.os != 'Windows'
-        run: cargo run -p cordis-remote --features loader --example process_rolling --locked -- target/process-packages/v1/cordis-package.json target/process-packages/v2/cordis-package.json http
-      - run: node sdk/typescript/examples/package-calculator.mjs target/ts-packages/v1/cordis-package.json v1
-      - run: node sdk/typescript/examples/package-calculator.mjs target/ts-packages/v2/cordis-package.json v2
+        run: cargo run -p cordis-remote --features loader --example process_rolling --locked -- "${{ runner.temp }}/cordis-packages/process/v1/cordis-package.json" "${{ runner.temp }}/cordis-packages/process/v2/cordis-package.json" http
+      - run: node sdk/typescript/examples/package-calculator.mjs "${{ runner.temp }}/cordis-packages/ts/v1/cordis-package.json" v1
+      - run: node sdk/typescript/examples/package-calculator.mjs "${{ runner.temp }}/cordis-packages/ts/v2/cordis-package.json" v2
       - shell: bash
-        run: cargo run -p cordis-remote --features loader --example process_reload --locked -- target/ts-packages/v1/cordis-package.json target/ts-packages/v2/cordis-package.json ipc "$(node -p process.execPath)"
+        run: cargo run -p cordis-remote --features loader --example process_reload --locked -- "${{ runner.temp }}/cordis-packages/ts/v1/cordis-package.json" "${{ runner.temp }}/cordis-packages/ts/v2/cordis-package.json" ipc "$(node -p process.execPath)"
       - shell: bash
-        run: cargo run -p cordis-remote --features loader --example process_rolling --locked -- target/ts-packages/v1/cordis-package.json target/ts-packages/v2/cordis-package.json http "$(node -p process.execPath)"
+        run: cargo run -p cordis-remote --features loader --example process_rolling --locked -- "${{ runner.temp }}/cordis-packages/ts/v1/cordis-package.json" "${{ runner.temp }}/cordis-packages/ts/v2/cordis-package.json" http "$(node -p process.execPath)"
       - if: runner.os != 'Windows'
         run: cargo run -p cordis-remote --example dependencies --locked -- http
       - if: runner.os != 'Windows'
@@ -155,7 +156,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/prepare
         with:
-          tools: rust python protoc cpp wasm
+          # Shared backend tests also start the TypeScript IPC/HTTP provider.
+          tools: rust python typescript protoc cpp wasm
       # Tests build separate guest packages with --offline. Compiling only the
       # host crate does not populate their registry dependencies on a cold runner.
       - name: Fetch dependencies for offline guest builds
