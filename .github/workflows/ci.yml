@@ -156,6 +156,10 @@ jobs:
       - uses: ./.github/actions/prepare
         with:
           tools: rust python protoc cpp wasm
+      # Tests build separate guest packages with --offline. Compiling only the
+      # host crate does not populate their registry dependencies on a cold runner.
+      - name: Fetch dependencies for offline guest builds
+        run: cargo fetch --locked
       # The cross-backend control test also exercises one native ABI fixture.
       - name: Prepare ABI control comparison fixture
         run: python tests/build.py --native --target cordis_workflows_abi

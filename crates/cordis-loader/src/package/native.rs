@@ -240,6 +240,8 @@ pub(super) fn system_dependencies() -> BTreeMap<String, String> {
             "vcruntime140_1d.dll",
             "msvcp140.dll",
             "msvcp140d.dll",
+            // Windows synchronization APIs, including WaitOnAddress.
+            "api-ms-win-core-synch-l1-2-0.dll",
             "api-ms-win-crt-runtime-l1-1-0.dll",
             "api-ms-win-crt-heap-l1-1-0.dll",
             "api-ms-win-crt-stdio-l1-1-0.dll",
