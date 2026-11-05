@@ -1,5 +1,6 @@
 use super::*;
 use crate::json;
+use cordis_host::Dependency;
 use cordis_runtime::Runtime;
 #[cfg(unix)]
 #[path = "../../tests/support/cpp_resources.rs"]
@@ -65,14 +66,18 @@ async fn store_recovery(cpp: bool) {
         true,
         Limits::default(),
         Capabilities {
-            dependencies: vec![Dependency::new_json(
-                &logger,
-                cordis_contract::Descriptor::new(
-                    cordis_portable_example::resources::generated::CounterLogClient::interface(),
-                )
-                .unwrap(),
-                |_, _, _, _| Box::pin(async { Ok(json!({})) }),
-            )],
+            bindings: cordis_host::HostBindings {
+                dependencies: vec![Dependency::json(
+                    &logger,
+                    cordis_contract::Descriptor::new(
+                        cordis_portable_example::resources::generated::CounterLogClient::interface(
+                        ),
+                    )
+                    .unwrap(),
+                    |_, _, _, _| Box::pin(async { Ok::<_, cordis_wasm::Error>(json!({})) }),
+                )],
+                ..Default::default()
+            },
             ..Default::default()
         },
     );
@@ -91,7 +96,10 @@ async fn store_recovery(cpp: bool) {
         false,
         Limits::default(),
         Capabilities {
-            dependencies: vec![Dependency::wasm(&counters)],
+            bindings: cordis_host::HostBindings {
+                dependencies: vec![Dependency::new(&counters).unwrap()],
+                ..Default::default()
+            },
             ..Default::default()
         },
     );

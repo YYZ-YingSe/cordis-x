@@ -271,7 +271,7 @@ async fn rust_rejects_mismatched_peer_responses_and_keeps_cleanup_unconfirmed() 
         let runtime = Runtime::new();
         let mut spec = python_spec();
         if fault == "unknown_field" {
-            spec.validation = cordis_contract::Validation::Audit;
+            spec.bindings.validation = cordis_contract::Validation::Audit;
         }
         spec.args.extend([
             format!(

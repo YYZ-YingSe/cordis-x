@@ -1,5 +1,6 @@
 //! Two Rust plugin processes reuse the same counter business as native Runtime.
-use cordis_remote::{Dependency, Endpoint, ProcessSpec, RemoteService, Value, json};
+use cordis_host::Dependency;
+use cordis_remote::{Endpoint, ProcessSpec, RemoteService, Value, json};
 use cordis_runtime::{Plugin, Runtime, Service};
 use std::sync::Arc;
 
@@ -44,14 +45,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime
         .install(
             spec.clone()
-                .requires(Dependency::new_json(
+                .requires(Dependency::json(
                     &logger,
                     cordis_remote::Descriptor::new(cordis_remote::Interface::value_dispatch(true))
                         .unwrap(),
                     |_, _, _, value| {
                         Box::pin(async move {
                             println!("cleanup: {value}");
-                            Ok(Value::Null)
+                            Ok::<_, cordis_remote::Error>(Value::Null)
                         })
                     },
                 ))
@@ -65,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     spec.args.push("--client".into());
     runtime
         .install(
-            spec.requires(Dependency::remote(&counters))
+            spec.requires(Dependency::new(&counters).unwrap())
                 .plugin("client", &client),
         )?
         .ready()

@@ -198,15 +198,20 @@ impl Fixture {
             artifact,
             limits,
             Capabilities {
-                validation,
-                dependencies: vec![Dependency::new_json(
-                    &logger,
-                    cordis_contract::Descriptor::new(cordis_contract::Interface::value_dispatch(
-                        true,
-                    ))
-                    .unwrap(),
-                    |control, ctx, method, args| Box::pin(control.invoke_json(ctx, method, args)),
-                )],
+                bindings: cordis_host::HostBindings {
+                    validation,
+                    dependencies: vec![Dependency::json(
+                        &logger,
+                        cordis_contract::Descriptor::new(
+                            cordis_contract::Interface::value_dispatch(true),
+                        )
+                        .unwrap(),
+                        |control, ctx, method, args| {
+                            Box::pin(control.invoke_json(ctx, method, args))
+                        },
+                    )],
+                    ..Default::default()
+                },
                 max_calls: 16,
                 max_requests: 16,
                 ..Default::default()
@@ -231,7 +236,10 @@ impl Fixture {
                     "wasm_resource_probe_client"
                 },
                 Capabilities {
-                    dependencies: vec![Dependency::wasm(&counters)],
+                    bindings: cordis_host::HostBindings {
+                        dependencies: vec![Dependency::new(&counters).unwrap()],
+                        ..Default::default()
+                    },
                     max_handles: 4,
                     ..Default::default()
                 },
@@ -520,7 +528,8 @@ async fn undeclared_factories_and_forged_resource_grants_are_rejected_without_fa
                 .await
                 .unwrap_err();
             assert!(
-                matches!(error, cordis_wasm::Error::Refused { code: actual, .. } if actual == code)
+                matches!(&error, cordis_wasm::Error::Refused { code: actual, .. } if actual == code),
+                "cpp={cpp}, command={command}, expected={code}, error={error:?}"
             );
         }
         let resource = f.acquire(json!({"probe_cleanup":true})).await.unwrap();

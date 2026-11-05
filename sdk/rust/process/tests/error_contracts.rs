@@ -1,4 +1,5 @@
-use cordis_remote::{Dependency, Endpoint, Error, ProcessSpec, RemoteService, Value, json};
+use cordis_host::Dependency;
+use cordis_remote::{Endpoint, Error, ProcessSpec, RemoteService, Value, json};
 use cordis_runtime::{self as rt, Plugin, Runtime, Service};
 use cordis_sdk_core::{Descriptor, Plugin as _};
 use std::{
@@ -52,7 +53,7 @@ async fn rig(endpoint: Endpoint) -> (Runtime, rt::PluginHandle, rt::ServiceHandl
         .ready()
         .await
         .unwrap();
-    let dependency = Dependency::new_json(
+    let dependency = Dependency::json(
         &observer,
         Descriptor::new(probe::dependency_interface()).unwrap(),
         |_, _, method, value| {

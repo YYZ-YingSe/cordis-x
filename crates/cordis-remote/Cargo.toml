@@ -11,6 +11,7 @@ license.workspace = true
 loader = ["dep:cordis-loader", "dep:dunce"]
 
 [dependencies]
+cordis-host.workspace = true
 cordis-wire.workspace = true
 prost.workspace = true
 cordis-runtime.workspace = true

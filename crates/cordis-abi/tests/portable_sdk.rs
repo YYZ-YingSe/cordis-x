@@ -173,37 +173,40 @@ async fn cpp_service_runs_through_async_abi() {
     .unwrap();
     let library = library
         .with_context(Capabilities {
-            dependencies: vec![cordis_abi::Dependency::new_json(
-                &logger(),
-                cordis_contract::Descriptor::new(
-                    cordis_contract::portable::decode(
-                        &cordis_example_contracts::resources::portable::PORTABLELOG
-                            .parse::<Value>()
-                            .unwrap(),
+            bindings: cordis_host::HostBindings {
+                dependencies: vec![cordis_host::Dependency::json(
+                    &logger(),
+                    cordis_contract::Descriptor::new(
+                        cordis_contract::portable::decode(
+                            &cordis_example_contracts::resources::portable::PORTABLELOG
+                                .parse::<Value>()
+                                .unwrap(),
+                        )
+                        .unwrap()
+                        .interface()
+                        .clone(),
                     )
-                    .unwrap()
-                    .interface()
-                    .clone(),
-                )
-                .unwrap(),
-                |logs, _, _, args| {
-                    Box::pin(async move {
-                        logs.lock().unwrap().push(args.clone());
-                        Ok(args)
-                    })
-                },
-            )],
-            events: vec![cordis_abi::EventBinding::new(
-                "message",
-                &Event::new("example.message", "1"),
-            )],
-            middleware: vec![cordis_abi::MiddlewareBinding::new(
-                "chain",
-                &Middleware::new("example.chain", "1"),
-            )],
-            factories: vec![cordis_abi::FactoryBinding::new("worker", |_| {
-                Ok(Plugin::new("child", |_| async { Ok(()) }))
-            })],
+                    .unwrap(),
+                    |logs, _, _, args| {
+                        Box::pin(async move {
+                            logs.lock().unwrap().push(args.clone());
+                            Ok::<_, cordis_abi::Error>(args)
+                        })
+                    },
+                )],
+                events: vec![cordis_host::EventBinding::new(
+                    "message",
+                    &Event::new("example.message", "1"),
+                )],
+                middleware: vec![cordis_host::MiddlewareBinding::new(
+                    "chain",
+                    &Middleware::new("example.chain", "1"),
+                )],
+                factories: vec![cordis_host::FactoryBinding::new("worker", |_| {
+                    Ok(Plugin::new("child", |_| async { Ok(()) }))
+                })],
+                ..Default::default()
+            },
             ..Default::default()
         })
         .unwrap();
@@ -234,7 +237,7 @@ async fn cpp_service_runs_through_ipc_http() {
     for endpoint in [Endpoint::Ipc, Endpoint::Http] {
         {
             let mut spec = ProcessSpec::new(build.join("cordis_portable_process")).requires(
-                cordis_remote::Dependency::new_json(
+                cordis_host::Dependency::json(
                     &logger(),
                     cordis_remote::Descriptor::new(
                         cordis_contract::portable::decode(
@@ -250,21 +253,21 @@ async fn cpp_service_runs_through_ipc_http() {
                     |logs, _, _, args| {
                         Box::pin(async move {
                             logs.lock().unwrap().push(args.clone());
-                            Ok(args)
+                            Ok::<_, cordis_abi::Error>(args)
                         })
                     },
                 ),
             );
             spec = spec
-                .event(cordis_remote::EventBinding::new(
+                .event(cordis_host::EventBinding::new(
                     "message",
                     &Event::new("example.message", "1"),
                 ))
-                .middleware(cordis_remote::MiddlewareBinding::new(
+                .middleware(cordis_host::MiddlewareBinding::new(
                     "chain",
                     &Middleware::new("example.chain", "1"),
                 ))
-                .factory(cordis_remote::FactoryBinding::new("worker", |_| {
+                .factory(cordis_host::FactoryBinding::new("worker", |_| {
                     Ok(Plugin::new("child", |_| async { Ok(()) }))
                 }));
             spec.endpoint = endpoint;

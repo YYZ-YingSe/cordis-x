@@ -1,6 +1,7 @@
+use cordis_host::Dependency;
 #[path = "artifacts.rs"]
 mod artifacts;
-use cordis_abi::{AbiService, Capabilities, Dependency, Error as AbiError, Library, Value, json};
+use cordis_abi::{AbiService, Capabilities, Error as AbiError, Library, Value, json};
 use cordis_sdk::*;
 use std::{
     path::PathBuf,
@@ -106,8 +107,8 @@ fn logger_service() -> Service<Logger> {
     Service::new("example.logger", "1")
 }
 fn caps() -> Capabilities {
-    Capabilities {
-        dependencies: vec![Dependency::new_json(
+    Capabilities {bindings: cordis_host::HostBindings {
+        dependencies: vec![Dependency::json(
             &logger_service(), cordis_contract::Descriptor::new(cordis_contract::Interface::value_dispatch(true)).unwrap(),
             |logger, ctx, method, args| {
                 Box::pin(async move {
@@ -132,7 +133,7 @@ fn caps() -> Capabilities {
                     Ok(args)
                 })
             },
-        )],
+        )], ..Default::default() },
         ..Default::default()
     }
 }

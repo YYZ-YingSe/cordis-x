@@ -1,7 +1,9 @@
+use cordis_host::Dependency;
+use cordis_host::HostBindings;
 use cordis_portable_example::resources::{CounterClient, CounterPlugin};
 use cordis_runtime::{Plugin, Runtime, Service};
 use cordis_sdk_core::{Descriptor, Plugin as _, json};
-use cordis_sdk_runtime::{Capabilities, Dependency, Service as PortableService};
+use cordis_sdk_runtime::Service as PortableService;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -22,8 +24,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "counters",
         &counters,
         json!({}),
-        Capabilities {
-            dependencies: vec![Dependency::new(
+        HostBindings {
+            dependencies: vec![Dependency::messages(
                 &logger,
                 Descriptor::new(
                     cordis_portable_example::resources::generated::CounterLogClient::interface(),
@@ -43,8 +45,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "client",
         &client,
         json!({}),
-        Capabilities {
-            dependencies: vec![Dependency::portable(&counters)?],
+        HostBindings {
+            dependencies: vec![Dependency::new(&counters)?],
             ..Default::default()
         },
     )?)?;

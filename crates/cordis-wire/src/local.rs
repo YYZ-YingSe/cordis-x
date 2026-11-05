@@ -11,12 +11,16 @@ use std::ops::Deref;
 pub struct Envelope {
     payload: Payload,
     checked: Option<MessageContract>,
+    native: Option<cordis_sdk_core::Message>,
+    verified: Option<cordis_sdk_core::Message>,
 }
 impl From<Payload> for Envelope {
     fn from(payload: Payload) -> Self {
         Self {
             payload,
             checked: None,
+            native: None,
+            verified: None,
         }
     }
 }
@@ -32,6 +36,32 @@ impl Deref for Envelope {
     }
 }
 impl Envelope {
+    /// Encode a native snapshot while retaining its unforgeable local checks.
+    /// The snapshot is private and cannot be replaced independently of the body.
+    pub fn from_message(message: cordis_sdk_core::Message) -> Result<Self, String> {
+        let payload = Payload::message(message.encode(crate::MAX_MESSAGE)?);
+        Ok(Self {
+            payload,
+            checked: None,
+            native: Some(message),
+            verified: None,
+        })
+    }
+
+    pub fn into_message(self, shape: &MessageContract) -> Result<cordis_sdk_core::Message, String> {
+        if let Some(native) = self.native {
+            native.bind(shape)
+        } else if let Some(verified) = self.verified
+            && verified.contract().same_message(shape)?
+        {
+            verified.bind(shape)
+        } else {
+            cordis_sdk_core::Message::from_bytes(
+                shape.clone(),
+                self.payload.one().map_err(|e| e.to_string())?,
+            )
+        }
+    }
     pub fn with_control(mut self, control: Value) -> Self {
         self.payload.control = control;
         self
@@ -40,6 +70,9 @@ impl Envelope {
         self.payload
     }
     pub fn check(&mut self, shape: &MessageContract) -> Result<(), String> {
+        if let Some(native) = &self.native {
+            return native.check(shape);
+        }
         // Contract still enforces cardinality and the physical byte limit, but
         // neither requests a schema plan nor manufactures field evidence.
         if !shape.validation().checks_fields() {
@@ -51,7 +84,15 @@ impl Envelope {
         {
             return Ok(());
         }
-        shape.check_binary(&self.payload.one().map_err(|e| e.to_string())?)?;
+        let message = match &self.verified {
+            Some(value) if value.contract().same_message(shape)? => value.clone(),
+            _ => cordis_sdk_core::Message::from_bytes(
+                shape.clone(),
+                self.payload.one().map_err(|e| e.to_string())?,
+            )?,
+        };
+        message.check(shape)?;
+        self.verified = Some(message);
         // All current checks use the same fixed logical budget. A configurable
         // budget must become part of this identity before receipts can reuse it.
         self.checked = Some(shape.clone());
@@ -64,6 +105,76 @@ mod tests {
     use super::*;
     use cordis_contract::Validation;
     use prost::Message;
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Snapshot {
+        #[prost(string, tag = "1")]
+        value: String,
+    }
+    static WALKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    impl cordis_sdk_core::typed::Walk for Snapshot {
+        fn walk(
+            &self,
+            depth: usize,
+            budget: &mut cordis_sdk_core::typed::Budget,
+        ) -> Result<(), String> {
+            WALKS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.value.walk(depth, budget)
+        }
+    }
+    impl cordis_sdk_core::typed::Codec for Snapshot {
+        fn contract() -> &'static MessageContract {
+            static SHAPE: std::sync::OnceLock<MessageContract> = std::sync::OnceLock::new();
+            SHAPE.get_or_init(|| MessageContract::standard("google.protobuf.StringValue"))
+        }
+    }
+    #[test]
+    fn native_receipt_survives_host_forwarding_but_not_a_physical_payload() {
+        use cordis_sdk_core::typed::Codec;
+        WALKS.store(0, std::sync::atomic::Ordering::SeqCst);
+        let shape = Snapshot::contract().with_validation(Validation::Checked);
+        let message = cordis_sdk_core::Message::new(Snapshot {
+            value: "snapshot".into(),
+        })
+        .unwrap()
+        .bind(&shape)
+        .unwrap();
+        let mut envelope = Envelope::from_message(message).unwrap();
+        envelope.check(&shape).unwrap();
+        let typed = envelope
+            .clone()
+            .into_message(&shape)
+            .unwrap()
+            .into_typed::<Snapshot>()
+            .unwrap();
+        assert_eq!(typed.value, "snapshot");
+        assert_eq!(
+            WALKS.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "unchanged native snapshot is checked once"
+        );
+        let mut payload = envelope.into_wire();
+        payload.messages[0] = vec![10, 1, 255].into();
+        assert!(
+            Envelope::from(payload).check(&shape).is_err(),
+            "wire data never inherits the host receipt"
+        );
+    }
+    #[test]
+    fn opaque_receipt_strength_is_preserved_when_entering_the_sdk() {
+        let shape = MessageContract::standard("google.protobuf.StringValue");
+        let mut value = Envelope::from(Payload::message(vec![10, 1, b'x', 120, 1].into()));
+        value
+            .check(&shape.with_validation(Validation::Checked))
+            .unwrap();
+        let message = value
+            .into_message(&shape.with_validation(Validation::Audit))
+            .unwrap();
+        assert!(
+            message.validate(message.validation()).is_err(),
+            "checked evidence cannot stand in for audit"
+        );
+    }
 
     #[test]
     fn same_name_different_schema_does_not_share_evidence() {

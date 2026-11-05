@@ -1,5 +1,6 @@
+use cordis_host::Dependency;
 use cordis_portable_example::lifecycle::{HeartbeatsClient, LifecycleLogClient};
-use cordis_remote::{Dependency, Endpoint, ProcessSpec, RemoteService, Value, json};
+use cordis_remote::{Endpoint, ProcessSpec, RemoteService, Value, json};
 use cordis_sdk::*;
 use std::{
     path::PathBuf,
@@ -75,13 +76,13 @@ async fn main() -> Result<()> {
         Some("http") => Endpoint::Http,
         _ => return Err(Error::Message("expected ipc or http".into())),
     };
-    spec = spec.requires(Dependency::new_json(
+    spec = spec.requires(Dependency::json(
         &logger(),
         cordis_remote::Descriptor::new(LifecycleLogClient::interface()).unwrap(),
         |_, ctx, _, args| {
             Box::pin(async move {
                 println!("owner {}: {args}", ctx.owner().fiber.0);
-                Ok(json!({}))
+                Ok::<_, cordis_remote::Error>(json!({}))
             })
         },
     ));

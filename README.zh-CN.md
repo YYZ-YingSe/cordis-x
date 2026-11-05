@@ -80,6 +80,31 @@ cargo run --locked -p cordis-sdk --example lifecycle
 cargo run --locked -p cordis-sdk --example broker
 ```
 
+## 统一宿主绑定
+
+`cordis-host` 通过真实 Runtime 连接 portable 服务。选定提供方后统一使用
+`Dependency::new(&service)?`，提供方可以是 native Rust、Process、C ABI 或 managed
+Wasm。消费方接收同一份 `HostBindings`，其中包含依赖、事件、中间件、授权工厂和
+发布值；命令、WASI imports、容量等执行选项仍由各自适配器负责。
+
+```rust,ignore
+use cordis_host::{Dependency, HostBindings};
+
+// `provider` is a declared Service<T> with its interface descriptor.
+let bindings = HostBindings {
+    dependencies: vec![Dependency::new(&provider)?],
+    ..Default::default()
+};
+let mut process = cordis_remote::ProcessSpec::new(executable);
+process.bindings = bindings;
+```
+
+资源能力继续保留原 Runtime owner 和清理结果。本地原生消息保留类型对象；编码和私有
+句柄映射由执行边界负责。自定义提供端实现共同 `Provider` 合同，新增适配器无需为其余
+每个后端分别写桥。宿主自有 `Service<T>` 可通过 `Dependency::messages`、`bytes` 或
+`json` 显式接入。[真实后端矩阵](crates/cordis-wasm/tests/unified_host.rs)覆盖异构资源、
+控制通道和子插件工厂。
+
 ## 执行后端
 
 宿主运行时使用 Rust。仓库提供以下插件 SDK 路径：

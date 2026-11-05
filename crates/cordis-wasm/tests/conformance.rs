@@ -501,3 +501,76 @@ async fn generated_calculator_preserves_full_i64_and_overflow_leaves_counter_unc
     counter.dispose().await.unwrap();
     app.rt.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn basic_world_exports_resources_through_the_shared_provider() {
+    use cordis_host::{Body, Dependency};
+    use cordis_sdk_core::Message;
+    let runtime = Runtime::new();
+    let component = support::component();
+    let descriptor = component.descriptor().clone();
+    let service =
+        Service::<WasmService>::new("example.calculator", "1").with_descriptor(descriptor.clone());
+    runtime
+        .install(component.plugin("basic", &service, json!({})).unwrap())
+        .unwrap()
+        .ready()
+        .await
+        .unwrap();
+    let endpoint = Dependency::new(&service).unwrap();
+    let saved = Arc::new(Mutex::new(None));
+    let target = saved.clone();
+    let owner = runtime
+        .install(endpoint.declare(Plugin::new("shared-owner", move |ctx| {
+            *target.lock().unwrap() = Some(ctx.snapshot());
+            async { Ok(()) }
+        })))
+        .unwrap();
+    owner.ready().await.unwrap();
+    let ctx = saved.lock().unwrap().take().unwrap();
+    let factory = cordis_contract::portable::resource(&descriptor, "counter").unwrap();
+    let resource = endpoint
+        .acquire(
+            ctx.clone(),
+            "counter".into(),
+            Message::from_json(factory.args.clone(), &json!({"initial":40}))
+                .unwrap()
+                .into(),
+        )
+        .await
+        .unwrap();
+    let signature = cordis_contract::portable::method(&factory.methods, "add").unwrap();
+    let input = Message::from_json(signature.args.clone(), &json!(2)).unwrap();
+    let output = resource
+        .invoke("add", Body::from(input))
+        .await
+        .unwrap()
+        .into_message(&signature.result)
+        .unwrap()
+        .to_json()
+        .unwrap();
+    assert_eq!(output, json!("42"));
+    let weak = resource.downgrade();
+    resource.dispose().await.unwrap();
+    drop(resource);
+    weak.dispose().await.unwrap();
+    let stats =
+        cordis_contract::portable::method(&descriptor.interface().methods, "stats").unwrap();
+    let value = endpoint
+        .invoke(
+            ctx,
+            "stats".into(),
+            Message::from_json(stats.args.clone(), &json!({}))
+                .unwrap()
+                .into(),
+        )
+        .await
+        .unwrap()
+        .into_message(&stats.result)
+        .unwrap()
+        .to_json()
+        .unwrap();
+    assert_eq!(value["releases"], "1");
+    runtime.shutdown().await.unwrap();
+    weak.dispose().await.unwrap();
+}

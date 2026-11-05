@@ -150,7 +150,7 @@ fn native_binding_rejects_dependency_shape_drift_before_starting_business() {
     let adder = rt::Service::<()>::new("example.adder", "1");
     let counter = rt::Service::<adapter::Service>::new("example.counter", "1")
         .with_descriptor(core::Descriptor::new(CounterClient::interface()).unwrap());
-    let drift = adapter::Dependency::new(
+    let drift = cordis_host::Dependency::messages(
         &adder,
         core::Descriptor::new(core::Interface::value_dispatch(false)).unwrap(),
         |_, _, _, _| Box::pin(async { panic!("drifted dependency must not run") }),
@@ -159,15 +159,18 @@ fn native_binding_rejects_dependency_shape_drift_before_starting_business() {
         "consumer",
         &consumer,
         core::json!({}),
-        adapter::Capabilities {
-            dependencies: vec![drift, adapter::Dependency::portable(&counter).unwrap()],
+        cordis_host::HostBindings {
+            dependencies: vec![drift, cordis_host::Dependency::new(&counter).unwrap()],
             ..Default::default()
         },
     );
     assert!(
         matches!(result,Err(core::Failure::Refused(e)) if e.code=="contract_mismatch" && e.message.contains("example.adder"))
     );
-    assert!(adapter::Dependency::portable(&rt::Service::new("untyped", "1")).is_err());
+    assert!(
+        cordis_host::Dependency::new(&rt::Service::<adapter::Service>::new("untyped", "1"))
+            .is_err()
+    );
 }
 #[tokio::test]
 async fn generated_clients_and_resources_run_on_the_actual_native_runtime() {
@@ -212,10 +215,10 @@ async fn generated_clients_and_resources_run_on_the_actual_native_runtime() {
                 "consumer",
                 &consumer,
                 core::json!({}),
-                adapter::Capabilities {
+                cordis_host::HostBindings {
                     dependencies: vec![
-                        adapter::Dependency::portable(&adder).unwrap(),
-                        adapter::Dependency::portable(&counter).unwrap(),
+                        cordis_host::Dependency::new(&adder).unwrap(),
+                        cordis_host::Dependency::new(&counter).unwrap(),
                     ],
                     ..Default::default()
                 },

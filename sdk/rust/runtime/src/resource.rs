@@ -8,7 +8,8 @@ mod tests;
 #[derive(Clone)]
 pub struct Resource {
     resource: rt::Resource<Ticket>,
-    contract: cordis_contract::Resource,
+    pub(crate) contract: cordis_contract::Resource,
+    released: Arc<std::sync::Mutex<Option<Result<()>>>>,
 }
 struct Ticket {
     client: Client,
@@ -20,7 +21,8 @@ impl Service {
         let contract = cordis_contract::portable::resource(&self.descriptor, kind)
             .map_err(|e| refused("unknown_resource_kind", e))?
             .clone();
-        args.check(&contract.args)
+        let args = args
+            .bind(&contract.args)
             .map_err(|e| refused("invalid_argument", e))?;
         let service = self.client.clone();
         let kind = kind.to_owned();
@@ -51,6 +53,8 @@ async fn acquire(
     args: Payload,
     contract: cordis_contract::Resource,
 ) -> Result<Resource> {
+    let released = Arc::new(std::sync::Mutex::new(None));
+    let cleanup_result = released.clone();
     let callback = ctx.snapshot();
     let errors = contract.errors.clone();
     let (sender, outcome) = tokio::sync::oneshot::channel();
@@ -67,8 +71,8 @@ async fn acquire(
                 // responsibility or permit the instance to close early.
                 Ok(Ticket { client, acquired })
             },
-            |ticket, cleanup| async move {
-                match &ticket.acquired {
+            move |ticket, cleanup| async move {
+                let result = match &ticket.acquired {
                     Ok(id) => ticket
                         .client
                         .release(cleanup, *id)
@@ -76,7 +80,9 @@ async fn acquire(
                         .map_err(native_error),
                     Err(Failure::Rejected(_) | Failure::Refused(_)) => Ok(()),
                     Err(failure @ Failure::Unknown(_)) => Err(native_error(failure.clone())),
-                }
+                };
+                *cleanup_result.lock().unwrap() = Some(result.clone().map_err(runtime_failure));
+                result
             },
         )
         .await
@@ -87,14 +93,19 @@ async fn acquire(
         }
         return Err(failure);
     }
-    Ok(Resource { resource, contract })
+    Ok(Resource {
+        resource,
+        contract,
+        released,
+    })
 }
 
 impl Resource {
     pub async fn invoke(&self, method: &str, args: Payload) -> Result<Payload> {
         let signature = cordis_contract::portable::method(&self.contract.methods, method)
             .map_err(|e| refused("unknown_method", e))?;
-        args.check(&signature.args)
+        let args = args
+            .bind(&signature.args)
             .map_err(|e| refused("invalid_argument", e))?;
         let signature = signature.clone();
         let method = method.to_owned();
@@ -134,5 +145,45 @@ impl Resource {
     }
     pub fn snapshot(&self) -> rt::EffectSnapshot {
         self.resource.snapshot()
+    }
+}
+
+/// Retains only cleanup evidence and a weak capability owned by Runtime.
+#[derive(Clone)]
+pub(crate) struct WeakResource {
+    resource: rt::WeakResource<Ticket>,
+    contract: cordis_contract::Resource,
+    released: Arc<std::sync::Mutex<Option<Result<()>>>>,
+}
+impl Resource {
+    pub(crate) fn downgrade(&self) -> WeakResource {
+        WeakResource {
+            resource: self.resource.downgrade(),
+            contract: self.contract.clone(),
+            released: self.released.clone(),
+        }
+    }
+}
+impl WeakResource {
+    pub(crate) fn upgrade(&self) -> Result<Resource> {
+        Ok(Resource {
+            resource: self
+                .resource
+                .upgrade()
+                .ok_or_else(|| refused("closed", "resource retired"))?,
+            contract: self.contract.clone(),
+            released: self.released.clone(),
+        })
+    }
+    pub(crate) async fn dispose(&self) -> Result<()> {
+        if let Some(effect) = self.resource.effect() {
+            effect.dispose().await.map_err(runtime_failure)
+        } else {
+            self.released
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_else(|| Err(refused("closed", "resource retired")))
+        }
     }
 }

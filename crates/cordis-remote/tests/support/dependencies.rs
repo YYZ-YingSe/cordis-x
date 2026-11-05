@@ -1,5 +1,6 @@
 use super::*;
-use cordis_remote::{Dependency, Value};
+use cordis_host::Dependency;
+use cordis_remote::Value;
 use std::sync::atomic::AtomicBool;
 
 struct NativeLog {
@@ -172,7 +173,7 @@ fn fault_spec(timeout: Duration) -> ProcessSpec {
         .unwrap()
         .errors
         .insert("expected".into());
-    let dependency = Dependency::new_json(
+    let dependency = Dependency::json(
         &logger(),
         cordis_remote::Descriptor::new(interface).unwrap(),
         |log, ctx, method, args| {

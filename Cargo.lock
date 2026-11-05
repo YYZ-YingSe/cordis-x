@@ -209,6 +209,7 @@ version = "0.1.0"
 dependencies = [
  "cordis-contract",
  "cordis-example-contracts",
+ "cordis-host",
  "cordis-kernel",
  "cordis-loader",
  "cordis-portable-example",
@@ -232,6 +233,7 @@ dependencies = [
  "base64 0.22.1",
  "cordis-contract",
  "cordis-example-contracts",
+ "cordis-host",
  "cordis-portable-example",
  "cordis-remote",
  "cordis-sdk",
@@ -302,6 +304,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cordis-host"
+version = "0.1.0"
+dependencies = [
+ "cordis-contract",
+ "cordis-runtime",
+ "cordis-sdk-core",
+ "cordis-wire",
+ "tokio",
+]
+
+[[package]]
 name = "cordis-kernel"
 version = "0.1.0"
 dependencies = [
@@ -351,6 +364,7 @@ version = "0.1.0"
 dependencies = [
  "cordis-contract",
  "cordis-example-contracts",
+ "cordis-host",
  "cordis-kernel",
  "cordis-loader",
  "cordis-portable-example",
@@ -396,6 +410,7 @@ dependencies = [
  "bindgen",
  "cordis-abi",
  "cordis-example-contracts",
+ "cordis-host",
  "cordis-kernel",
  "cordis-loader",
  "cordis-portable-example",
@@ -424,6 +439,7 @@ name = "cordis-sdk-process"
 version = "0.1.0"
 dependencies = [
  "cordis-example-contracts",
+ "cordis-host",
  "cordis-kernel",
  "cordis-portable-example",
  "cordis-remote",
@@ -446,6 +462,7 @@ version = "0.1.0"
 dependencies = [
  "cordis-contract",
  "cordis-example-contracts",
+ "cordis-host",
  "cordis-kernel",
  "cordis-portable-example",
  "cordis-runtime",
@@ -470,6 +487,7 @@ dependencies = [
  "cordis-component",
  "cordis-contract",
  "cordis-example-contracts",
+ "cordis-host",
  "cordis-kernel",
  "cordis-loader",
  "cordis-portable-example",
@@ -525,6 +543,7 @@ name = "cordis-wire"
 version = "0.1.0"
 dependencies = [
  "cordis-contract",
+ "cordis-sdk-core",
  "prost",
  "prost-build",
  "prost-reflect",

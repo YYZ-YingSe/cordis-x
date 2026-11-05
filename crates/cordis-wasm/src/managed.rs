@@ -1,5 +1,6 @@
 //! Context adapter with native Component Model asynchronous execution.
 mod execution;
+mod host;
 #[cfg(test)]
 #[path = "managed/resource_tests.rs"]
 mod resource_tests;
@@ -12,9 +13,7 @@ use crate::{
 };
 use cordis_component::{Bytes, Payload};
 use cordis_contract::{ContractId, Descriptor, portable as contract};
-use cordis_runtime::{
-    BoxFuture, Broker, BrokerRegistration, Context, Event, Middleware, Plugin, Service,
-};
+use cordis_runtime::{BoxFuture, Broker, BrokerRegistration, Context, Plugin, Service};
 use cordis_wire::local::Envelope;
 pub use resources::ContextResource;
 use std::{
@@ -77,135 +76,13 @@ fn failure(e: Error) -> wit::Failure {
         }),
     }
 }
-type Invoke =
-    dyn Fn(Context, String, Envelope) -> BoxFuture<'static, Result<Envelope>> + Send + Sync;
-type Acquire =
-    dyn Fn(Context, String, Envelope) -> BoxFuture<'static, Result<ContextResource>> + Send + Sync;
-#[derive(Clone)]
-pub struct Dependency {
-    declaration: Service<()>,
-    descriptor: Option<Descriptor>,
-    invoke: Arc<Invoke>,
-    acquire: Option<Arc<Acquire>>,
-}
-impl Dependency {
-    pub fn new<T, F>(service: &Service<T>, descriptor: Descriptor, invoke: F) -> Self
-    where
-        T: ?Sized + Send + Sync + 'static,
-        F: for<'a> Fn(&'a T, Context, String, Bytes) -> BoxFuture<'a, Result<Bytes>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let invoke = Arc::new(invoke);
-        Self::bind(
-            service,
-            Some(descriptor),
-            move |service, ctx, method, args| {
-                let invoke = invoke.clone();
-                Box::pin(async move {
-                    let bytes = invoke(
-                        service,
-                        ctx,
-                        method,
-                        args.one().map_err(|e| Error::InvalidInput(e.to_string()))?,
-                    )
-                    .await?;
-                    Ok(Payload::message(bytes).into())
-                })
-            },
-        )
-    }
-    /// Explicit JSON gateway for a host application whose service API is JSON.
-    pub fn new_json<T, F>(
-        service: &Service<T>,
-        descriptor: cordis_contract::Descriptor,
-        invoke: F,
-    ) -> Self
-    where
-        T: ?Sized + Send + Sync + 'static,
-        F: for<'a> Fn(&'a T, Context, String, Value) -> BoxFuture<'a, Result<Value>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let schema = descriptor.clone();
-        let invoke = Arc::new(invoke);
-        Self::new(service, descriptor, move |value, ctx, method, args| {
-            let schema = schema.clone();
-            let invoke = invoke.clone();
-            Box::pin(async move {
-                let signature =
-                    cordis_contract::portable::method(&schema.interface().methods, &method)
-                        .map_err(Error::InvalidInput)?;
-                let input = crate::body_json(&signature.args, &args)
-                    .map_err(|e| Error::InvalidInput(e.to_string()))?;
-                let result = invoke(value, ctx, method, input).await?;
-                crate::json_body(&signature.result, &result)
-                    .map_err(|e| Error::Unknown(e.to_string()))
-            })
-        })
-    }
-    fn bind<T, F>(service: &Service<T>, descriptor: Option<Descriptor>, invoke: F) -> Self
-    where
-        T: ?Sized + Send + Sync + 'static,
-        F: for<'a> Fn(&'a T, Context, String, Envelope) -> BoxFuture<'a, Result<Envelope>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let declaration = Service::new(
-            service.contract().name.clone(),
-            service.contract().revision.clone(),
-        );
-        let service = service.clone();
-        let invoke = Arc::new(invoke);
-        Self {
-            declaration,
-            descriptor,
-            acquire: None,
-            invoke: Arc::new(move |ctx, method, args| {
-                let service = service.clone();
-                let invoke = invoke.clone();
-                Box::pin(async move {
-                    ctx.dependency(&service)?
-                        .call(move |s, c| {
-                            Box::pin(async move { Ok(invoke(s, c, method, args).await) })
-                        })
-                        .await?
-                })
-            }),
-        }
-    }
-    pub fn wasm(service: &Service<ContextService>) -> Self {
-        let mut binding = Self::bind(service, service.descriptor().cloned(), |s, c, m, a| {
-            Box::pin(async move { s.invoke_envelope(&c, &m, a).await })
-        });
-        let service = service.clone();
-        binding.acquire = Some(Arc::new(move |ctx, kind, args| {
-            let service = service.clone();
-            Box::pin(async move {
-                ctx.dependency(&service)?
-                    .call(move |s, ctx| {
-                        Box::pin(async move { Ok(s.acquire_envelope(&ctx, &kind, args).await) })
-                    })
-                    .await?
-            })
-        }));
-        binding
-    }
-}
+
 /// Explicit bindings and bounded Context work. WASI is disabled unless provided.
 #[derive(Clone)]
 pub struct Capabilities {
-    pub validation: cordis_contract::Validation,
-    pub dependencies: Vec<Dependency>,
-    pub events: BTreeMap<String, Event<Bytes, Bytes>>,
-    pub middleware: BTreeMap<String, Middleware<Bytes, Bytes>>,
+    pub bindings: cordis_host::HostBindings,
     /// Named host factories are the only plugins a guest may install.
-    pub factories: BTreeMap<String, Arc<dyn Fn(Bytes) -> Result<Plugin> + Send + Sync>>,
     /// Explicit value services the guest is allowed to publish during initialization.
-    pub provisions: BTreeMap<String, Service<Bytes>>,
     pub wasi: Option<Wasi>,
     pub max_handles: usize,
     pub max_requests: usize,
@@ -215,12 +92,7 @@ pub struct Capabilities {
 impl Default for Capabilities {
     fn default() -> Self {
         Self {
-            validation: cordis_contract::Validation::Checked,
-            dependencies: Vec::new(),
-            events: BTreeMap::new(),
-            middleware: BTreeMap::new(),
-            factories: BTreeMap::new(),
-            provisions: BTreeMap::new(),
+            bindings: cordis_host::HostBindings::default(),
             wasi: None,
             max_handles: 1024,
             max_requests: 256,
@@ -263,11 +135,14 @@ impl ContextComponent {
         limits: Limits,
         mut capabilities: Capabilities,
     ) -> Result<Self> {
-        for dependency in &mut capabilities.dependencies {
-            dependency.descriptor = dependency
-                .descriptor
-                .take()
-                .map(|d| d.with_validation(capabilities.validation));
+        capabilities
+            .bindings
+            .validate()
+            .map_err(|e| Error::Contract(e.to_string()))?;
+        for dependency in &mut capabilities.bindings.dependencies {
+            *dependency = dependency
+                .clone()
+                .with_validation(capabilities.bindings.validation);
         }
         if bytes.len() > limits.artifact_bytes
             || limits.pending_calls == 0
@@ -331,7 +206,7 @@ impl ContextComponent {
                     .map_err(unknown)?,
                 )
                 .map_err(Error::Contract)?
-                .with_validation(module.capabilities.validation),
+                .with_validation(module.capabilities.bindings.validation),
             );
             module.contract = ContractId::new(manifest.provides.name, manifest.provides.revision);
             for d in manifest.requires {
@@ -357,24 +232,20 @@ impl ContextComponent {
                 }
             }
             let mut configured = BTreeMap::new();
-            for d in &module.capabilities.dependencies {
-                let name = d.declaration.contract().name.as_ref();
+            for d in &module.capabilities.bindings.dependencies {
+                let name = d.declaration().contract().name.as_ref();
                 if let Some((_, required)) = module.requires.get(name) {
-                    let actual = d.descriptor.as_ref().ok_or_else(|| {
-                        Error::Contract(format!("dependencies.{name}: descriptor required"))
-                    })?;
+                    let actual = d.descriptor();
                     required
                         .compare(actual)
                         .map_err(|e| Error::Contract(format!("dependencies.{name}: {e}")))?;
                 }
                 if configured
                     .insert(
-                        d.declaration.contract().name.to_string(),
+                        d.declaration().contract().name.to_string(),
                         (
-                            d.declaration.contract().revision.to_string(),
-                            d.descriptor.clone().ok_or_else(|| {
-                                Error::Contract("dependency descriptor required".into())
-                            })?,
+                            d.declaration().contract().revision.to_string(),
+                            d.descriptor().clone(),
                         ),
                     )
                     .is_some()
@@ -389,7 +260,13 @@ impl ContextComponent {
             }
             let mut provisions = std::collections::BTreeSet::new();
             provisions.insert(module.contract.name.clone());
-            for service in module.capabilities.provisions.values() {
+            for service in module
+                .capabilities
+                .bindings
+                .provisions
+                .iter()
+                .map(|p| &p.service)
+            {
                 if !provisions.insert(service.contract().name.clone()) {
                     return Err(Error::Contract(
                         "duplicate provision or primary service collision".into(),
@@ -555,7 +432,7 @@ impl ContextComponent {
                 let instance = owned.with(Clone::clone)?;
                 let settings = cordis_component::Initialization::encode(
                     config,
-                    instance.module.capabilities.validation,
+                    instance.module.capabilities.bindings.validation,
                 );
                 instance.call(&ctx, "create", settings).await?;
                 instance
@@ -574,14 +451,17 @@ impl ContextComponent {
         let plugin = self
             .0
             .capabilities
+            .bindings
             .dependencies
             .iter()
-            .fold(plugin, |p, d| p.requires(&d.declaration));
+            .fold(plugin, |p, d| p.requires(d.declaration()));
         Ok(self
             .0
             .capabilities
+            .bindings
             .provisions
-            .values()
+            .iter()
+            .map(|p| &p.service)
             .fold(plugin, |p, s| p.provides(s)))
     }
 }
@@ -610,7 +490,7 @@ impl<T: Send> bindings::cordis::plugin::host::HostWithStore<T> for Data {
         let instance = accessor.with(|mut access| access.get().instance.upgrade());
         let result = async {
             let instance = instance.ok_or(Error::Closed)?;
-            let args = output(args, instance.module.capabilities.validation)?;
+            let args = output(args, instance.module.capabilities.bindings.validation)?;
             let value = instance
                 .router
                 .call(&instance, &context, command, args)

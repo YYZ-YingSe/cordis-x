@@ -1,8 +1,9 @@
+use cordis_host::Dependency;
 #[path = "support/context.rs"]
 mod context_guest;
 mod support;
 use cordis_runtime::Service;
-use cordis_wasm::{Capabilities, Compiler, Dependency, Limits};
+use cordis_wasm::{Capabilities, Compiler, Limits};
 
 #[cfg(feature = "loader")]
 #[tokio::test]
@@ -194,15 +195,18 @@ fn cached_context_code_never_caches_import_or_dependency_authority() {
     let bytes = context_guest::bytes();
     let logger = Service::<()>::new("example.context-log", "1");
     let permitted = Capabilities {
+        bindings: cordis_host::HostBindings {
+            dependencies: vec![Dependency::json(
+                &logger,
+                cordis_contract::Descriptor::new(
+                    cordis_portable_example::context::ContextLogClient::interface(),
+                )
+                .unwrap(),
+                |_, _, _, args| Box::pin(async move { Ok::<_, cordis_wasm::Error>(args) }),
+            )],
+            ..Default::default()
+        },
         wasi: Some(Default::default()),
-        dependencies: vec![Dependency::new_json(
-            &logger,
-            cordis_contract::Descriptor::new(
-                cordis_portable_example::context::ContextLogClient::interface(),
-            )
-            .unwrap(),
-            |_, _, _, args| Box::pin(async move { Ok(args) }),
-        )],
         ..Default::default()
     };
     // A failure to bind imports is not a negative cache entry or permission grant.
@@ -215,7 +219,7 @@ fn cached_context_code_never_caches_import_or_dependency_authority() {
         .context_component(bytes, Limits::default(), permitted.clone())
         .unwrap();
     let mut missing_dependency = permitted.clone();
-    missing_dependency.dependencies.clear();
+    missing_dependency.bindings.dependencies.clear();
     assert!(
         compiler
             .context_component(bytes, Limits::default(), missing_dependency)

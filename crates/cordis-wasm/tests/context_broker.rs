@@ -1,11 +1,12 @@
 #![cfg(feature = "loader")]
+use cordis_host::Dependency;
 use cordis_portable_example::context::ContextLogClient;
 use cordis_portable_example::context_fixture_interface;
 #[path = "support/context.rs"]
 mod guest;
 use cordis_loader::{ArtifactRef, Configuration, Entry, Loader, Registry};
 use cordis_sdk::*;
-use cordis_wasm::{Capabilities, ContextService, Dependency, Limits, Value, json};
+use cordis_wasm::{Capabilities, ContextService, Limits, Value, json};
 use std::{
     collections::BTreeMap,
     sync::{
@@ -110,34 +111,43 @@ impl App {
         let handle = saved.lock().unwrap().take().unwrap();
         let factories = Arc::new(AtomicUsize::new(0));
         let mut caps = Capabilities {
+            bindings: cordis_host::HostBindings {
+                dependencies: vec![Dependency::json(
+                    &logger,
+                    cordis_contract::Descriptor::new(ContextLogClient::interface()).unwrap(),
+                    |log, _, _, args| {
+                        Box::pin(async move {
+                            log.lock().unwrap().push(args.clone());
+                            Ok::<_, cordis_wasm::Error>(args)
+                        })
+                    },
+                )],
+                ..Default::default()
+            },
             wasi: Some(cordis_wasm::Wasi::default()),
-            dependencies: vec![Dependency::new_json(
-                &logger,
-                cordis_contract::Descriptor::new(ContextLogClient::interface()).unwrap(),
-                |log, _, _, args| {
-                    Box::pin(async move {
-                        log.lock().unwrap().push(args.clone());
-                        Ok(args)
-                    })
-                },
-            )],
             ..Capabilities::default()
         };
-        caps.events
-            .insert("messages".into(), Event::new("messages", "1"));
-        caps.middleware
-            .insert("pipeline".into(), Middleware::new("pipeline", "1"));
-        caps.factories.insert("worker".into(), {
+        caps.bindings.events.push(cordis_host::EventBinding::new(
+            "messages",
+            &Event::new("messages", "1"),
+        ));
+        caps.bindings
+            .middleware
+            .push(cordis_host::MiddlewareBinding::new(
+                "pipeline",
+                &Middleware::new("pipeline", "1"),
+            ));
+        caps.bindings.factories.push(cordis_host::FactoryBinding::new("worker", {
             let factories = factories.clone();
-            Arc::new(move |config| {
+            move |config: cordis_host::Body| {
                 cordis_portable_example::context::ContextControls::worker()
-                    .build(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::context::data::cordis::data::Unit as cordis_sdk_core::typed::Codec>::contract().clone(),config).unwrap(), |_| {
+                    .build(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::context::data::cordis::data::Unit as cordis_sdk_core::typed::Codec>::contract().clone(),config.into_bytes().map_err(Error::Message)?).unwrap(), |_| {
                         factories.fetch_add(1, Ordering::SeqCst);
                         Ok(Plugin::new("worker", |_| async { Ok(()) }))
                     })
-                    .map_err(|e| cordis_wasm::Error::from(Error::from(e)))
-            })
-        });
+                    .map_err(Error::from)
+            }
+        }));
         let candidates = Arc::new(Mutex::new(BTreeMap::new()));
         let compiler = cordis_wasm::Compiler::default();
         let mut registry = Registry::new();

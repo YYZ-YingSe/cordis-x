@@ -1,12 +1,11 @@
+use cordis_host::Dependency;
 use cordis_portable_example::context::{ContextLogClient, data::google::protobuf::BytesValue};
 use cordis_portable_example::context_fixture_interface;
 use cordis_sdk_core::typed::Codec;
 #[path = "support/context.rs"]
 mod guest;
 use cordis_sdk::*;
-use cordis_wasm::{
-    Capabilities, ContextComponent, ContextService, Dependency, Limits, Value, json,
-};
+use cordis_wasm::{Capabilities, ContextComponent, ContextService, Limits, Value, json};
 use guest::bytes;
 use std::{
     sync::{Arc, Mutex},
@@ -58,28 +57,34 @@ async fn app_artifact(
         wasi: Some(cordis_wasm::Wasi::default()),
         ..Capabilities::default()
     };
-    caps.dependencies.push(Dependency::new_json(
+    caps.bindings.dependencies.push(Dependency::json(
         &logger,
         cordis_contract::Descriptor::new(ContextLogClient::interface()).unwrap(),
         |log, _ctx, _method, args| {
             Box::pin(async move {
                 log.lock().unwrap().push(args.clone());
-                Ok(args)
+                Ok::<_, cordis_wasm::Error>(args)
             })
         },
     ));
-    caps.events
-        .insert("messages".into(), Event::new("messages", "1"));
-    caps.middleware
-        .insert("pipeline".into(), Middleware::new("pipeline", "1"));
-    caps.factories.insert(
-        "worker".into(),
-        Arc::new(|config| {
+    caps.bindings.events.push(cordis_host::EventBinding::new(
+        "messages",
+        &Event::new("messages", "1"),
+    ));
+    caps.bindings
+        .middleware
+        .push(cordis_host::MiddlewareBinding::new(
+            "pipeline",
+            &Middleware::new("pipeline", "1"),
+        ));
+    caps.bindings.factories.push(cordis_host::FactoryBinding::new(
+        "worker",
+        |config| {
             cordis_portable_example::context::ContextControls::worker()
-                .build(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::context::data::cordis::data::Unit as Codec>::contract().clone(),config).unwrap(), |_| Ok(Plugin::new("worker", |_| async { Ok(()) })))
-                .map_err(|e| cordis_wasm::Error::from(Error::from(e)))
-        }),
-    );
+                .build(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::context::data::cordis::data::Unit as Codec>::contract().clone(),config.into_bytes().unwrap()).unwrap(), |_| Ok(Plugin::new("worker", |_| async { Ok(()) })))
+                .map_err(Error::from)
+        },
+    ));
     configure(&mut caps);
     let component = ContextComponent::from_bytes(
         if normal {
@@ -642,7 +647,7 @@ async fn cancelled_wait_retains_native_call_and_late_inverse_before_provider_cle
         let app = app_with(|caps| {
             let entered = entered.clone();
             let resume = resume.clone();
-            caps.dependencies = vec![Dependency::new_json(
+            caps.bindings.dependencies = vec![Dependency::json(
                 &Service::<Mutex<Vec<Value>>>::new("example.context-log", "1"),
                 cordis_contract::Descriptor::new(ContextLogClient::interface()).unwrap(),
                 move |log, _, method, args| {
@@ -655,7 +660,7 @@ async fn cancelled_wait_retains_native_call_and_late_inverse_before_provider_cle
                         } else {
                             log.lock().unwrap().push(args.clone());
                         }
-                        Ok(args)
+                        Ok::<_, cordis_wasm::Error>(args)
                     })
                 },
             )];
@@ -787,10 +792,12 @@ async fn restart_rejects_old_handles_and_recovers_old_effects() {
 
 #[tokio::test]
 async fn value_provision_requires_explicit_binding_and_initialization() {
-    let settings = Service::<cordis_wasm::Bytes>::new("example.settings", "1");
+    let settings = Service::<cordis_host::Body>::new("example.settings", "1");
     let app = app_config(
         |caps| {
-            caps.provisions.insert("settings".into(), settings.clone());
+            caps.bindings
+                .provisions
+                .push(cordis_host::ProvisionBinding::new("settings", &settings));
         },
         json!({"provide":{"answer":42}}),
     )
@@ -809,7 +816,7 @@ async fn value_provision_requires_explicit_binding_and_initialization() {
                                     assert_eq!(
                                         cordis_sdk_core::Message::from_bytes(
                                             cordis_sdk_core::MessageContract::json_value(),
-                                            value.clone()
+                                            value.clone().into_bytes().unwrap()
                                         )
                                         .unwrap()
                                         .to_json()
@@ -849,11 +856,14 @@ async fn real_instance_must_preserve_preflight_manifest() {
     ] {
         let logger = Service::<()>::new("example.context-log", "1");
         let caps = Capabilities {
-            dependencies: vec![Dependency::new_json(
-                &logger,
-                cordis_contract::Descriptor::new(ContextLogClient::interface()).unwrap(),
-                |_, _, _, _| Box::pin(async { Ok(json!({})) }),
-            )],
+            bindings: cordis_host::HostBindings {
+                dependencies: vec![Dependency::json(
+                    &logger,
+                    cordis_contract::Descriptor::new(ContextLogClient::interface()).unwrap(),
+                    |_, _, _, _| Box::pin(async { Ok::<_, cordis_wasm::Error>(json!({})) }),
+                )],
+                ..Default::default()
+            },
             wasi: Some(cordis_wasm::Wasi {
                 environment: [(environment.into(), "changed".into())].into(),
                 ..Default::default()

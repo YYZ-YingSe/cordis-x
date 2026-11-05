@@ -20,17 +20,17 @@ pub(crate) struct Native {
     pub ctx: rt::Context,
     pub instance: Weak<Instance>,
     pub frame: Rc<Frame>,
-    pub next: Option<rt::Next<Payload, Payload>>,
+    pub next: Option<rt::Next<cordis_host::Body, cordis_host::Body>>,
 }
 #[derive(Clone)]
 enum Kind {
-    Resource(Rc<super::Resource>),
+    Resource(cordis_host::WeakResource),
     Effect(rt::WeakEffectHandle, u64),
     Scope(rt::WeakScopeHandle),
     Task(rt::TaskHandle),
     Sequence(rt::WeakEffectSequence),
     Child(rt::WeakPluginHandle),
-    Next(rt::Next<Payload, Payload>),
+    Next(rt::Next<cordis_host::Body, cordis_host::Body>),
 }
 struct Capability {
     owner: Weak<Instance>,
@@ -93,14 +93,11 @@ impl Native {
                     .capabilities
                     .dependencies
                     .iter()
-                    .find(|d| d.declaration.contract().name.as_ref() == dependency)
+                    .find(|d| d.declaration().contract().name.as_ref() == dependency)
                     .ok_or_else(|| refused("undeclared_dependency", dependency))?;
-                let acquire = dependency.acquire.as_ref().ok_or_else(|| {
-                    refused("unsupported_resource", "dependency has no resource binding")
-                })?;
-                let resource = acquire(ctx.clone(), kind, args).await?;
+                let resource = dependency.acquire(ctx.clone(), kind, args.into()).await?;
                 return Ok(Reply::Handle(
-                    self.handle(Kind::Resource(Rc::new(resource))),
+                    self.handle(Kind::Resource(resource.downgrade())),
                 ));
             }
             Operation::ResourceInvoke {
@@ -112,7 +109,11 @@ impl Native {
                 let Kind::Resource(resource) = self.capability(&resource)? else {
                     return Err(refused("invalid_handle", "expected resource"));
                 };
-                let value = resource.invoke(&method, args).await?;
+                let value = resource
+                    .invoke(&method, args.into())
+                    .await?
+                    .into_message(&result)
+                    .map_err(cordis_sdk_core::typed::violation)?;
                 value
                     .check(&result)
                     .map_err(cordis_sdk_core::typed::violation)?;
@@ -136,11 +137,12 @@ impl Native {
                         .capabilities
                         .dependencies
                         .iter()
-                        .any(|d| d.declaration.contract() == contract.contract())
+                        .any(|d| d.declaration().contract() == contract.contract())
                     || instance
                         .capabilities
                         .provisions
-                        .values()
+                        .iter()
+                        .map(|p| &p.service)
                         .any(|p| p.contract() == contract.contract());
                 if !permitted {
                     return Err(refused("undeclared_metadata", contract.contract()));
@@ -158,18 +160,22 @@ impl Native {
                     .capabilities
                     .dependencies
                     .iter()
-                    .find(|d| d.declaration.contract().name.as_ref() == dependency)
+                    .find(|d| d.declaration().contract().name.as_ref() == dependency)
                     .ok_or_else(|| refused("undeclared_dependency", dependency))?;
                 let signature = cordis_contract::portable::method(
-                    &dependency.descriptor.interface().methods,
+                    &dependency.descriptor().interface().methods,
                     &method,
                 )
                 .map_err(|e| refused("invalid_argument", e))?;
                 args.check(&signature.args)
                     .map_err(|e| refused("invalid_argument", e))?;
-                let value = (dependency.invoke)(ctx.clone(), method, args)
+                let value = dependency
+                    .invoke(ctx.clone(), method, args.into())
                     .await
                     .map_err(|e| e.check_declared(&signature.errors, "dependency result"))?;
+                let value = value
+                    .into_message(&result)
+                    .map_err(cordis_sdk_core::typed::violation)?;
                 value
                     .check(&signature.result)
                     .map_err(cordis_sdk_core::typed::violation)?;
@@ -297,6 +303,7 @@ impl Native {
                     label,
                     move |ctx| {
                         let client = client.clone();
+
                         async move {
                             let value = match client.callback(ctx, id, Value::Null).await {
                                 Ok(value) => value,
@@ -376,23 +383,32 @@ impl Native {
             Operation::On {
                 event,
                 handler,
-                signature: _,
+                signature,
             } => {
                 let event = instance
                     .capabilities
-                    .events
-                    .get(&event)
+                    .event(&event)
                     .ok_or_else(|| refused("undeclared_event", event))?;
                 let id = instance.insert_listener(handler)?;
                 let cleanup = client.clone();
                 let subscription = self.subscription(id, cleanup, || {
                     ctx.on(event, move |args, ctx| {
                         let client = client.clone();
+                        let signature = signature.clone();
                         async move {
-                            let value =
-                                client.listener(ctx, id, args).await.map_err(native_error)?;
+                            let value = client
+                                .listener(
+                                    ctx,
+                                    id,
+                                    args.into_message(&signature.args)
+                                        .map_err(rt::Error::Message)?,
+                                )
+                                .await
+                                .map_err(native_error)?;
                             Ok(match value {
-                                cordis_sdk_core::typed::Flow::Break(value) => rt::Break(value),
+                                cordis_sdk_core::typed::Flow::Break(value) => {
+                                    rt::Break(value.into())
+                                }
                                 cordis_sdk_core::typed::Flow::Continue => rt::Continue(()),
                             })
                         }
@@ -407,17 +423,16 @@ impl Native {
                 event,
                 args,
                 serial,
-                signature: _,
+                signature,
             } => {
                 let event = instance
                     .capabilities
-                    .events
-                    .get(&event)
+                    .event(&event)
                     .ok_or_else(|| refused("undeclared_event", event))?;
                 let dispatch = if serial {
-                    event.emit_serial(ctx, args)
+                    event.emit_serial(ctx, args.into())
                 } else {
-                    event.emit(ctx, args)
+                    event.emit(ctx, args.into())
                 }
                 .map_err(rejected)?;
                 return Ok(Reply::Flows(
@@ -426,22 +441,26 @@ impl Native {
                         .await
                         .map_err(runtime_failure)?
                         .into_iter()
-                        .map(|flow| match flow {
-                            rt::Break(v) => cordis_sdk_core::typed::Flow::Break(v),
-                            rt::Continue(()) => cordis_sdk_core::typed::Flow::Continue,
+                        .map(|flow| {
+                            Ok(match flow {
+                                rt::Break(v) => cordis_sdk_core::typed::Flow::Break(
+                                    v.into_message(&signature.result)
+                                        .map_err(cordis_sdk_core::typed::violation)?,
+                                ),
+                                rt::Continue(()) => cordis_sdk_core::typed::Flow::Continue,
+                            })
                         })
-                        .collect(),
+                        .collect::<Result<Vec<_>>>()?,
                 ));
             }
             Operation::Middleware {
                 name,
                 handler,
-                signature: _,
+                signature,
             } => {
                 let chain = instance
                     .capabilities
-                    .middleware
-                    .get(&name)
+                    .middleware(&name)
                     .ok_or_else(|| refused("undeclared_middleware", name))?;
                 // The worker transfers the actual native continuation.
                 let id = instance.insert_message(Rc::new(move |ctx, args| {
@@ -458,10 +477,18 @@ impl Native {
                 let subscription = self.subscription(id, cleanup, || {
                     ctx.middleware(chain, move |args, ctx, next| {
                         let client = client.clone();
+                        let signature = signature.clone();
                         async move {
                             client
-                                .middleware(ctx, id, args, next)
+                                .middleware(
+                                    ctx,
+                                    id,
+                                    args.into_message(&signature.args)
+                                        .map_err(rt::Error::Message)?,
+                                    next,
+                                )
                                 .await
+                                .map(Into::into)
                                 .map_err(native_error)
                         }
                     })
@@ -475,7 +502,12 @@ impl Native {
                 let Kind::Next(next) = self.capability(&next)? else {
                     return Err(refused("invalid_handle", "expected next"));
                 };
-                let value = next.run(args).await.map_err(runtime_failure)?;
+                let value = next
+                    .run(args.into())
+                    .await
+                    .map_err(runtime_failure)?
+                    .into_message(&result)
+                    .map_err(cordis_sdk_core::typed::violation)?;
                 value
                     .check(&result)
                     .map_err(cordis_sdk_core::typed::violation)?;
@@ -489,24 +521,34 @@ impl Native {
             } => {
                 let chain = instance
                     .capabilities
-                    .middleware
-                    .get(&name)
+                    .middleware(&name)
                     .ok_or_else(|| refused("undeclared_middleware", name))?
                     .clone();
                 let id = instance.insert_message(terminal)?;
+                let callback_signature = signature.clone();
                 let result = chain
-                    .run(ctx, args, move |args, ctx| {
+                    .run(ctx, args.into(), move |args, ctx| {
                         let client = client.clone();
+                        let signature = callback_signature.clone();
                         async move {
                             client
-                                .message_callback(ctx, id, args)
+                                .message_callback(
+                                    ctx,
+                                    id,
+                                    args.into_message(&signature.args)
+                                        .map_err(rt::Error::Message)?,
+                                )
                                 .await
+                                .map(Into::into)
                                 .map_err(native_error)
                         }
                     })
                     .await;
                 instance.remove(id);
-                let value = result.map_err(runtime_failure)?;
+                let value = result
+                    .map_err(runtime_failure)?
+                    .into_message(&signature.result)
+                    .map_err(cordis_sdk_core::typed::violation)?;
                 value
                     .check(&signature.result)
                     .map_err(cordis_sdk_core::typed::violation)?;
@@ -515,21 +557,19 @@ impl Native {
             Operation::Install { factory, config } => {
                 let factory = instance
                     .capabilities
-                    .factories
-                    .get(&factory)
+                    .factory(&factory)
                     .ok_or_else(|| refused("undeclared_factory", factory))?
                     .clone();
                 let context = ctx.clone();
-                let child =
-                    tokio::task::spawn_blocking(move || context.install_with(|| factory(config)))
-                        .await
-                        .map_err(unknown)?
-                        .map_err(|error| match error {
-                            rt::Error::Closed => {
-                                refused("closed", "context cannot install children")
-                            }
-                            other => runtime_failure(other),
-                        })?;
+                let child = tokio::task::spawn_blocking(move || {
+                    context.install_with(|| factory(config.into()))
+                })
+                .await
+                .map_err(unknown)?
+                .map_err(|error| match error {
+                    rt::Error::Closed => refused("closed", "context cannot install children"),
+                    other => runtime_failure(other),
+                })?;
                 return Ok(Reply::Handle(self.handle(Kind::Child(child.downgrade()))));
             }
             Operation::ChildReady { child } => {
@@ -559,10 +599,10 @@ impl Native {
             Operation::Provide { service, value } => {
                 let service = instance
                     .capabilities
-                    .provisions
-                    .get(&service)
+                    .provision(&service)
                     .ok_or_else(|| refused("undeclared_provision", service))?;
-                ctx.provide(service, Arc::new(value)).map_err(rejected)?;
+                ctx.provide(service, Arc::new(value.into()))
+                    .map_err(rejected)?;
                 Value::Null
             }
         };

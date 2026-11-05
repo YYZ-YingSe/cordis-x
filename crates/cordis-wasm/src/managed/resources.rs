@@ -206,6 +206,16 @@ impl ContextResource {
     }
 
     pub async fn invoke(&self, method: &str, args: Bytes) -> Result<Bytes> {
+        self.invoke_envelope(method, Payload::message(args).into())
+            .await?
+            .one()
+            .map_err(|e| Error::InvalidInput(e.to_string()))
+    }
+    pub(crate) async fn invoke_envelope(
+        &self,
+        method: &str,
+        mut args: cordis_wire::local::Envelope,
+    ) -> Result<cordis_wire::local::Envelope> {
         if method.len() > cordis_component::MAX_BYTES {
             return Err(Error::InvalidInput("method too long".into()));
         }
@@ -220,10 +230,7 @@ impl ContextResource {
                                 .map_err(Error::InvalidInput)?;
                         let signature = contract::method(&factory.methods, &method)
                             .map_err(Error::InvalidInput)?;
-                        signature
-                            .args
-                            .check_binary(&args)
-                            .map_err(Error::InvalidInput)?;
+                        args.check(&signature.args).map_err(Error::InvalidInput)?;
                         Ok::<_, Error>(signature.clone())
                     })();
                     let signature = match signature {
@@ -246,14 +253,14 @@ impl ContextResource {
                         .call_payload(
                             &ctx,
                             "resource-invoke",
-                            Payload::with_message(request, args),
+                            args.with_control(request).into_wire(),
                         )
                         .await
-                        .and_then(|value| value.one().map_err(unknown));
+                        .map(cordis_wire::local::Envelope::from);
                     let result = result
                         .map_err(|e| e.check_declared(&signature.errors, "resource errors"))
-                        .and_then(|value| {
-                            signature.result.check_binary(&value).map_err(unknown)?;
+                        .and_then(|mut value| {
+                            value.check(&signature.result).map_err(unknown)?;
                             Ok(value)
                         });
                     if let Err(error @ Error::Unknown(_)) = &result {
@@ -285,12 +292,16 @@ pub(super) struct WeakContextResource {
     released: Arc<Mutex<Option<Result<()>>>>,
 }
 impl WeakContextResource {
-    pub async fn invoke(&self, method: &str, args: Bytes) -> Result<Bytes> {
+    pub async fn invoke_envelope(
+        &self,
+        method: &str,
+        args: cordis_wire::local::Envelope,
+    ) -> Result<cordis_wire::local::Envelope> {
         ContextResource {
             resource: self.resource.upgrade().ok_or(Error::Closed)?,
             released: self.released.clone(),
         }
-        .invoke(method, args)
+        .invoke_envelope(method, args)
         .await
     }
     pub async fn dispose(&self) -> Result<()> {

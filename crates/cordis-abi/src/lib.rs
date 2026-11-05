@@ -3,16 +3,18 @@
 mod artifact;
 mod composition;
 mod context;
+mod host;
+mod host_failure;
 mod resource_dependencies;
-pub use composition::{CompositionLimits, FactoryBinding, ProvisionBinding};
+pub use composition::CompositionLimits;
 mod managed;
 mod reactive;
 pub use managed::ManagedLimits;
-pub use reactive::{EventBinding, MiddlewareBinding, ReactiveLimits};
+pub use reactive::ReactiveLimits;
 mod ffi;
 #[cfg(feature = "loader")]
 pub use artifact::ArtifactOptions;
-pub use context::{Capabilities, Dependency};
+pub use context::Capabilities;
 #[cfg(feature = "loader")]
 pub mod loader;
 
@@ -148,7 +150,7 @@ impl Library {
         &self.0.descriptor
     }
     pub fn with_validation(mut self, validation: cordis_contract::Validation) -> Self {
-        Arc::make_mut(&mut self.1).validation = validation;
+        Arc::make_mut(&mut self.1).bindings.validation = validation;
         self
     }
     pub fn supports_resources(&self) -> bool {
@@ -262,8 +264,10 @@ impl Library {
         Ok(self.1.declare(Plugin::new(name, move |ctx| {
             let module = library.0.clone();
             let capabilities = library.1.clone();
-            let config =
-                cordis_wire::Initialization::encode(config.clone(), capabilities.validation);
+            let config = cordis_wire::Initialization::encode(
+                config.clone(),
+                capabilities.bindings.validation,
+            );
             let publish = publish.clone();
             async move {
                 let activation = ctx.activation();
@@ -279,7 +283,7 @@ impl Library {
                                     Op::Create,
                                     0,
                                     &config.into(),
-                                    worker.router.capabilities.validation,
+                                    worker.router.capabilities.bindings.validation,
                                 );
                                 let mut state = worker.state.lock().unwrap();
                                 match result {
@@ -346,7 +350,7 @@ impl Instance {
             descriptor: module
                 .descriptor
                 .clone()
-                .with_validation(capabilities.validation),
+                .with_validation(capabilities.bindings.validation),
             router: context::Router::new(weak.clone(), capabilities, host_id),
             module,
             state: Mutex::new(State {
@@ -458,7 +462,13 @@ impl Instance {
         if self.module.context.is_none() {
             return self
                 .module
-                .execute(op, id, method, args, self.router.capabilities.validation)
+                .execute(
+                    op,
+                    id,
+                    method,
+                    args,
+                    self.router.capabilities.bindings.validation,
+                )
                 .await;
         }
         let scope = self.router.scope(ctx, op)?;
@@ -554,7 +564,7 @@ impl Instance {
             // tail of its last completion callback. Only this bounded teardown
             // boundary needs a blocking worker; business awaits do not.
             let module = instance.module.clone();
-            let validation = instance.router.capabilities.validation;
+            let validation = instance.router.capabilities.bindings.validation;
             tokio::task::spawn_blocking(move || {
                 module.execute_local(Op::Destroy, id, &Value::Null.into(), validation)
             })
@@ -786,7 +796,22 @@ impl AbiResource {
         }
     }
     pub async fn invoke(&self, method: &str, args: Bytes) -> Result<Bytes> {
-        if args.len() > cordis_wire::MAX_MESSAGE {
+        self.invoke_envelope(method, Payload::message(args).into())
+            .await?
+            .one()
+            .map_err(|e| Error::InvalidInput(e.to_string()))
+    }
+    pub(crate) async fn invoke_envelope(
+        &self,
+        method: &str,
+        mut args: cordis_wire::local::Envelope,
+    ) -> Result<cordis_wire::local::Envelope> {
+        if args
+            .one()
+            .map_err(|e| Error::InvalidInput(e.to_string()))?
+            .len()
+            > cordis_wire::MAX_MESSAGE
+        {
             return Err(Error::InvalidInput("message too large".into()));
         }
         if method.len() > cordis_wire::MAX_MESSAGE {
@@ -806,10 +831,7 @@ impl AbiResource {
                                 .map_err(Error::InvalidInput)?;
                         let signature = contract::method(&resource.methods, &method)
                             .map_err(Error::InvalidInput)?;
-                        signature
-                            .args
-                            .check_binary(&args)
-                            .map_err(Error::InvalidInput)?;
+                        args.check(&signature.args).map_err(Error::InvalidInput)?;
                         Ok::<_, Error>(signature)
                     })();
                     let signature = match signature {
@@ -818,23 +840,12 @@ impl AbiResource {
                     };
                     let outcome = ticket
                         .instance
-                        .run(
-                            &context,
-                            Op::ResourceCall(id),
-                            method,
-                            Payload::message(args).into(),
-                        )
+                        .run(&context, Op::ResourceCall(id), method, args)
                         .await
                         .map_err(|e| e.check_declared(&signature.errors, "resource errors"))
                         .and_then(|reply| {
-                            let value = reply
-                                .value
-                                .one()
-                                .map_err(|e| Error::Unknown(e.to_string()))?;
-                            signature
-                                .result
-                                .check_binary(&value)
-                                .map_err(Error::Unknown)?;
+                            let mut value = reply.value;
+                            value.check(&signature.result).map_err(Error::Unknown)?;
                             Ok(value)
                         });
                     if let Err(error @ Error::Unknown(_)) = &outcome {
@@ -861,12 +872,16 @@ pub(crate) struct WeakAbiResource {
     released: Arc<Mutex<Option<Result<()>>>>,
 }
 impl WeakAbiResource {
-    pub async fn invoke(&self, method: &str, args: Bytes) -> Result<Bytes> {
+    pub async fn invoke_envelope(
+        &self,
+        method: &str,
+        args: cordis_wire::local::Envelope,
+    ) -> Result<cordis_wire::local::Envelope> {
         AbiResource {
             resource: self.resource.upgrade().ok_or(Error::Closed)?,
             released: self.released.clone(),
         }
-        .invoke(method, args)
+        .invoke_envelope(method, args)
         .await
     }
     pub async fn dispose(&self) -> Result<()> {

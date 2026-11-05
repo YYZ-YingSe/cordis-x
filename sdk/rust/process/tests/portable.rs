@@ -1,7 +1,6 @@
-use cordis_remote::{
-    Dependency, Endpoint, EventBinding, FactoryBinding, MiddlewareBinding, ProcessSpec,
-    RemoteService as PortableService,
-};
+use cordis_host::Dependency;
+use cordis_host::{EventBinding, FactoryBinding, MiddlewareBinding};
+use cordis_remote::{Endpoint, ProcessSpec, RemoteService as PortableService};
 use cordis_runtime::*;
 use cordis_sdk_core::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -29,7 +28,7 @@ async fn scenario(endpoint: Endpoint) {
     .await
     .unwrap();
     let mut spec = ProcessSpec::new(artifact())
-        .requires(Dependency::new_json(
+        .requires(Dependency::json(
             &logger,
             cordis_remote::Descriptor::new(
                 cordis_sdk_core::contract::decode(

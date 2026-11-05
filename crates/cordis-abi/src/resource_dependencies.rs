@@ -1,5 +1,5 @@
 use crate::{
-    Error, Payload, Result, Value, WeakAbiResource,
+    Error, Payload, Result, Value,
     context::{Router, next_id},
     ffi::Reply,
 };
@@ -10,7 +10,7 @@ use std::{
 use tokio::sync::Semaphore;
 
 pub(crate) struct Resources {
-    entries: Mutex<BTreeMap<u64, Arc<OnceLock<WeakAbiResource>>>>,
+    entries: Mutex<BTreeMap<u64, Arc<OnceLock<cordis_host::WeakResource>>>>,
     calls: Semaphore,
     cleanup: Semaphore,
     disposals: Semaphore,
@@ -24,7 +24,7 @@ impl Resources {
             disposals: Semaphore::new(capacity),
         }
     }
-    fn reserve(&self) -> Result<(u64, Arc<OnceLock<WeakAbiResource>>)> {
+    fn reserve(&self) -> Result<(u64, Arc<OnceLock<cordis_host::WeakResource>>)> {
         let mut entries = self.entries.lock().unwrap();
         if entries.len() >= 4096 {
             return Err(Error::Overloaded);
@@ -34,7 +34,7 @@ impl Resources {
         entries.insert(id, entry.clone());
         Ok((id, entry))
     }
-    fn get(&self, id: u64) -> Result<WeakAbiResource> {
+    fn get(&self, id: u64) -> Result<cordis_host::WeakResource> {
         self.entries
             .lock()
             .unwrap()
@@ -108,6 +108,7 @@ impl Router {
                 if operation == 1 {
                     let binding = router
                         .capabilities
+                        .bindings
                         .dependencies
                         .iter()
                         .find(|d| d.contract().name.as_ref() == dependency)
@@ -115,18 +116,17 @@ impl Router {
                             code: "undeclared_dependency".into(),
                             message: dependency,
                         })?;
-                    let acquire = binding.acquire.as_ref().ok_or_else(|| Error::Refused {
-                        code: "unsupported_resource".into(),
-                        message: "dependency has no resource binding".into(),
-                    })?;
-                    let schema = cordis_contract::portable::resource(binding.descriptor(), &method)
-                        .map_err(Error::InvalidInput)?;
+                    let schema = binding.resource_contract(&method).map_err(Error::from)?;
                     let mut args = cordis_wire::local::Envelope::from(Payload::message(
                         args.one().map_err(|e| Error::InvalidInput(e.to_string()))?,
                     ));
                     args.check(&schema.args).map_err(Error::InvalidInput)?;
                     let (id, entry) = router.resources.reserve()?;
-                    let resource = acquire(ctx, method, args).await.map_err(uncertainty)?;
+                    let resource = binding
+                        .acquire_wire(ctx, method, args)
+                        .await
+                        .map_err(Error::from)
+                        .map_err(uncertainty)?;
                     let _ = entry.set(resource.downgrade());
                     return Ok(Reply {
                         value: Value::Null.into(),
@@ -137,7 +137,7 @@ impl Router {
                 let value = if operation == 2 {
                     Payload::message(
                         resource
-                            .invoke(
+                            .invoke_bytes(
                                 &method,
                                 args.one().map_err(|e| Error::InvalidInput(e.to_string()))?,
                             )

@@ -159,7 +159,7 @@ impl Fixture {
         let provider = runtime
             .install(
                 process
-                    .requires(Dependency::new_json(
+                    .requires(Dependency::json(
                         &logger,
                         cordis_remote::Descriptor::new(cordis_remote::Interface::value_dispatch(
                             true,
@@ -188,7 +188,7 @@ impl Fixture {
             runtime
                 .install(
                     client_spec
-                        .requires(Dependency::remote(&counters))
+                        .requires(Dependency::new(&counters).unwrap())
                         .plugin("client", &client),
                 )
                 .unwrap();

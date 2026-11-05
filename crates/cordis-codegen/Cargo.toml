@@ -26,6 +26,7 @@ tempfile = "3"
 dunce = "1.0.5"
 
 [dev-dependencies]
+cordis-host.workspace = true
 cordis-test-contracts.workspace = true
 cordis-example-contracts.workspace = true
 cordis-remote = { path = "../cordis-remote" }

@@ -1,4 +1,5 @@
 #![cfg(feature = "loader")]
+use cordis_host::Dependency;
 #[path = "support/context.rs"]
 mod context_guest;
 mod support;
@@ -573,7 +574,7 @@ async fn cancelled_inflight_call_keeps_old_code_until_execution_finishes() {
 
 #[tokio::test]
 async fn context_artifact_uses_explicit_bindings_and_wasi_without_widening_authority() {
-    use cordis_wasm::{Capabilities, ContextService, Dependency, Wasi};
+    use cordis_wasm::{Capabilities, ContextService, Wasi};
     let files = Files::new();
     let artifact = files.write("context.wasm", context_guest::bytes());
     let rt = Runtime::new();
@@ -606,14 +607,17 @@ async fn context_artifact_uses_explicit_bindings_and_wasi_without_widening_autho
         cordis_wasm::Compiler::default(),
         Limits::default(),
         Capabilities {
-            dependencies: vec![Dependency::new_json(
-                &logger,
-                cordis_contract::Descriptor::new(
-                    cordis_portable_example::context::ContextLogClient::interface(),
-                )
-                .unwrap(),
-                |_, _, _, args| Box::pin(async move { Ok(args) }),
-            )],
+            bindings: cordis_host::HostBindings {
+                dependencies: vec![Dependency::json(
+                    &logger,
+                    cordis_contract::Descriptor::new(
+                        cordis_portable_example::context::ContextLogClient::interface(),
+                    )
+                    .unwrap(),
+                    |_, _, _, args| Box::pin(async move { Ok::<_, cordis_wasm::Error>(args) }),
+                )],
+                ..Default::default()
+            },
             wasi: Some(Wasi {
                 environment: [("ALLOWED".into(), "yes".into())].into(),
                 ..Default::default()

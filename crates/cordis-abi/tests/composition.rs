@@ -1,7 +1,7 @@
+use cordis_host::{FactoryBinding, MiddlewareBinding, ProvisionBinding};
 include!("support/context.rs");
-use cordis_abi::{FactoryBinding, MiddlewareBinding, ProvisionBinding};
 
-fn info() -> Service<cordis_abi::Bytes> {
+fn info() -> Service<cordis_host::Body> {
     Service::new("example.info", "1")
 }
 struct FactoryState {
@@ -23,50 +23,35 @@ impl FactoryState {
 fn composition_caps(state: &Arc<FactoryState>) -> Capabilities {
     let state = state.clone();
     Capabilities {
-        factories: vec![FactoryBinding::new("worker", move |config| {
-            let config = unwire_json(&config);
-            state.calls.fetch_add(1, Ordering::Relaxed);
-            if config["block"] == true {
-                state.entered.add_permits(1);
-                tokio::runtime::Handle::current()
-                    .block_on(state.gate.acquire())
-                    .unwrap()
-                    .forget();
-            }
-            if config["reject"] == true {
-                return Err(Error::Message("factory rejected".into()));
-            }
-            assert_ne!(config["panic"], true, "factory panic");
-            let state = state.clone();
-            let child_config = config.clone();
-            let mut plugin = Plugin::new("factory child", move |ctx| {
+        bindings: cordis_host::HostBindings {
+            factories: vec![FactoryBinding::new("worker", move |config| {
+                let config = unwire_json(&config.into_bytes().unwrap());
+                state.calls.fetch_add(1, Ordering::Relaxed);
+                if config["block"] == true {
+                    state.entered.add_permits(1);
+                    tokio::runtime::Handle::current()
+                        .block_on(state.gate.acquire())
+                        .unwrap()
+                        .forget();
+                }
+                if config["reject"] == true {
+                    return Err(Error::Message("factory rejected".into()));
+                }
+                assert_ne!(config["panic"], true, "factory panic");
                 let state = state.clone();
-                let config = child_config.clone();
-                async move {
-                    // Inherited from the ABI definition, without a child requires declaration.
-                    let logger = ctx.dependency(&logger_service())?;
-                    logger
-                        .call(|logger, ctx| {
-                            Box::pin(async move {
-                                logger.records.lock().unwrap().push(Record {
-                                    method: "child".into(),
-                                    args: json!("active"),
-                                    owner: ctx.owner(),
-                                    caller: ctx.caller(),
-                                    cleanup: ctx.is_cleanup(),
-                                });
-                                Ok(())
-                            })
-                        })
-                        .await?;
-                    ctx.defer("child cleanup", move |ctx| async move {
+                let child_config = config.clone();
+                let mut plugin = Plugin::new("factory child", move |ctx| {
+                    let state = state.clone();
+                    let config = child_config.clone();
+                    async move {
+                        // Inherited from the ABI definition, without a child requires declaration.
                         let logger = ctx.dependency(&logger_service())?;
                         logger
                             .call(|logger, ctx| {
                                 Box::pin(async move {
                                     logger.records.lock().unwrap().push(Record {
-                                        method: "child-cleanup".into(),
-                                        args: Value::Null,
+                                        method: "child".into(),
+                                        args: json!("active"),
                                         owner: ctx.owner(),
                                         caller: ctx.caller(),
                                         cleanup: ctx.is_cleanup(),
@@ -75,31 +60,49 @@ fn composition_caps(state: &Arc<FactoryState>) -> Capabilities {
                                 })
                             })
                             .await?;
-                        state.cleaned.fetch_add(1, Ordering::Relaxed);
-                        if config["cleanup_fail"] == true {
-                            return Err(Error::Message("child inverse failed".into()));
-                        }
+                        ctx.defer("child cleanup", move |ctx| async move {
+                            let logger = ctx.dependency(&logger_service())?;
+                            logger
+                                .call(|logger, ctx| {
+                                    Box::pin(async move {
+                                        logger.records.lock().unwrap().push(Record {
+                                            method: "child-cleanup".into(),
+                                            args: Value::Null,
+                                            owner: ctx.owner(),
+                                            caller: ctx.caller(),
+                                            cleanup: ctx.is_cleanup(),
+                                        });
+                                        Ok(())
+                                    })
+                                })
+                                .await?;
+                            state.cleaned.fetch_add(1, Ordering::Relaxed);
+                            if config["cleanup_fail"] == true {
+                                return Err(Error::Message("child inverse failed".into()));
+                            }
+                            Ok(())
+                        })?;
                         Ok(())
-                    })?;
-                    Ok(())
+                    }
+                });
+                if config["parent"] == true {
+                    plugin = plugin.requires(
+                        &Service::<AbiService>::new("example.context", "1").with_descriptor(
+                            cordis_contract::Descriptor::new(
+                                cordis_contract::Interface::value_dispatch(true),
+                            )
+                            .unwrap(),
+                        ),
+                    );
                 }
-            });
-            if config["parent"] == true {
-                plugin = plugin.requires(
-                    &Service::<AbiService>::new("example.context", "1").with_descriptor(
-                        cordis_contract::Descriptor::new(
-                            cordis_contract::Interface::value_dispatch(true),
-                        )
-                        .unwrap(),
-                    ),
-                );
-            }
-            if config["missing"] == true {
-                plugin = plugin.requires(&Service::<()>::new("missing", "1"));
-            }
-            Ok(plugin)
-        })],
-        provisions: vec![ProvisionBinding::new("info", &info())],
+                if config["missing"] == true {
+                    plugin = plugin.requires(&Service::<()>::new("missing", "1"));
+                }
+                Ok(plugin)
+            })],
+            provisions: vec![ProvisionBinding::new("info", &info())],
+            ..caps().bindings
+        },
         ..caps()
     }
 }
@@ -139,15 +142,19 @@ fn independent_negotiation_and_exact_manifest_preflight() {
     );
     assert!(library.clone().with_context(caps()).is_err());
     let mut policy = composition_caps(&state);
-    policy.factories.push(policy.factories[0].clone());
+    policy
+        .bindings
+        .factories
+        .push(policy.bindings.factories[0].clone());
     assert!(library.clone().with_context(policy).is_err());
     let mut policy = composition_caps(&state);
     policy
+        .bindings
         .provisions
         .push(ProvisionBinding::new("other", &info()));
     assert!(library.clone().with_context(policy).is_err());
     let mut policy = composition_caps(&state);
-    policy.provisions = vec![ProvisionBinding::new(
+    policy.bindings.provisions = vec![ProvisionBinding::new(
         "info",
         &Service::new("example.context", "1").with_descriptor(
             cordis_contract::Descriptor::new(cordis_contract::Interface::value_dispatch(true))
@@ -156,7 +163,7 @@ fn independent_negotiation_and_exact_manifest_preflight() {
     )];
     assert!(library.clone().with_context(policy).is_err());
     let mut policy = composition_caps(&state);
-    policy.provisions = vec![ProvisionBinding::new(
+    policy.bindings.provisions = vec![ProvisionBinding::new(
         "info",
         &Service::new("example.info", "2"),
     )];
@@ -322,7 +329,7 @@ async fn publication_is_staged_and_consumers_drain_before_child_and_provider() {
                         value
                             .call(|v, _| {
                                 Box::pin(async move {
-                                    assert_eq!(unwire_json(v), json!({"version":1.0}));
+                                    assert_eq!(unwire_json(&v.clone().into_bytes().unwrap()), json!({"version":1.0}));
                                     Ok(())
                                 })
                             })
@@ -333,7 +340,7 @@ async fn publication_is_staged_and_consumers_drain_before_child_and_provider() {
                             ctx.dependency(&info())?
                                 .call(|v, _| {
                                     Box::pin(async move {
-                                        assert_eq!(unwire_json(v)["version"], json!(1.0));
+                                        assert_eq!(unwire_json(&v.clone().into_bytes().unwrap())["version"], json!(1.0));
                                         Ok(())
                                     })
                                 })
@@ -449,7 +456,10 @@ async fn foreign_or_active_context_cannot_replace_a_published_value() {
     handle
         .call(|value, _| {
             Box::pin(async move {
-                assert_eq!(unwire_json(value)["version"], json!(1.0));
+                assert_eq!(
+                    unwire_json(&value.clone().into_bytes().unwrap())["version"],
+                    json!(1.0)
+                );
                 Ok(())
             })
         })
@@ -529,7 +539,7 @@ async fn composition_is_available_in_managed_and_reactive_callbacks() {
     let files = Files::new("cordis_abi_composition_reactive");
     let state = FactoryState::new();
     let mut policy = composition_caps(&state);
-    policy.middleware = vec![MiddlewareBinding::new(
+    policy.bindings.middleware = vec![MiddlewareBinding::new(
         "chain",
         &Middleware::new("example.chain", "1"),
     )];
@@ -594,7 +604,10 @@ async fn definition_realms_control_publication_and_inherited_child_dependencies(
                 ctx.dependency(&info())?
                     .call(|v, _| {
                         Box::pin(async move {
-                            assert_eq!(unwire_json(v)["version"], json!(1.0));
+                            assert_eq!(
+                                unwire_json(&v.clone().into_bytes().unwrap())["version"],
+                                json!(1.0)
+                            );
                             Ok(())
                         })
                     })
@@ -725,7 +738,10 @@ async fn loader_preflights_composition_and_recovers_children() {
     handle
         .call(|v, _| {
             Box::pin(async move {
-                assert_eq!(unwire_json(v)["version"], json!(1.0));
+                assert_eq!(
+                    unwire_json(&v.clone().into_bytes().unwrap())["version"],
+                    json!(1.0)
+                );
                 Ok(())
             })
         })

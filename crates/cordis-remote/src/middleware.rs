@@ -8,29 +8,7 @@ use std::{
     },
 };
 
-/// Installation-owned channel binding; peers cannot choose arbitrary realms.
-#[derive(Clone)]
-pub struct MiddlewareBinding {
-    alias: String,
-    middleware: Middleware<Bytes, Bytes>,
-}
-impl std::fmt::Debug for MiddlewareBinding {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("MiddlewareBinding")
-            .field(&self.alias)
-            .field(self.middleware.contract())
-            .field(&self.middleware.realm())
-            .finish()
-    }
-}
-impl MiddlewareBinding {
-    pub fn new(alias: impl Into<String>, middleware: &Middleware<Bytes, Bytes>) -> Self {
-        Self {
-            alias: alias.into(),
-            middleware: middleware.clone(),
-        }
-    }
-}
+use cordis_host::{Body, MiddlewareBinding};
 struct Handler {
     grant: String,
     handle: OnceLock<WeakEffectHandle>,
@@ -41,7 +19,7 @@ struct Handler {
 struct Continuation {
     context: String,
     grant: String,
-    next: Next<Bytes, Bytes>,
+    next: Next<Body, Body>,
 }
 #[derive(Default)]
 struct Calls {
@@ -58,7 +36,7 @@ impl Drop for Frame {
     }
 }
 pub(crate) struct Middlewares {
-    bindings: BTreeMap<String, Middleware<Bytes, Bytes>>,
+    bindings: BTreeMap<String, Middleware<Body, Body>>,
     handlers: Mutex<BTreeMap<String, Arc<Handler>>>,
     runs: Mutex<BTreeSet<String>>,
     calls: Arc<Calls>,
@@ -88,7 +66,7 @@ impl Middlewares {
     pub fn declarations(&self) -> Value {
         Value::Object(self.bindings.iter().map(|(alias, m)| (alias.clone(), json!({"name":m.contract().name.as_ref(),"revision":m.contract().revision.as_ref(),"realm":m.realm().0.to_string()}))).collect())
     }
-    fn binding(&self, payload: &Value) -> Result<Middleware<Bytes, Bytes>> {
+    fn binding(&self, payload: &Value) -> Result<Middleware<Body, Body>> {
         self.bindings
             .get(&crate::scope::text(payload, "middleware")?)
             .cloned()
@@ -170,7 +148,7 @@ impl Middlewares {
                             "middleware_call",
                             Payload::with_message(
                                 json!({"handler":id,"call":call,"next":grant}),
-                                args,
+                                args.into_bytes().map_err(Error::InvalidInput)?,
                             ),
                         )?;
                         let token = crate::scope::text(&request.payload.control, "context")?;
@@ -190,7 +168,7 @@ impl Middlewares {
                     if let Err(error @ Error::OutcomeUnknown(_)) = &result {
                         *entry.failure.lock().unwrap() = Some(error.clone());
                     }
-                    result.map_err(Into::into)
+                    result.map(Body::from_bytes).map_err(Into::into)
                 }
             })
             .map_err(runtime_error)?;
@@ -218,7 +196,7 @@ impl Middlewares {
             .clone()
             .unwrap_or(Err(Error::Closed))
     }
-    pub fn continuation(&self, payload: &Value) -> Result<Next<Bytes, Bytes>> {
+    pub fn continuation(&self, payload: &Value) -> Result<Next<Body, Body>> {
         let id = crate::scope::text(payload, "call")?;
         let grant = crate::scope::text(payload, "grant")?;
         let context = crate::scope::text(payload, "context")?;
@@ -252,7 +230,7 @@ impl Middlewares {
         }
         let calls = self.calls.clone();
         middleware
-            .run(ctx, args, move |args, ctx| {
+            .run(ctx, Body::from_bytes(args), move |args, ctx| {
                 let (run, session, calls) = (run.clone(), session.clone(), calls.clone());
                 async move {
                     let result = async {
@@ -263,16 +241,24 @@ impl Middlewares {
                             .scoped_payload(
                                 &ctx,
                                 "middleware_terminal",
-                                Payload::with_message(json!({"run":run,"call":call}), args),
+                                Payload::with_message(
+                                    json!({"run":run,"call":call}),
+                                    args.into_bytes().map_err(Error::InvalidInput)?,
+                                ),
                             )
                             .await
                     }
                     .await;
-                    callback_outcome(&ctx, result).await.map_err(Into::into)
+                    callback_outcome(&ctx, result)
+                        .await
+                        .map(Body::from_bytes)
+                        .map_err(Into::into)
                 }
             })
             .await
-            .map_err(runtime_error)
+            .map_err(runtime_error)?
+            .into_bytes()
+            .map_err(Error::Protocol)
     }
 }
 fn call_id(calls: &Calls) -> Result<String> {

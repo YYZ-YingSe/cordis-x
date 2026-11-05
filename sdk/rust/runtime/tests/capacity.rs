@@ -1,6 +1,7 @@
+use cordis_host::HostBindings;
 use cordis_runtime::{Plugin as NativePlugin, Runtime, Service};
 use cordis_sdk_core::*;
-use cordis_sdk_runtime::{Capabilities, Service as PortableService};
+use cordis_sdk_runtime::Service as PortableService;
 use std::{cell::Cell, rc::Rc};
 
 struct CapacityProbe;
@@ -91,7 +92,7 @@ async fn full_callback_table_rejects_sequence_before_acquisition() {
             "capacity",
             &service,
             Value::Null,
-            Capabilities::default(),
+            HostBindings::default(),
         )
         .unwrap(),
     )

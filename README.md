@@ -80,6 +80,35 @@ The [lifecycle example](sdk/rust/native/examples/lifecycle.rs) shows a consumer 
 cargo run --locked -p cordis-sdk --example broker
 ```
 
+## Shared host bindings
+
+`cordis-host` connects portable services through the actual Runtime. Bind a selected
+service with `Dependency::new(&service)?`, whether its provider is native Rust,
+Process, C ABI, or managed Wasm. Consumers receive the same `HostBindings` for
+dependencies, events, middleware, authorized factories, and value provisions.
+Execution options such as commands, WASI imports, and capacity remain with their
+respective adapters.
+
+```rust,ignore
+use cordis_host::{Dependency, HostBindings};
+
+// `provider` is an already declared Service<T> with its interface descriptor.
+let bindings = HostBindings {
+    dependencies: vec![Dependency::new(&provider)?],
+    ..Default::default()
+};
+let mut process = cordis_remote::ProcessSpec::new(executable);
+process.bindings = bindings;
+```
+
+Resource capabilities retain their original Runtime owner and cleanup result.
+Local native messages stay typed; encoding and private handle mapping happen at
+the execution boundary. Custom providers implement the shared `Provider` contract,
+so adding an adapter does not require a bridge for every other backend. A local
+`Service<T>` can also use the explicit `Dependency::messages`, `bytes`, or `json`
+gateway. The [real backend matrix](crates/cordis-wasm/tests/unified_host.rs) exercises
+heterogeneous resources, control channels, and child plugin factories.
+
 ## Execution backends
 
 The host runtime is Rust. Plugins can run through the following SDK paths:

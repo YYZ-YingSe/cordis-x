@@ -3,7 +3,7 @@ use crate::{
     Bytes, Error, Instance, Payload, Result, Value, context::Router, context::next_id, ffi::Reply,
     json,
 };
-use cordis_runtime::{Context, Event, Middleware, Next, WeakEffectHandle};
+use cordis_runtime::{Context, Next, WeakEffectHandle};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::ControlFlow,
@@ -14,50 +14,7 @@ use std::{
 };
 use tokio::sync::{Semaphore, watch};
 
-#[derive(Clone)]
-pub struct EventBinding {
-    pub(crate) alias: String,
-    pub(crate) event: Event<Bytes, Bytes>,
-}
-impl EventBinding {
-    pub fn new(alias: impl Into<String>, event: &Event<Bytes, Bytes>) -> Self {
-        Self {
-            alias: alias.into(),
-            event: event.clone(),
-        }
-    }
-}
-#[derive(Clone)]
-pub struct MiddlewareBinding {
-    pub(crate) alias: String,
-    pub(crate) middleware: Middleware<Bytes, Bytes>,
-}
-impl MiddlewareBinding {
-    pub fn new(alias: impl Into<String>, middleware: &Middleware<Bytes, Bytes>) -> Self {
-        Self {
-            alias: alias.into(),
-            middleware: middleware.clone(),
-        }
-    }
-}
-impl std::fmt::Debug for EventBinding {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("EventBinding")
-            .field(&self.alias)
-            .field(self.event.contract())
-            .field(&self.event.realm())
-            .finish()
-    }
-}
-impl std::fmt::Debug for MiddlewareBinding {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("MiddlewareBinding")
-            .field(&self.alias)
-            .field(self.middleware.contract())
-            .field(&self.middleware.realm())
-            .finish()
-    }
-}
+use cordis_host::Body;
 #[derive(Clone, Debug)]
 pub struct ReactiveLimits {
     pub subscriptions: usize,
@@ -93,14 +50,14 @@ impl crate::Capabilities {
             }
         }
         let mut expected = json!({"events":{},"middleware":{}});
-        for binding in &self.events {
+        for binding in &self.bindings.events {
             declaration(
                 &mut expected["events"],
                 &binding.alias,
                 binding.event.contract(),
             )?;
         }
-        for binding in &self.middleware {
+        for binding in &self.bindings.middleware {
             declaration(
                 &mut expected["middleware"],
                 &binding.alias,
@@ -145,7 +102,7 @@ struct Registry {
 }
 struct Frame {
     grant: u64,
-    next: Next<Bytes, Bytes>,
+    next: Next<Body, Body>,
 }
 struct Subscription {
     callback: u64,
@@ -314,9 +271,11 @@ impl Router {
                         )
                     })?;
                 Payload::message(
-                    next.run(args.one().map_err(invalid_payload)?)
+                    next.run(Body::from_bytes(args.one().map_err(invalid_payload)?))
                         .await
-                        .map_err(runtime_error)?,
+                        .map_err(runtime_error)?
+                        .into_bytes()
+                        .map_err(Error::Unknown)?,
                 )
             }
             _ => return Err(Error::InvalidInput("unknown Reactive operation".into())),
@@ -333,12 +292,14 @@ impl Router {
     ) -> Result<u64> {
         let event = self
             .capabilities
+            .bindings
             .events
             .iter()
             .find(|b| b.alias == alias)
             .map(|b| b.event.clone());
         let middleware = self
             .capabilities
+            .bindings
             .middleware
             .iter()
             .find(|b| b.alias == alias)
@@ -391,11 +352,17 @@ impl Router {
         let router = self.clone();
         let invoked = entry.clone();
         let native = if let Some(event) = event.filter(|_| kind == 1) {
-            let handler = move |args, ctx| {
+            let handler = move |args: Body, ctx| {
                 let (router, entry, instance) = (router.clone(), invoked.clone(), instance.clone());
                 async move {
                     let result = router
-                        .callback(&instance, &ctx, 13, callback, Payload::message(args))
+                        .callback(
+                            &instance,
+                            &ctx,
+                            13,
+                            callback,
+                            Payload::message(args.into_bytes().map_err(Error::InvalidInput)?),
+                        )
                         .await
                         .and_then(parse_flow);
                     router.record_unknown(&instance, &ctx, Some(&entry), result.as_ref().err())?;
@@ -429,13 +396,16 @@ impl Router {
                             &ctx,
                             14,
                             callback,
-                            Payload::with_message(json!({"next":id}), args),
+                            Payload::with_message(
+                                json!({"next":id}),
+                                args.into_bytes().map_err(Error::InvalidInput)?,
+                            ),
                         )
                         .await
                         .and_then(|p| p.one().map_err(|e| Error::Unknown(e.to_string())));
                     drop(frame);
                     router.record_unknown(&instance, &ctx, Some(&entry), result.as_ref().err())?;
-                    result.map_err(Into::into)
+                    result.map(Body::from_bytes).map_err(Into::into)
                 }
             })
         };
@@ -486,6 +456,7 @@ impl Router {
         let ctx = self.context(grant)?;
         let event = &self
             .capabilities
+            .bindings
             .events
             .iter()
             .find(|b| b.alias == alias)
@@ -511,15 +482,19 @@ impl Router {
         let id = next_id()?;
         let instance = self.instance.upgrade().ok_or(Error::Closed)?;
         let dispatch = if serial {
-            event.emit_serial(&ctx, input)
+            event.emit_serial(&ctx, Body::from_bytes(input))
         } else {
-            event.emit(&ctx, input)
+            event.emit(&ctx, Body::from_bytes(input))
         }?;
         let (tx, rx) = watch::channel(None);
         entries.dispatches.insert(id, rx);
         tokio::spawn(async move {
             let _instance = instance;
-            let result = dispatch.join().await.map(flows_payload).map_err(Into::into);
+            let result = dispatch
+                .join()
+                .await
+                .map_err(Error::from)
+                .and_then(flows_payload);
             tx.send_replace(Some(result));
         });
         Ok(id)
@@ -534,6 +509,7 @@ impl Router {
         let ctx = self.context(grant)?;
         let middleware = self
             .capabilities
+            .bindings
             .middleware
             .iter()
             .find(|b| b.alias == alias)
@@ -559,19 +535,25 @@ impl Router {
         let unknown = Arc::new(Mutex::new(None));
         let failure = unknown.clone();
         let result = middleware
-            .run(&ctx, args, move |args, ctx| {
+            .run(&ctx, Body::from_bytes(args), move |args, ctx| {
                 let (router, instance, failure) =
                     (router.clone(), instance.clone(), failure.clone());
                 async move {
                     let result = router
-                        .callback(&instance, &ctx, 15, callback, Payload::message(args))
+                        .callback(
+                            &instance,
+                            &ctx,
+                            15,
+                            callback,
+                            Payload::message(args.into_bytes().map_err(Error::InvalidInput)?),
+                        )
                         .await
                         .and_then(|p| p.one().map_err(|e| Error::Unknown(e.to_string())));
                     if let Err(error @ Error::Unknown(_)) = &result {
                         *failure.lock().unwrap() = Some(error.clone());
                     }
                     router.record_unknown(&instance, &ctx, None, result.as_ref().err())?;
-                    result.map_err(Into::into)
+                    result.map(Body::from_bytes).map_err(Into::into)
                 }
             })
             .await
@@ -579,7 +561,10 @@ impl Router {
         // C++ owns this one-shot callback until this synchronous host call ends.
         // An unknown terminal retains its captures and native failed inverse.
         let failure = unknown.lock().unwrap().clone();
-        failure.map_or(result, Err)
+        failure
+            .map_or(result, Err)?
+            .into_bytes()
+            .map_err(Error::Unknown)
     }
     async fn callback(
         &self,
@@ -658,23 +643,23 @@ fn runtime_error(error: cordis_runtime::Error) -> Error {
 fn invalid_payload(e: impl ToString) -> Error {
     Error::InvalidInput(e.to_string())
 }
-fn flows_payload(flows: Vec<ControlFlow<Bytes>>) -> Payload {
+fn flows_payload(flows: Vec<ControlFlow<Body>>) -> Result<Payload> {
     let mut messages = vec![];
     let control = Value::Array(
         flows
             .into_iter()
             .map(|flow| match flow {
-                ControlFlow::Continue(()) => json!("continue"),
+                ControlFlow::Continue(()) => Ok(json!("continue")),
                 ControlFlow::Break(value) => {
-                    messages.push(value);
-                    json!("break")
+                    messages.push(value.into_bytes().map_err(Error::Unknown)?);
+                    Ok(json!("break"))
                 }
             })
-            .collect(),
+            .collect::<Result<Vec<_>>>()?,
     );
-    Payload { control, messages }
+    Ok(Payload { control, messages })
 }
-fn parse_flow(value: Payload) -> Result<ControlFlow<Bytes>> {
+fn parse_flow(value: Payload) -> Result<ControlFlow<Body>> {
     if value.control.as_object().map(|o| o.len()) != Some(1) {
         return Err(Error::Unknown("invalid ABI event control flow".into()));
     }
@@ -682,7 +667,7 @@ fn parse_flow(value: Payload) -> Result<ControlFlow<Bytes>> {
         Some("continue") if value.messages.is_empty() => Ok(ControlFlow::Continue(())),
         Some("break") => value
             .one()
-            .map(ControlFlow::Break)
+            .map(|v| ControlFlow::Break(Body::from_bytes(v)))
             .map_err(|e| Error::Unknown(e.to_string())),
         _ => Err(Error::Unknown("invalid ABI event control flow".into())),
     }

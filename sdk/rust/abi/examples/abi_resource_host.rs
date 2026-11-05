@@ -1,4 +1,5 @@
-use cordis_abi::{AbiService as PortableService, Capabilities, Dependency, Library};
+use cordis_abi::{AbiService as PortableService, Capabilities, Library};
+use cordis_host::Dependency;
 use cordis_runtime::{Plugin, Runtime, Service};
 use cordis_sdk_core::json;
 use std::sync::Arc;
@@ -37,19 +38,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap(),
     );
     let provider = load("resource_counter")?.with_context(Capabilities {
-        dependencies: vec![Dependency::new_json(
-            &logger,
-            cordis_sdk_core::Descriptor::new(
-                cordis_portable_example::resources::generated::CounterLogClient::interface(),
-            )
-            .unwrap(),
-            |_, _, _, value| {
-                Box::pin(async move {
-                    println!("cleanup: {value}");
-                    Ok(json!({}))
-                })
-            },
-        )],
+        bindings: cordis_host::HostBindings {
+            dependencies: vec![Dependency::json(
+                &logger,
+                cordis_sdk_core::Descriptor::new(
+                    cordis_portable_example::resources::generated::CounterLogClient::interface(),
+                )
+                .unwrap(),
+                |_, _, _, value| {
+                    Box::pin(async move {
+                        println!("cleanup: {value}");
+                        Ok::<_, cordis_abi::Error>(json!({}))
+                    })
+                },
+            )],
+            ..Default::default()
+        },
         ..Default::default()
     })?;
     runtime
@@ -63,7 +67,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap(),
     );
     let consumer = load("resource_client")?.with_context(Capabilities {
-        dependencies: vec![Dependency::abi(&counters)],
+        bindings: cordis_host::HostBindings {
+            dependencies: vec![Dependency::new(&counters).unwrap()],
+            ..Default::default()
+        },
         ..Default::default()
     })?;
     runtime

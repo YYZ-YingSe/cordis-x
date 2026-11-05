@@ -117,7 +117,7 @@ async fn candidate(
                     // Install the same local executor under a real Broker candidate's
                     // Context, so resource tickets must retain its dynamic lease.
                     let client =
-                        Client::start::<Version>(json!(version), Arc::new(Capabilities::default()))
+                        Client::start::<Version>(json!(version), Arc::new(HostBindings::default()))
                             .await
                             .map_err(native_error)?;
                     let cleanup = client.clone();

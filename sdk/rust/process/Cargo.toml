@@ -18,6 +18,7 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 
 [dev-dependencies]
+cordis-host.workspace = true
 cordis-example-contracts.workspace = true
 cordis-test-contracts.workspace = true
 cordis-sdk-runtime.workspace = true

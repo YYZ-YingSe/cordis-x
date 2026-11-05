@@ -1,7 +1,7 @@
 //! One generated service exercises native ABI and two actual Wasm guests.
 #[path = "../../cordis-codegen/tests/support/next_probe.rs"]
 mod next_probe;
-use cordis_abi::Bytes;
+use cordis_host::Body;
 use cordis_portable_example::workflows::generated::{WorkflowClient, WorkflowControls};
 use cordis_runtime as rt;
 use cordis_sdk_core::{self as sdk, json};
@@ -121,7 +121,7 @@ call!(cordis_abi::AbiService);
 call!(cordis_wasm::ContextService);
 struct Setup {
     validation: sdk::Validation,
-    settings: rt::Service<Bytes>,
+    settings: rt::Service<Body>,
     created: Arc<AtomicUsize>,
     closed: Arc<AtomicUsize>,
 }
@@ -134,14 +134,14 @@ impl Setup {
             closed: Arc::new(AtomicUsize::new(0)),
         }
     }
-    fn factory(&self) -> impl Fn(Bytes) -> rt::Result<rt::Plugin> + Send + Sync + 'static {
+    fn factory(&self) -> impl Fn(Body) -> rt::Result<rt::Plugin> + Send + Sync + 'static {
         let validation = self.validation;
         let created = self.created.clone();
         let closed = self.closed.clone();
         move |config| {
             WorkflowControls::worker()
                 .with_validation(validation)
-                .build(sdk::Message::from_bytes(<cordis_portable_example::workflows::generated::data::workflows::WorkerConfig as sdk::typed::Codec>::contract().clone(),config).unwrap(), |config| {
+                .build(sdk::Message::from_bytes(<cordis_portable_example::workflows::generated::data::workflows::WorkerConfig as sdk::typed::Codec>::contract().clone(),config.into_bytes().unwrap()).unwrap(), |config| {
                     if config.label.as_deref() == Some("reject") {
                         return Err(sdk::error("invalid_worker", "factory refusal"));
                     }
@@ -180,7 +180,7 @@ async fn scenario<S: Call>(setup: Setup, service: rt::Service<S>, plugin: rt::Pl
                     async move {
                         assert_eq!(
                             WorkflowControls::settings()
-                                .decode(sdk::Message::from_bytes(<cordis_portable_example::workflows::generated::data::workflows::Settings as sdk::typed::Codec>::contract().clone(),ctx.dependency(&settings)?.with(|v, _| Ok(v.clone()))?).unwrap())
+                                .decode(sdk::Message::from_bytes(<cordis_portable_example::workflows::generated::data::workflows::Settings as sdk::typed::Codec>::contract().clone(),ctx.dependency(&settings)?.with(|v, _| Ok(v.clone()))?.into_bytes().map_err(rt::Error::Message)?).unwrap())
                                 .unwrap()
                                 .answer,
                             Some(42)
@@ -236,7 +236,7 @@ async fn scenario<S: Call>(setup: Setup, service: rt::Service<S>, plugin: rt::Pl
         );
     }
     for expired in [false, true] {
-        let probe = next_probe::install::<Bytes>(&runtime, expired).await;
+        let probe = next_probe::install::<Body>(&runtime, expired).await;
         if expired {
             handle
                 .call(|s, ctx| s.invoke(ctx, "run", json!({"value":"5"})))
@@ -296,20 +296,23 @@ async fn generated_controls_run_through_rust_and_cpp_abi() {
             }
             .unwrap()
             .with_context(cordis_abi::Capabilities {
-                validation,
-                events: vec![cordis_abi::EventBinding::new(
-                    "tick",
-                    &rt::Event::new("example.tick", "1"),
-                )],
-                middleware: vec![cordis_abi::MiddlewareBinding::new(
-                    "request",
-                    &rt::Middleware::new("example.request", "1"),
-                )],
-                factories: vec![cordis_abi::FactoryBinding::new("worker", setup.factory())],
-                provisions: vec![cordis_abi::ProvisionBinding::new(
-                    "settings",
-                    &setup.settings,
-                )],
+                bindings: cordis_host::HostBindings {
+                    validation,
+                    events: vec![cordis_host::EventBinding::new(
+                        "tick",
+                        &rt::Event::new("example.tick", "1"),
+                    )],
+                    middleware: vec![cordis_host::MiddlewareBinding::new(
+                        "request",
+                        &rt::Middleware::new("example.request", "1"),
+                    )],
+                    factories: vec![cordis_host::FactoryBinding::new("worker", setup.factory())],
+                    provisions: vec![cordis_host::ProvisionBinding::new(
+                        "settings",
+                        &setup.settings,
+                    )],
+                    ..Default::default()
+                },
                 ..Default::default()
             })
             .unwrap();
@@ -343,20 +346,23 @@ async fn generated_controls_run_through_rust_and_cpp_wasm() {
                     ..Default::default()
                 },
                 cordis_wasm::Capabilities {
-                    validation,
-                    events: [("tick".into(), rt::Event::new("example.tick", "1"))].into(),
-                    middleware: [(
-                        "request".into(),
-                        rt::Middleware::new("example.request", "1"),
-                    )]
-                    .into(),
-                    factories: [(
-                        "worker".into(),
-                        Arc::new(move |v| factory(v).map_err(Into::into))
-                            as Arc<dyn Fn(Bytes) -> cordis_wasm::Result<rt::Plugin> + Send + Sync>,
-                    )]
-                    .into(),
-                    provisions: [("settings".into(), setup.settings.clone())].into(),
+                    bindings: cordis_host::HostBindings {
+                        validation,
+                        events: vec![cordis_host::EventBinding::new(
+                            "tick",
+                            &rt::Event::new("example.tick", "1"),
+                        )],
+                        middleware: vec![cordis_host::MiddlewareBinding::new(
+                            "request",
+                            &rt::Middleware::new("example.request", "1"),
+                        )],
+                        factories: vec![cordis_host::FactoryBinding::new("worker", factory)],
+                        provisions: vec![cordis_host::ProvisionBinding::new(
+                            "settings",
+                            &setup.settings,
+                        )],
+                        ..Default::default()
+                    },
                     wasi: cpp.then(cordis_wasm::Wasi::default),
                     ..Default::default()
                 },

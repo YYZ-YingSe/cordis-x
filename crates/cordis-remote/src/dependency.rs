@@ -1,169 +1,15 @@
-use crate::{Bytes, Error, Payload, RemoteService, Result, Value, json};
-use cordis_runtime::{BoxFuture, Context, Plugin, Service};
+use crate::{Error, Payload, Result, Value, json};
+use cordis_runtime::{Context, Service};
 use cordis_wire::local::Envelope;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fmt,
     sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
 };
 
-type Invoke =
-    dyn Fn(Context, String, Envelope) -> BoxFuture<'static, Result<Envelope>> + Send + Sync;
-type Acquire = dyn Fn(Context, String, Envelope) -> BoxFuture<'static, Result<crate::RemoteResource>>
-    + Send
-    + Sync;
-
-/// An explicit adapter from a native service contract to portable method calls.
-#[derive(Clone)]
-pub struct Dependency {
-    descriptor: Option<cordis_contract::Descriptor>,
-    declaration: Service<()>,
-    invoke: Arc<Invoke>,
-    acquire: Option<Arc<Acquire>>,
-}
-impl fmt::Debug for Dependency {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Dependency")
-            .field(self.declaration.contract())
-            .finish()
-    }
-}
-impl Dependency {
-    pub fn new<T, F>(
-        service: &Service<T>,
-        descriptor: cordis_contract::Descriptor,
-        invoke: F,
-    ) -> Self
-    where
-        T: ?Sized + Send + Sync + 'static,
-        F: for<'a> Fn(&'a T, Context, String, Bytes) -> BoxFuture<'a, Result<Bytes>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let invoke = Arc::new(invoke);
-        Self::bind(
-            service,
-            Some(descriptor),
-            move |service, ctx, method, args| {
-                let invoke = invoke.clone();
-                Box::pin(async move {
-                    let bytes = invoke(service, ctx, method, args.one()?).await?;
-                    // An arbitrary application callback returns a new, unverified body.
-                    Ok(Envelope::from(Payload::message(bytes)))
-                })
-            },
-        )
-    }
-    /// Explicit JSON gateway for applications whose native service API is JSON.
-    pub fn new_json<T, F>(
-        service: &Service<T>,
-        descriptor: cordis_contract::Descriptor,
-        invoke: F,
-    ) -> Self
-    where
-        T: ?Sized + Send + Sync + 'static,
-        F: for<'a> Fn(&'a T, Context, String, Value) -> BoxFuture<'a, Result<Value>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let schema = descriptor.clone();
-        let invoke = Arc::new(invoke);
-        Self::new(service, descriptor, move |value, ctx, method, args| {
-            let schema = schema.clone();
-            let invoke = invoke.clone();
-            Box::pin(async move {
-                let signature =
-                    cordis_contract::portable::method(&schema.interface().methods, &method)
-                        .map_err(Error::InvalidInput)?;
-                let input = crate::body_json(&signature.args, &args)
-                    .map_err(|e| Error::InvalidInput(e.to_string()))?;
-                let result = invoke(value, ctx, method, input).await?;
-                crate::json_body(&signature.result, &result)
-                    .map_err(|e| Error::Protocol(e.to_string()))
-            })
-        })
-    }
-    fn bind<T, F>(
-        service: &Service<T>,
-        descriptor: Option<cordis_contract::Descriptor>,
-        invoke: F,
-    ) -> Self
-    where
-        T: ?Sized + Send + Sync + 'static,
-        F: for<'a> Fn(&'a T, Context, String, Envelope) -> BoxFuture<'a, Result<Envelope>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let declaration = Service::new(
-            service.contract().name.clone(),
-            service.contract().revision.clone(),
-        );
-        let service = service.clone();
-        let invoke = Arc::new(invoke);
-        Self {
-            descriptor,
-            declaration,
-            acquire: None,
-            invoke: Arc::new(move |ctx, method, args| {
-                let service = service.clone();
-                let invoke = invoke.clone();
-                Box::pin(async move {
-                    // Resolve through the invocation's definition site, preserving its use site.
-                    let handle = ctx
-                        .dependency(&service)
-                        .map_err(crate::resource::runtime_error)?;
-                    handle
-                        .call(move |value, context| {
-                            Box::pin(async move { Ok(invoke(value, context, method, args).await) })
-                        })
-                        .await
-                        .map_err(crate::resource::runtime_error)?
-                })
-            }),
-        }
-    }
-    /// Bind both value calls and caller-owned resource acquisition from a process service.
-    pub fn remote(service: &Service<RemoteService>) -> Self {
-        let mut dependency = Self::bind(
-            service,
-            service.descriptor().cloned(),
-            |remote, ctx, method, args| {
-                Box::pin(async move {
-                    remote
-                        .invoke_envelope(&ctx, remote.endpoint(), &method, args)
-                        .await
-                })
-            },
-        );
-        let service = service.clone();
-        dependency.acquire = Some(Arc::new(move |ctx, kind, args| {
-            let service = service.clone();
-            Box::pin(async move {
-                ctx.dependency(&service)
-                    .map_err(crate::resource::runtime_error)?
-                    .call(move |remote, ctx| {
-                        Box::pin(async move {
-                            Ok(remote
-                                .acquire_envelope(&ctx, remote.endpoint(), &kind, args)
-                                .await)
-                        })
-                    })
-                    .await
-                    .map_err(crate::resource::runtime_error)?
-            })
-        }));
-        dependency
-    }
-    pub(crate) fn declare(&self, plugin: Plugin) -> Plugin {
-        plugin.requires(&self.declaration)
-    }
-}
+use cordis_host::Dependency;
 
 pub(crate) struct Router {
     dependencies: BTreeMap<String, Dependency>,
@@ -260,10 +106,14 @@ impl Router {
                             "middleware_next" => router
                                 .middleware
                                 .continuation(&control)?
-                                .run(args)
+                                .run(cordis_host::Body::from_bytes(args))
                                 .await
-                                .map(Payload::message)
-                                .map_err(crate::middleware::runtime_error),
+                                .map_err(crate::middleware::runtime_error)
+                                .and_then(|v| {
+                                    v.into_bytes()
+                                        .map(Payload::message)
+                                        .map_err(Error::Protocol)
+                                }),
                             _ => unreachable!(),
                         }
                     }
@@ -312,23 +162,20 @@ impl Router {
             })?;
             let method = text(&payload.control, "method")?;
             let signature = cordis_contract::portable::method(
-                &dependency
-                    .descriptor
-                    .as_ref()
-                    .expect("validated descriptor")
-                    .interface()
-                    .methods,
+                &dependency.descriptor().interface().methods,
                 &method,
             )
             .map_err(Error::InvalidInput)?
             .clone();
             let mut args = Envelope::from(Payload::message(payload.one()?));
             args.check(&signature.args).map_err(Error::InvalidInput)?;
-            let invoke = dependency.invoke.clone();
+            let dependency = dependency.clone();
             return context
                 .operation(move |ctx| async move {
-                    Ok(invoke(ctx, method, args)
+                    Ok(dependency
+                        .invoke_wire(ctx, method, args)
                         .await
+                        .map_err(Error::from)
                         .map_err(|e| e.check_declared(&signature.errors, "dependency errors"))
                         .and_then(|mut value| {
                             value.check(&signature.result).map_err(Error::Protocol)?;
@@ -368,34 +215,28 @@ impl Router {
                                     code: "undeclared_dependency".into(),
                                     message: name,
                                 })?;
-                        let acquire =
-                            dependency.acquire.as_ref().ok_or_else(|| Error::Refused {
-                                code: "unsupported_resource".into(),
-                                message: "dependency has no resource binding".into(),
-                            })?;
                         let kind = text(&payload.control, "kind")?;
+                        let schema = dependency.resource_contract(&kind).map_err(Error::from)?;
                         let mut args = Envelope::from(Payload::message(payload.one()?));
-                        let schema = cordis_contract::portable::resource(
-                            dependency
-                                .descriptor
-                                .as_ref()
-                                .expect("validated descriptor"),
-                            &kind,
-                        )
-                        .map_err(Error::InvalidInput)?;
                         args.check(&schema.args).map_err(Error::InvalidInput)?;
                         let (id, entry) = router.resources.reserve(&payload.control)?;
-                        return Ok(match acquire(ctx, kind, args).await {
-                            Ok(resource) => entry.commit(id, resource).into(),
-                            Err(error) => failure(error, true).into(),
-                        });
+                        return Ok(
+                            match dependency
+                                .acquire_wire(ctx, kind, args)
+                                .await
+                                .map_err(Error::from)
+                            {
+                                Ok(resource) => entry.commit(id, resource).into(),
+                                Err(error) => failure(error, true).into(),
+                            },
+                        );
                     }
                     let resource = router.resources.get(&payload.control)?;
                     if command == "dependency_resource_dispose" {
                         if !payload.messages.is_empty() {
                             return Err(Error::InvalidInput("unexpected business message".into()));
                         }
-                        return Ok(match resource.dispose().await {
+                        return Ok(match resource.dispose().await.map_err(Error::from) {
                             Ok(()) => success(Value::Null),
                             Err(e) => failure(e, false),
                         }
@@ -403,8 +244,9 @@ impl Router {
                     }
                     Ok(
                         match resource
-                            .invoke(&text(&payload.control, "method")?, payload.one()?)
+                            .invoke_bytes(&text(&payload.control, "method")?, payload.one()?)
                             .await
+                            .map_err(Error::from)
                         {
                             Ok(bytes) => Payload::with_message(success(Value::Null), bytes),
                             Err(error) => failure(error, false).into(),
@@ -421,19 +263,14 @@ impl Router {
             .map_err(crate::resource::runtime_error)
     }
     pub fn new(spec: &crate::ProcessSpec) -> Result<Arc<Self>> {
+        spec.bindings
+            .validate()
+            .map_err(|e| Error::InvalidInput(e.to_string()))?;
         let mut entries = BTreeMap::new();
-        for dependency in &spec.dependencies {
-            if dependency.descriptor.is_none() {
-                return Err(Error::InvalidInput(format!(
-                    "dependency {}: interface descriptor required",
-                    dependency.declaration.contract()
-                )));
-            }
-            let name = dependency.declaration.contract().name.to_string();
+        for dependency in &spec.bindings.dependencies {
+            let name = dependency.declaration().contract().name.to_string();
             let mut dependency = dependency.clone();
-            dependency.descriptor = dependency
-                .descriptor
-                .map(|d| d.with_validation(spec.validation));
+            dependency = dependency.with_validation(spec.bindings.validation);
             if entries.insert(name, dependency).is_some() {
                 return Err(Error::InvalidInput("duplicate dependency name".into()));
             }
@@ -447,15 +284,15 @@ impl Router {
             sequences_enabled: AtomicBool::new(false),
             children: crate::scope::Scopes::default(),
             children_enabled: AtomicBool::new(false),
-            middleware: crate::middleware::Middlewares::new(&spec.middleware)?,
+            middleware: crate::middleware::Middlewares::new(&spec.bindings.middleware)?,
             middleware_enabled: AtomicBool::new(false),
-            events: crate::events::Events::new(&spec.events)?,
+            events: crate::events::Events::new(&spec.bindings.events)?,
             events_enabled: AtomicBool::new(false),
             tasks: crate::task::Tasks::default(),
             tasks_enabled: AtomicBool::new(false),
             composition: crate::composition::Composition::new(
-                &spec.factories,
-                &spec.provisions,
+                &spec.bindings.factories,
+                &spec.bindings.provisions,
                 spec.composition.clone(),
             )?,
             composition_enabled: AtomicBool::new(false),
@@ -463,10 +300,16 @@ impl Router {
             resources: crate::dependency_resources::Resources::default(),
             resources_enabled: AtomicBool::new(false),
             metadata_contracts: spec
+                .bindings
                 .dependencies
                 .iter()
-                .map(|d| d.declaration.contract().clone())
-                .chain(spec.provisions.iter().map(|p| p.service.contract().clone()))
+                .map(|d| d.declaration().contract().clone())
+                .chain(
+                    spec.bindings
+                        .provisions
+                        .iter()
+                        .map(|p| p.service.contract().clone()),
+                )
                 .collect(),
             primary: OnceLock::new(),
             session: OnceLock::new(),
@@ -523,7 +366,7 @@ impl Router {
                 .map(|(name, dependency)| {
                     (
                         name.clone(),
-                        json!(dependency.declaration.contract().revision.as_ref()),
+                        json!(dependency.declaration().contract().revision.as_ref()),
                     )
                 })
                 .collect(),
@@ -536,12 +379,7 @@ impl Router {
                 .map(|(name, dependency)| {
                     (
                         name.clone(),
-                        cordis_contract::portable::encode(
-                            dependency
-                                .descriptor
-                                .as_ref()
-                                .expect("validated at construction"),
-                        ),
+                        cordis_contract::portable::encode(dependency.descriptor()),
                     )
                 })
                 .collect(),

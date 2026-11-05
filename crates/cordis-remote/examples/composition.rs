@@ -1,4 +1,5 @@
-use cordis_remote::{Endpoint, FactoryBinding, ProcessSpec, ProvisionBinding, RemoteService, json};
+use cordis_host::{FactoryBinding, ProvisionBinding};
+use cordis_remote::{Endpoint, ProcessSpec, RemoteService, json};
 use cordis_sdk::*;
 use std::sync::{Arc, Mutex};
 #[tokio::main]
@@ -28,7 +29,7 @@ async fn main() -> Result<()> {
         spec.args.push("--stdio-only".into());
     }
     let rt = Runtime::new();
-    let settings = Service::<cordis_remote::Bytes>::new("example.settings", "1");
+    let settings = Service::<cordis_host::Body>::new("example.settings", "1");
     let service = Service::<RemoteService>::new("example.composition", "1").with_descriptor(
         cordis_remote::Descriptor::new(
             cordis_portable_example::lifecycle::ComposerClient::interface(),
@@ -38,7 +39,7 @@ async fn main() -> Result<()> {
     spec = spec
         .factory(FactoryBinding::new("worker", |config| {
             cordis_portable_example::lifecycle::ComposerControls::worker()
-                .build(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::lifecycle::data::lifecycle::WorkerConfig as cordis_sdk_core::typed::Codec>::contract().clone(), config).map_err(Error::Message)?, |config| {
+                .build(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::lifecycle::data::lifecycle::WorkerConfig as cordis_sdk_core::typed::Codec>::contract().clone(), config.into_bytes().map_err(Error::Message)?).map_err(Error::Message)?, |config| {
                     // This factory constructs a definition. Resource acquisition belongs in
                     // its initializer, so the Runtime can own and unwind it.
                     let name = config.name.expect("validated required name");

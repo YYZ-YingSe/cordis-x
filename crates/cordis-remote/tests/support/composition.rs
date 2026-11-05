@@ -1,5 +1,6 @@
 use super::*;
-use cordis_remote::{CompositionLimits, FactoryBinding, ProvisionBinding, Value};
+use cordis_host::{FactoryBinding, ProvisionBinding};
+use cordis_remote::{CompositionLimits, Value};
 fn service() -> Service<RemoteService> {
     Service::new("example.composition", "1").with_descriptor(
         cordis_remote::Descriptor::new(
@@ -8,7 +9,7 @@ fn service() -> Service<RemoteService> {
         .unwrap(),
     )
 }
-fn settings() -> Service<cordis_remote::Bytes> {
+fn settings() -> Service<cordis_host::Body> {
     Service::new("example.settings", "1")
 }
 fn spec(backend: Backend, endpoint: Endpoint, log: Arc<Mutex<Vec<String>>>) -> ProcessSpec {
@@ -20,7 +21,7 @@ fn spec(backend: Backend, endpoint: Endpoint, log: Arc<Mutex<Vec<String>>>) -> P
     }
     spec.factory(FactoryBinding::new("worker", move |config| {
         cordis_portable_example::lifecycle::ComposerControls::worker()
-            .build(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::lifecycle::data::lifecycle::WorkerConfig as cordis_sdk_core::typed::Codec>::contract().clone(),config).unwrap(), |config| {
+            .build(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::lifecycle::data::lifecycle::WorkerConfig as cordis_sdk_core::typed::Codec>::contract().clone(),config.into_bytes().map_err(Error::Message)?).unwrap(), |config| {
                 let name = config.name.expect("validated required name");
                 if name == "panic" {
                     panic!("definition factory panic");
@@ -81,7 +82,7 @@ async fn consumer_for(
                             .dependency(&settings())?
                             .call(|v, _| Box::pin(async move { Ok((*v).clone()) }))
                             .await?;
-                        assert_eq!(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::lifecycle::data::lifecycle::Settings as cordis_sdk_core::typed::Codec>::contract().clone(),config).unwrap().to_json().unwrap(),json!({"answer":42}));
+                        assert_eq!(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::lifecycle::data::lifecycle::Settings as cordis_sdk_core::typed::Codec>::contract().clone(),config.into_bytes().map_err(Error::Message)?).unwrap().to_json().unwrap(),json!({"answer":42}));
                         *saved.lock().unwrap() = Some(ctx.dependency(&service)?);
                         Ok(())
                     }
@@ -388,7 +389,7 @@ async fn broker_install_denies_before_factory_and_leaves_live_route_usable() {
         bounded(b.ready()).await.unwrap();
         let definitions = Arc::new(AtomicUsize::new(0));
         let mut spec = spec(backend, Endpoint::Ipc, Arc::default());
-        spec.factories = vec![FactoryBinding::new("worker", {
+        spec.bindings.factories = vec![FactoryBinding::new("worker", {
             let definitions = definitions.clone();
             move |_| {
                 definitions.fetch_add(1, Ordering::SeqCst);

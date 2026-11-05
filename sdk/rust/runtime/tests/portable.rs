@@ -1,7 +1,9 @@
+use cordis_host::Dependency;
+use cordis_host::HostBindings;
 use cordis_portable_example::Example;
 use cordis_runtime::*;
 use cordis_sdk_core::{Value, json};
-use cordis_sdk_runtime::{Capabilities, Dependency, Service as PortableService};
+use cordis_sdk_runtime::Service as PortableService;
 use std::sync::{Arc, Mutex};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -23,8 +25,8 @@ async fn portable_plugin_runs_reentrant_callbacks_on_native_runtime() {
     .ready()
     .await
     .unwrap();
-    let caps = Capabilities {
-        dependencies: vec![Dependency::new(
+    let caps = HostBindings {
+        dependencies: vec![Dependency::messages(
             &logger,
             cordis_sdk_core::Descriptor::new(
                 cordis_sdk_core::contract::decode(
@@ -52,14 +54,17 @@ async fn portable_plugin_runs_reentrant_callbacks_on_native_runtime() {
                 })
             },
         )],
-        events: [("message".into(), Event::new("example.message", "1"))].into(),
-        middleware: [("chain".into(), Middleware::new("example.chain", "1"))].into(),
-        factories: [(
-            "worker".into(),
-            Arc::new(|_| Ok(Plugin::new("child", |_| async { Ok(()) })))
-                as cordis_sdk_runtime::Factory,
-        )]
-        .into(),
+        events: vec![cordis_host::EventBinding::new(
+            "message",
+            &Event::new("example.message", "1"),
+        )],
+        middleware: vec![cordis_host::MiddlewareBinding::new(
+            "chain",
+            &Middleware::new("example.chain", "1"),
+        )],
+        factories: vec![cordis_host::FactoryBinding::new("worker", |_| {
+            Ok(Plugin::new("child", |_| async { Ok(()) }))
+        })],
         ..Default::default()
     };
     let service = Service::<PortableService>::new("example.portable-rust", "1");

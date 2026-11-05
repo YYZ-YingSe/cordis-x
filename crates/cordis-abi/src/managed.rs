@@ -165,11 +165,13 @@ impl Router {
                 if &instance.module.contract != contract
                     && !self
                         .capabilities
+                        .bindings
                         .dependencies
                         .iter()
                         .any(|d| d.contract() == contract)
                     && !self
                         .capabilities
+                        .bindings
                         .provisions
                         .iter()
                         .any(|p| p.service.contract() == contract)

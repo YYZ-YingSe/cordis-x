@@ -1,7 +1,8 @@
+use cordis_host::Dependency;
 use cordis_runtime::{Plugin, Runtime, Service};
 use cordis_sdk_core::json;
 use cordis_wasm::{
-    Capabilities, ContextComponent, ContextService as PortableService, Dependency, Limits, Wasi,
+    Capabilities, ContextComponent, ContextService as PortableService, Limits, Wasi,
 };
 use std::sync::Arc;
 
@@ -42,19 +43,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let provider = load(
         "counter",
         Capabilities {
-            dependencies: vec![Dependency::new_json(
-                &logger,
-                cordis_contract::Descriptor::new(
-                    cordis_portable_example::resources::generated::CounterLogClient::interface(),
-                )
-                .unwrap(),
-                |_, _, _, value| {
-                    Box::pin(async move {
-                        println!("cleanup: {value}");
-                        Ok(json!({}))
-                    })
-                },
-            )],
+            bindings: cordis_host::HostBindings {
+                dependencies: vec![Dependency::json(
+                    &logger,
+                    cordis_contract::Descriptor::new(
+                        cordis_portable_example::resources::generated::CounterLogClient::interface(
+                        ),
+                    )
+                    .unwrap(),
+                    |_, _, _, value| {
+                        Box::pin(async move {
+                            println!("cleanup: {value}");
+                            Ok::<_, cordis_wasm::Error>(json!({}))
+                        })
+                    },
+                )],
+                ..Default::default()
+            },
             ..Default::default()
         },
     )?;
@@ -71,7 +76,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let consumer = load(
         "client",
         Capabilities {
-            dependencies: vec![Dependency::wasm(&counters)],
+            bindings: cordis_host::HostBindings {
+                dependencies: vec![Dependency::new(&counters).unwrap()],
+                ..Default::default()
+            },
             ..Default::default()
         },
     )?;

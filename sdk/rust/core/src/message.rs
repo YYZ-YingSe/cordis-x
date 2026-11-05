@@ -187,6 +187,12 @@ impl Message {
             },
         })
     }
+    /// Attach a host-selected contract without traversing fields. The real
+    /// consumer performs typed decoding or explicitly validates an opaque body.
+    pub fn bind(self, expected: &MessageContract) -> Result<Self, String> {
+        self.check_identity(expected)?;
+        Ok(self.with_validation(expected.validation()))
+    }
     fn check_identity(&self, expected: &MessageContract) -> Result<(), String> {
         if std::ptr::eq(self.contract(), expected) || self.contract().same_message(expected)? {
             Ok(())

@@ -4,7 +4,9 @@ mod artifact;
 mod composition;
 mod dependency;
 mod dependency_resources;
-pub use composition::{CompositionLimits, FactoryBinding, ProvisionBinding};
+mod host;
+mod host_failure;
+pub use composition::CompositionLimits;
 #[cfg(feature = "loader")]
 pub mod loader;
 #[cfg(feature = "loader")]
@@ -12,8 +14,7 @@ pub use artifact::{ArtifactOptions, Launch, ProcessArtifact};
 mod effects;
 mod events;
 mod middleware;
-pub use events::EventBinding;
-pub use middleware::MiddlewareBinding;
+
 mod error;
 mod frame;
 mod http;
@@ -25,7 +26,7 @@ mod session;
 mod task;
 pub use cordis_contract::{Descriptor, Dispatch, Interface, MessageContract, Method};
 pub use cordis_wire::{Bytes, Payload, Value, json};
-pub use dependency::Dependency;
+
 pub use error::{Error, Result};
 pub use process::{Endpoint, ProcessSpec, RemoteService};
 pub use resource::RemoteResource;

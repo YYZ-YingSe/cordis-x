@@ -1,9 +1,7 @@
 //! Typed control business is shared across languages; the host chooses transport and grants.
+use cordis_host::{EventBinding, FactoryBinding, MiddlewareBinding, ProvisionBinding};
 use cordis_portable_example::workflows::generated::{WorkflowClient, WorkflowControls};
-use cordis_remote::{
-    Endpoint, EventBinding, FactoryBinding, MiddlewareBinding, ProcessSpec, ProvisionBinding,
-    RemoteService, json,
-};
+use cordis_remote::{Endpoint, ProcessSpec, RemoteService, json};
 use cordis_sdk::*;
 use std::{
     path::Path,
@@ -44,7 +42,7 @@ async fn main() -> Result<()> {
     if matches!(spec.endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());
     }
-    let settings = Service::<cordis_remote::Bytes>::new("example.settings", "1");
+    let settings = Service::<cordis_host::Body>::new("example.settings", "1");
     spec = spec
         .event(EventBinding::new("tick", &Event::new("example.tick", "1")))
         .middleware(MiddlewareBinding::new(
@@ -54,7 +52,7 @@ async fn main() -> Result<()> {
         .provision(ProvisionBinding::new("settings", &settings))
         .factory(FactoryBinding::new("worker", |config| {
             WorkflowControls::worker()
-                .build(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::workflows::generated::data::workflows::WorkerConfig as cordis_sdk_core::typed::Codec>::contract().clone(), config).map_err(Error::Message)?, |config| {
+                .build(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::workflows::generated::data::workflows::WorkerConfig as cordis_sdk_core::typed::Codec>::contract().clone(), config.into_bytes().map_err(Error::Message)?).map_err(Error::Message)?, |config| {
                     let name = config.label.unwrap();
                     Ok(Plugin::new(name.clone(), move |ctx| {
                         let name = name.clone();
@@ -87,7 +85,7 @@ async fn main() -> Result<()> {
                 let settings = settings.clone();
                 async move {
                     let settings = WorkflowControls::settings()
-                        .decode(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::workflows::generated::data::workflows::Settings as cordis_sdk_core::typed::Codec>::contract().clone(),ctx.dependency(&settings)?.with(|v, _| Ok(v.clone()))?).map_err(Error::Message)?)?;
+                        .decode(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::workflows::generated::data::workflows::Settings as cordis_sdk_core::typed::Codec>::contract().clone(),ctx.dependency(&settings)?.with(|v, _| Ok(v.clone()))?.into_bytes().map_err(Error::Message)?).map_err(Error::Message)?)?;
                     println!("settings.answer = {}", settings.answer.unwrap());
                     *saved.lock().unwrap() = Some(ctx.dependency(&service)?);
                     Ok(())

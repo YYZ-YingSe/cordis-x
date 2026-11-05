@@ -3,57 +3,13 @@ use crate::{
     Bytes, Error, Result, Value, json, resource::runtime_error, scope::text, session::WeakSession,
 };
 use cordis_contract::ContractId;
-use cordis_runtime::{Context, Plugin, Service, WeakPluginHandle};
+use cordis_runtime::{Context, Service, WeakPluginHandle};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fmt,
     sync::{Arc, Mutex},
 };
 
-type Factory = dyn Fn(Bytes) -> cordis_runtime::Result<Plugin> + Send + Sync;
-/// Constructs a definition only. Acquire resources in the plugin initializer.
-#[derive(Clone)]
-pub struct FactoryBinding {
-    alias: String,
-    factory: Arc<Factory>,
-}
-impl FactoryBinding {
-    pub fn new<F>(alias: impl Into<String>, factory: F) -> Self
-    where
-        F: Fn(Bytes) -> cordis_runtime::Result<Plugin> + Send + Sync + 'static,
-    {
-        Self {
-            alias: alias.into(),
-            factory: Arc::new(factory),
-        }
-    }
-}
-impl fmt::Debug for FactoryBinding {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("FactoryBinding").field(&self.alias).finish()
-    }
-}
-#[derive(Clone)]
-pub struct ProvisionBinding {
-    alias: String,
-    pub(crate) service: Service<Bytes>,
-}
-impl ProvisionBinding {
-    pub fn new(alias: impl Into<String>, service: &Service<Bytes>) -> Self {
-        Self {
-            alias: alias.into(),
-            service: service.clone(),
-        }
-    }
-}
-impl fmt::Debug for ProvisionBinding {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ProvisionBinding")
-            .field(&self.alias)
-            .field(self.service.contract())
-            .finish()
-    }
-}
+use cordis_host::{Body, Factory, FactoryBinding, ProvisionBinding};
 #[derive(Clone, Debug)]
 pub struct CompositionLimits {
     pub children: usize,
@@ -66,7 +22,7 @@ impl Default for CompositionLimits {
 
 pub(crate) struct Composition {
     factories: BTreeMap<String, Arc<Factory>>,
-    provisions: BTreeMap<String, Service<Bytes>>,
+    provisions: BTreeMap<String, Service<Body>>,
     limits: CompositionLimits,
     entries: Mutex<BTreeMap<String, Option<Entry>>>,
 }
@@ -158,10 +114,12 @@ impl Composition {
             id: id.clone(),
         };
         // install_with checks Broker/cleanup/owner authority BEFORE factory code.
-        let child = tokio::task::spawn_blocking(move || ctx.install_with(|| factory(config)))
-            .await
-            .map_err(|e| Error::Resource(format!("factory failed: {e}")))?
-            .map_err(runtime_error)?;
+        let child = tokio::task::spawn_blocking(move || {
+            ctx.install_with(|| factory(Body::from_bytes(config)))
+        })
+        .await
+        .map_err(|e| Error::Resource(format!("factory failed: {e}")))?
+        .map_err(runtime_error)?;
         self.entries.lock().unwrap().insert(
             id.clone(),
             Some(Entry {
@@ -177,7 +135,7 @@ impl Composition {
             code: "undeclared_provision".into(),
             message: alias,
         })?;
-        ctx.provide(service, Arc::new(value))
+        ctx.provide(service, Arc::new(Body::from_bytes(value)))
             .map_err(runtime_error)?;
         Ok(Value::Null)
     }

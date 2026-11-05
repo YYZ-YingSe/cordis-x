@@ -188,30 +188,37 @@ async fn controls_run_on_native_runtime_and_children_follow_the_calling_owner() 
     let runtime = rt::Runtime::new();
     let event = rt::Event::new("example.tick", "1");
     let chain = rt::Middleware::new("example.request", "1");
-    let settings = rt::Service::<sdk::Message>::new("example.settings", "1");
+    let settings = rt::Service::<cordis_host::Body>::new("example.settings", "1");
     let service = rt::Service::<adapter::Service>::new("example.workflow", "1")
         .with_descriptor(sdk::Descriptor::new(WorkflowClient::interface()).unwrap());
     let created = Arc::new(AtomicUsize::new(0));
     let closed = Arc::new(AtomicUsize::new(0));
-    let factory: adapter::Factory = {
+    let factory: Arc<cordis_host::Factory> = {
         let created = created.clone();
         let closed = closed.clone();
         Arc::new(move |config| {
             WorkflowControls::worker()
-                .build(config, |config| {
-                    created.fetch_add(1, Ordering::SeqCst);
-                    let closed = closed.clone();
-                    Ok(rt::Plugin::new(config.label.unwrap(), move |ctx| {
+                .build(
+                    config
+                        .into_message(
+                            <data::workflows::WorkerConfig as sdk::typed::Codec>::contract(),
+                        )
+                        .map_err(rt::Error::Message)?,
+                    |config| {
+                        created.fetch_add(1, Ordering::SeqCst);
                         let closed = closed.clone();
-                        async move {
-                            ctx.defer("worker", move |_| async move {
-                                closed.fetch_add(1, Ordering::SeqCst);
+                        Ok(rt::Plugin::new(config.label.unwrap(), move |ctx| {
+                            let closed = closed.clone();
+                            async move {
+                                ctx.defer("worker", move |_| async move {
+                                    closed.fetch_add(1, Ordering::SeqCst);
+                                    Ok(())
+                                })?;
                                 Ok(())
-                            })?;
-                            Ok(())
-                        }
-                    }))
-                })
+                            }
+                        }))
+                    },
+                )
                 .map_err(Into::into)
         })
     };
@@ -221,11 +228,14 @@ async fn controls_run_on_native_runtime_and_children_follow_the_calling_owner() 
                 "workflow",
                 &service,
                 json!({}),
-                adapter::Capabilities {
-                    events: [("tick".into(), event.clone())].into(),
-                    middleware: [("request".into(), chain)].into(),
-                    factories: [("worker".into(), factory)].into(),
-                    provisions: [("settings".into(), settings.clone())].into(),
+                cordis_host::HostBindings {
+                    events: vec![cordis_host::EventBinding::new("tick", &event)],
+                    middleware: vec![cordis_host::MiddlewareBinding::new("request", &chain)],
+                    factories: vec![cordis_host::FactoryBinding {
+                        alias: "worker".into(),
+                        factory,
+                    }],
+                    provisions: vec![cordis_host::ProvisionBinding::new("settings", &settings)],
                     ..Default::default()
                 },
             )
@@ -247,7 +257,7 @@ async fn controls_run_on_native_runtime_and_children_follow_the_calling_owner() 
                     async move {
                         let config = ctx.dependency(&settings)?.with(|v, _| Ok(v.clone()))?;
                         assert_eq!(
-                            WorkflowControls::settings().decode(config).unwrap().answer,
+                            WorkflowControls::settings().decode(config.into_message(<data::workflows::Settings as sdk::typed::Codec>::contract()).unwrap()).unwrap().answer,
                             Some(42)
                         );
                         *saved.lock().unwrap() = Some(ctx.dependency(&service)?);
@@ -290,7 +300,7 @@ async fn controls_run_on_native_runtime_and_children_follow_the_calling_owner() 
         assert_eq!(value, expected, "{method}");
     }
     for expired in [false, true] {
-        let probe = next_probe::install::<cordis_sdk_core::Message>(&runtime, expired).await;
+        let probe = next_probe::install::<cordis_host::Body>(&runtime, expired).await;
         if expired {
             handle
                 .call(|s, ctx| {

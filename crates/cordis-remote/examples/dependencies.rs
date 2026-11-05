@@ -1,4 +1,5 @@
-use cordis_remote::{Dependency, Endpoint, ProcessSpec, RemoteService, json};
+use cordis_host::Dependency;
+use cordis_remote::{Endpoint, ProcessSpec, RemoteService, json};
 use cordis_sdk::*;
 use std::{
     path::PathBuf,
@@ -58,7 +59,7 @@ async fn main() -> Result<()> {
     let mut cpp = ProcessSpec::new(
         std::path::Path::new(cordis_example_contracts::NATIVE_BIN).join("cordis_pricing"),
     )
-    .requires(Dependency::new_json(
+    .requires(Dependency::json(
         &logger(),
         cordis_contract::portable::decode(
             &serde_json::from_str(cordis_example_contracts::resources::logger::LOGGER).unwrap(),
@@ -83,7 +84,7 @@ async fn main() -> Result<()> {
     ));
     cpp.endpoint = endpoint;
     let price = runtime.install(cpp.plugin("pricing", &pricing()))?;
-    let mut ts = ProcessSpec::new("node").requires(Dependency::remote(&pricing()));
+    let mut ts = ProcessSpec::new("node").requires(Dependency::new(&pricing()).unwrap());
     ts.args = vec![
         root.join("sdk/typescript/examples/orders.ts")
             .display()

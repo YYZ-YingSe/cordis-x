@@ -3,6 +3,7 @@ members = [
   "examples",
   "tests",
   "crates/cordis-contract",
+  "crates/cordis-host",
   "crates/cordis-codegen",
   "crates/cordis-component-pack",
   "crates/cordis-kernel",
@@ -33,6 +34,7 @@ rust-version = "1.96"
 license = "Apache-2.0"
 
 [workspace.dependencies]
+cordis-host = { version = "0.1.0", path = "crates/cordis-host" }
 cordis-example-contracts = { path = "examples" }
 cordis-test-contracts = { path = "tests" }
 cordis-contract = { version = "0.1.0", path = "crates/cordis-contract" }

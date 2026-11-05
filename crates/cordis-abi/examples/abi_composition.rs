@@ -1,4 +1,5 @@
-use cordis_abi::{AbiService, Capabilities, FactoryBinding, Library, ProvisionBinding, json};
+use cordis_abi::{AbiService, Capabilities, Library, json};
+use cordis_host::{FactoryBinding, ProvisionBinding};
 use cordis_sdk::*;
 use std::sync::{Arc, Mutex};
 
@@ -8,13 +9,13 @@ async fn main() -> Result<()> {
         Error::Message("usage: abi_composition <trusted composition example library>".into())
     })?;
     let runtime = Runtime::new();
-    let info = Service::<cordis_abi::Bytes>::new("example.info", "1");
+    let info = Service::<cordis_host::Body>::new("example.info", "1");
     let cleaned = Arc::new(Mutex::new(Vec::new()));
     let factory = FactoryBinding::new("worker", {
         let cleaned = cleaned.clone();
         move |config| {
             cordis_portable_example::lifecycle::ApplicationControls::worker()
-                .build(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::lifecycle::data::lifecycle::WorkerConfig as cordis_sdk_core::typed::Codec>::contract().clone(),config).map_err(Error::Message)?, |config| {
+                .build(cordis_sdk_core::Message::from_bytes(<cordis_portable_example::lifecycle::data::lifecycle::WorkerConfig as cordis_sdk_core::typed::Codec>::contract().clone(),config.into_bytes().map_err(Error::Message)?).map_err(Error::Message)?, |config| {
                     let label = config.name.expect("validated required name");
                     let cleaned = cleaned.clone();
                     // Only build a definition here. Resources belong to its initializer.
@@ -39,8 +40,11 @@ async fn main() -> Result<()> {
     // the binary and its native dependencies are trusted in-process code.
     #[allow(unsafe_code)]
     let library = unsafe { Library::load(path)? }.with_context(Capabilities {
-        factories: vec![factory],
-        provisions: vec![ProvisionBinding::new("info", &info)],
+        bindings: cordis_host::HostBindings {
+            factories: vec![factory],
+            provisions: vec![ProvisionBinding::new("info", &info)],
+            ..Default::default()
+        },
         ..Default::default()
     })?;
     let service = Service::<AbiService>::new("example.application", "1").with_descriptor(
@@ -63,7 +67,7 @@ async fn main() -> Result<()> {
                     ctx.dependency(&info)?
                         .call(|value, _| {
                             Box::pin(async move {
-                                let value=cordis_sdk_core::Message::from_bytes(<cordis_portable_example::lifecycle::data::lifecycle::ApplicationInfo as cordis_sdk_core::typed::Codec>::contract().clone(),value.clone()).map_err(Error::Message)?.to_json().map_err(Error::Message)?;
+                                let value=cordis_sdk_core::Message::from_bytes(<cordis_portable_example::lifecycle::data::lifecycle::ApplicationInfo as cordis_sdk_core::typed::Codec>::contract().clone(),value.clone().into_bytes().map_err(Error::Message)?).map_err(Error::Message)?.to_json().map_err(Error::Message)?;
                                 assert_eq!(value["version"], 1);
                                 println!("published info: {value}");
                                 Ok(())

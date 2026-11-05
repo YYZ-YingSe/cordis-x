@@ -1,9 +1,7 @@
 //! Generated control paths execute through real process transports and Runtime ownership.
+use cordis_host::{EventBinding, FactoryBinding, MiddlewareBinding, ProvisionBinding};
 use cordis_portable_example::workflows::generated::{WorkflowClient, WorkflowControls};
-use cordis_remote::{
-    Endpoint, EventBinding, FactoryBinding, MiddlewareBinding, ProcessSpec, ProvisionBinding,
-    RemoteService,
-};
+use cordis_remote::{Endpoint, ProcessSpec, RemoteService};
 use cordis_sdk as rt;
 use cordis_sdk_core::{self as sdk, json};
 use std::{
@@ -47,7 +45,7 @@ fn build(language: &str) -> PathBuf {
 }
 async fn scenario(root: &Path, language: &str, endpoint: Endpoint, validation: sdk::Validation) {
     let runtime = rt::Runtime::new();
-    let settings = rt::Service::<cordis_remote::Bytes>::new("example.settings", "1");
+    let settings = rt::Service::<cordis_host::Body>::new("example.settings", "1");
     let created = Arc::new(AtomicUsize::new(0));
     let closed = Arc::new(AtomicUsize::new(0));
     let factory = FactoryBinding::new("worker", {
@@ -56,7 +54,7 @@ async fn scenario(root: &Path, language: &str, endpoint: Endpoint, validation: s
         move |config| {
             WorkflowControls::worker()
                 .with_validation(validation)
-                .build(sdk::Message::from_bytes(<cordis_portable_example::workflows::generated::data::workflows::WorkerConfig as sdk::typed::Codec>::contract().clone(), config).map_err(|e| sdk::refused("invalid_argument", e))?, |config| {
+                .build(config.into_message(<cordis_portable_example::workflows::generated::data::workflows::WorkerConfig as sdk::typed::Codec>::contract()).map_err(|e| sdk::refused("invalid_argument", e))?, |config| {
                     if config.label.as_deref() == Some("reject") {
                         return Err(sdk::error("invalid_worker", "rejected by factory"));
                     }
@@ -105,7 +103,7 @@ async fn scenario(root: &Path, language: &str, endpoint: Endpoint, validation: s
     ))
     .factory(factory)
     .provision(ProvisionBinding::new("settings", &settings));
-    spec.validation = validation;
+    spec.bindings.validation = validation;
     spec.endpoint = endpoint;
     if matches!(endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());
@@ -132,7 +130,7 @@ async fn scenario(root: &Path, language: &str, endpoint: Endpoint, validation: s
                         assert_eq!(
                             WorkflowControls::settings()
                                 .with_validation(validation)
-                                .decode(sdk::Message::from_bytes(<cordis_portable_example::workflows::generated::data::workflows::Settings as sdk::typed::Codec>::contract().clone(), config).unwrap())
+                                .decode(config.into_message(<cordis_portable_example::workflows::generated::data::workflows::Settings as sdk::typed::Codec>::contract()).unwrap())
                                 .unwrap()
                                 .answer,
                             Some(42)

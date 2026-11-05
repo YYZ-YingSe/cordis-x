@@ -1,4 +1,5 @@
-use cordis_abi::{AbiResource, AbiService, Capabilities, Dependency, Library};
+use cordis_abi::{AbiResource, AbiService, Capabilities, Library};
+use cordis_host::Dependency;
 use cordis_portable_example::resources::{CounterClient, CounterPlugin};
 use cordis_runtime::{self as rt, Plugin, Runtime, Service};
 use cordis_sdk_core::{Value, json};
@@ -157,7 +158,8 @@ async fn scenario(abi: Option<(bool, bool)>) -> Vec<Value> {
                 "resource_counter"
             },
             Capabilities {
-                dependencies: vec![Dependency::new_json(
+                bindings: cordis_host::HostBindings {
+                    dependencies: vec![Dependency::json(
                     &logger,
                     cordis_sdk_core::Descriptor::new(
                         cordis_portable_example::resources::generated::CounterLogClient::interface(
@@ -167,10 +169,12 @@ async fn scenario(abi: Option<(bool, bool)>) -> Vec<Value> {
                     |log, _, _, value| {
                         Box::pin(async move {
                             log.lock().unwrap().push(value);
-                            Ok(json!({}))
+                            Ok::<_, cordis_abi::Error>(json!({}))
                         })
                     },
                 )],
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         );
@@ -191,7 +195,10 @@ async fn scenario(abi: Option<(bool, bool)>) -> Vec<Value> {
                 "resource_client"
             },
             Capabilities {
-                dependencies: vec![Dependency::abi(&counters)],
+                bindings: cordis_host::HostBindings {
+                    dependencies: vec![Dependency::new(&counters).unwrap()],
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         );
@@ -215,8 +222,8 @@ async fn scenario(abi: Option<(bool, bool)>) -> Vec<Value> {
                     "counters",
                     &counters,
                     json!({}),
-                    native::Capabilities {
-                        dependencies: vec![native::Dependency::new(
+                    cordis_host::HostBindings {
+                        dependencies: vec![cordis_host::Dependency::messages(
                             &logger,
                             cordis_sdk_core::Descriptor::new(
                                 cordis_portable_example::resources::generated::CounterLogClient::interface(),
@@ -228,9 +235,7 @@ async fn scenario(abi: Option<(bool, bool)>) -> Vec<Value> {
                                     cordis_sdk_core::Message::new(cordis_portable_example::resources::generated::data::google::protobuf::Empty {}).map_err(cordis_sdk_core::typed::violation)
                                 })
                             },
-                        )],
-                        ..Default::default()
-                    },
+                        )], ..Default::default() },
                 )
                 .unwrap(),
             )
@@ -242,8 +247,8 @@ async fn scenario(abi: Option<(bool, bool)>) -> Vec<Value> {
                     "client",
                     &client,
                     json!({}),
-                    native::Capabilities {
-                        dependencies: vec![native::Dependency::portable(&counters).unwrap()],
+                    cordis_host::HostBindings {
+                        dependencies: vec![cordis_host::Dependency::new(&counters).unwrap()],
                         ..Default::default()
                     },
                 )
@@ -385,14 +390,18 @@ async fn code_recovery(cpp: bool) {
     let library = load(
         "resource_counter",
         Capabilities {
-            dependencies: vec![Dependency::new_json(
-                &logger,
-                cordis_sdk_core::Descriptor::new(
-                    cordis_portable_example::resources::generated::CounterLogClient::interface(),
-                )
-                .unwrap(),
-                |_, _, _, _| Box::pin(async { Ok(json!({})) }),
-            )],
+            bindings: cordis_host::HostBindings {
+                dependencies: vec![Dependency::json(
+                    &logger,
+                    cordis_sdk_core::Descriptor::new(
+                        cordis_portable_example::resources::generated::CounterLogClient::interface(
+                        ),
+                    )
+                    .unwrap(),
+                    |_, _, _, _| Box::pin(async { Ok::<_, cordis_abi::Error>(json!({})) }),
+                )],
+                ..Default::default()
+            },
             ..Default::default()
         },
     );
@@ -412,7 +421,10 @@ async fn code_recovery(cpp: bool) {
     let library = load(
         "resource_client",
         Capabilities {
-            dependencies: vec![Dependency::abi(&counters)],
+            bindings: cordis_host::HostBindings {
+                dependencies: vec![Dependency::new(&counters).unwrap()],
+                ..Default::default()
+            },
             ..Default::default()
         },
     );

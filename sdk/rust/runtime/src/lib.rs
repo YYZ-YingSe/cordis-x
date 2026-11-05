@@ -1,6 +1,7 @@
 //! Run portable, locally asynchronous Rust plugins on the native Runtime.
 //! Typed `cordis-sdk` calls are unaffected by this optional adapter.
 mod backend;
+mod host;
 mod resource;
 mod worker;
 
@@ -10,108 +11,7 @@ pub use resource::Resource;
 use std::{collections::BTreeMap, sync::Arc};
 pub use worker::Service;
 
-type Invoke =
-    dyn Fn(rt::Context, String, Payload) -> rt::BoxFuture<'static, Result<Payload>> + Send + Sync;
-type Acquire =
-    dyn Fn(rt::Context, String, Payload) -> rt::BoxFuture<'static, Result<Resource>> + Send + Sync;
-
-/// Explicit native service binding. The Runtime still checks the declaration
-/// and resolves through the definition site of the actual callback.
-#[derive(Clone)]
-pub struct Dependency {
-    declaration: rt::Service<()>,
-    descriptor: cordis_contract::Descriptor,
-    invoke: Arc<Invoke>,
-    acquire: Option<Arc<Acquire>>,
-}
-impl Dependency {
-    pub fn new<T, F>(
-        service: &rt::Service<T>,
-        descriptor: cordis_contract::Descriptor,
-        invoke: F,
-    ) -> Self
-    where
-        T: ?Sized + Send + Sync + 'static,
-        F: for<'a> Fn(&'a T, rt::Context, String, Payload) -> rt::BoxFuture<'a, Result<Payload>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let declaration = rt::Service::new(
-            service.contract().name.clone(),
-            service.contract().revision.clone(),
-        );
-        let service = service.clone();
-        let invoke = Arc::new(invoke);
-        Self {
-            declaration,
-            descriptor,
-            acquire: None,
-            invoke: Arc::new(move |ctx, method, args| {
-                let service = service.clone();
-                let invoke = invoke.clone();
-                Box::pin(async move {
-                    ctx.dependency(&service)
-                        .map_err(rejected)?
-                        .call(move |value, ctx| {
-                            Box::pin(async move { Ok(invoke(value, ctx, method, args).await) })
-                        })
-                        .await
-                        .map_err(unknown)?
-                })
-            }),
-        }
-    }
-    pub fn portable(service: &rt::Service<Service>) -> Result<Self> {
-        let descriptor = service.descriptor().cloned().ok_or_else(|| {
-            refused(
-                "contract_mismatch",
-                "portable dependency requires an explicit descriptor",
-            )
-        })?;
-        let mut dependency = Self::new(service, descriptor, |service, ctx, method, args| {
-            Box::pin(async move { service.invoke(&ctx, &method, args).await })
-        });
-        let service = service.clone();
-        dependency.acquire = Some(Arc::new(move |ctx, kind, args| {
-            let service = service.clone();
-            Box::pin(async move {
-                ctx.dependency(&service)
-                    .map_err(rejected)?
-                    .call(move |value, ctx| {
-                        Box::pin(async move { Ok(value.acquire(&ctx, &kind, args).await) })
-                    })
-                    .await
-                    .map_err(unknown)?
-            })
-        }));
-        Ok(dependency)
-    }
-}
-pub type Factory = Arc<dyn Fn(Payload) -> rt::Result<rt::Plugin> + Send + Sync>;
-
-/// Host-selected capabilities. Merely knowing an alias does not grant access.
-#[derive(Clone)]
-pub struct Capabilities {
-    pub validation: cordis_sdk_core::Validation,
-    pub dependencies: Vec<Dependency>,
-    pub events: BTreeMap<String, rt::Event<Payload, Payload>>,
-    pub middleware: BTreeMap<String, rt::Middleware<Payload, Payload>>,
-    pub factories: BTreeMap<String, Factory>,
-    pub provisions: BTreeMap<String, rt::Service<Payload>>,
-}
-impl Default for Capabilities {
-    fn default() -> Self {
-        Self {
-            validation: cordis_sdk_core::Validation::Checked,
-            dependencies: vec![],
-            events: BTreeMap::new(),
-            middleware: BTreeMap::new(),
-            factories: BTreeMap::new(),
-            provisions: BTreeMap::new(),
-        }
-    }
-}
+use cordis_host::HostBindings;
 
 /// Install a portable plugin using a dedicated local executor. Callback futures
 /// may suspend and reenter the same instance without making business state Send.
@@ -119,13 +19,11 @@ pub fn plugin<P: Plugin>(
     name: impl Into<String>,
     service: &rt::Service<Service>,
     config: Value,
-    mut capabilities: Capabilities,
+    mut capabilities: HostBindings,
 ) -> Result<rt::Plugin> {
+    capabilities.validate()?;
     for dependency in &mut capabilities.dependencies {
-        dependency.descriptor = dependency
-            .descriptor
-            .clone()
-            .with_validation(capabilities.validation);
+        *dependency = dependency.clone().with_validation(capabilities.validation);
     }
     let manifest = P::manifest();
     if manifest.provides.name != service.contract().name.as_ref()
@@ -153,8 +51,8 @@ pub fn plugin<P: Plugin>(
         .iter()
         .map(|d| {
             (
-                d.declaration.contract().name.as_ref(),
-                d.declaration.contract().revision.as_ref(),
+                d.declaration().contract().name.as_ref(),
+                d.declaration().contract().revision.as_ref(),
             )
         })
         .collect();
@@ -179,11 +77,11 @@ pub fn plugin<P: Plugin>(
         ));
     }
     for dependency in &capabilities.dependencies {
-        let name = dependency.declaration.contract().name.as_ref();
+        let name = dependency.declaration().contract().name.as_ref();
         let expected = cordis_contract::Descriptor::new(declared_interfaces[name].clone())
             .map_err(|e| refused("contract_mismatch", e))?;
         expected
-            .compare(&dependency.descriptor)
+            .compare(dependency.descriptor())
             .map_err(|e| refused("contract_mismatch", format!("dependencies.{name}: {e}")))?;
     }
     let bindings = P::bindings();
@@ -194,24 +92,31 @@ pub fn plugin<P: Plugin>(
     let events = capabilities
         .events
         .iter()
-        .map(|(alias, e)| (alias.clone(), contract(e.contract())))
+        .map(|b| (b.alias.clone(), contract(b.event.contract())))
         .collect::<BTreeMap<_, _>>();
     let middleware = capabilities
         .middleware
         .iter()
-        .map(|(alias, m)| (alias.clone(), contract(m.contract())))
+        .map(|b| (b.alias.clone(), contract(b.middleware.contract())))
         .collect::<BTreeMap<_, _>>();
     let provisions = capabilities
         .provisions
         .iter()
-        .map(|(alias, p)| (alias.clone(), contract(p.contract())))
+        .map(|b| (b.alias.clone(), contract(b.service.contract())))
         .collect::<BTreeMap<_, _>>();
     let mut factories = bindings.factories.clone();
     factories.sort();
     if bindings.events != events
         || bindings.middleware != middleware
         || bindings.provisions != provisions
-        || factories != capabilities.factories.keys().cloned().collect::<Vec<_>>()
+        || factories
+            != capabilities
+                .factories
+                .iter()
+                .map(|b| b.alias.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
     {
         return Err(refused(
             "binding_mismatch",
@@ -252,9 +157,9 @@ pub fn plugin<P: Plugin>(
     })
     .provides(&declaration);
     for dependency in capabilities.dependencies {
-        plugin = plugin.requires(&dependency.declaration);
+        plugin = plugin.requires(dependency.declaration());
     }
-    for provision in capabilities.provisions.values() {
+    for provision in capabilities.provisions.iter().map(|p| &p.service) {
         plugin = plugin.provides(provision);
     }
     Ok(plugin)

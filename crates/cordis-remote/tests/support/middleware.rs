@@ -2,7 +2,8 @@ use super::effects::{
     Log, lifecycle_log_dependency as log_dependency, lifecycle_log_plugin as log_plugin,
 };
 use super::*;
-use cordis_remote::{MiddlewareBinding, Value};
+use cordis_host::MiddlewareBinding;
+use cordis_remote::Value;
 fn service() -> Service<RemoteService> {
     Service::new("example.middleware", "1").with_descriptor(
         cordis_remote::Descriptor::new(
@@ -11,7 +12,7 @@ fn service() -> Service<RemoteService> {
         .unwrap(),
     )
 }
-fn pipeline() -> Middleware<cordis_remote::Bytes, cordis_remote::Bytes> {
+fn pipeline() -> Middleware<cordis_host::Body, cordis_host::Body> {
     Middleware::new("example.middleware.request", "1").in_realm(RealmId(71))
 }
 fn spec(backend: Backend, endpoint: Endpoint) -> ProcessSpec {
@@ -279,7 +280,7 @@ async fn startup_failure_releases_middleware_and_binding_mismatch_rejects() {
         assert!(bounded(provider.ready()).await.is_err());
         bounded(provider.dispose()).await.unwrap();
         let mut s = spec(backend, Endpoint::Ipc);
-        s.middleware.clear();
+        s.bindings.middleware.clear();
         let mismatch = rt.install(s.plugin("mismatch", &service())).unwrap();
         assert!(bounded(mismatch.ready()).await.is_err());
         bounded(mismatch.dispose()).await.unwrap();
@@ -293,7 +294,7 @@ fn probe_service() -> Service<RemoteService> {
         cordis_remote::Descriptor::new(cordis_remote::Interface::value_dispatch(true)).unwrap(),
     )
 }
-fn probe_pipeline() -> Middleware<cordis_remote::Bytes, cordis_remote::Bytes> {
+fn probe_pipeline() -> Middleware<cordis_host::Body, cordis_host::Body> {
     Middleware::new("example.request", "1").in_realm(RealmId(71))
 }
 fn peer(mode: &str) -> (ProcessSpec, PathBuf) {
@@ -609,4 +610,11 @@ async fn typed_middleware_preserves_integer_bounds_and_rejects_duplicate_registr
         );
         bounded(rt.shutdown()).await.unwrap();
     }
+}
+
+fn wire_json(value: Value) -> cordis_host::Body {
+    super::wire_json(value).into()
+}
+fn unwire_json(value: cordis_host::Body) -> Value {
+    super::unwire_json(value.into_bytes().unwrap())
 }

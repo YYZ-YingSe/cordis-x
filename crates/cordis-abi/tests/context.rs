@@ -21,14 +21,15 @@ fn exact_manifest_and_capability_preflight_before_create() {
     );
     let mut duplicate = caps();
     duplicate
+        .bindings
         .dependencies
-        .push(duplicate.dependencies[0].clone());
+        .push(duplicate.bindings.dependencies[0].clone());
     assert!(library.clone().with_context(duplicate).is_err());
     let mut wrong = caps();
-    wrong.dependencies = vec![Dependency::new_json(
+    wrong.bindings.dependencies = vec![Dependency::json(
         &Service::<Logger>::new("example.logger", "2"),
         cordis_contract::Descriptor::new(cordis_contract::Interface::value_dispatch(true)).unwrap(),
-        |_, _, _, args| Box::pin(async move { Ok(args) }),
+        |_, _, _, args| Box::pin(async move { Ok::<_, cordis_abi::Error>(args) }),
     )];
     assert!(library.with_context(wrong).is_err());
     assert_eq!(files.count("create"), 0);

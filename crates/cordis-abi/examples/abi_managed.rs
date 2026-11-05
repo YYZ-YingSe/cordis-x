@@ -1,4 +1,5 @@
-use cordis_abi::{AbiService, Capabilities, Dependency, Library, Value};
+use cordis_abi::{AbiService, Capabilities, Library, Value};
+use cordis_host::Dependency;
 use cordis_sdk::*;
 use std::sync::{Arc, Mutex};
 
@@ -18,7 +19,7 @@ async fn main() -> Result<()> {
         .provides(&logger),
     )?;
     log_plugin.ready().await?;
-    let dependency = Dependency::new_json(
+    let dependency = Dependency::json(
         &logger,
         cordis_contract::Descriptor::new(cordis_contract::Interface::value_dispatch(true)).unwrap(),
         |_, ctx, method, args| {
@@ -38,7 +39,10 @@ async fn main() -> Result<()> {
     // in-process example assumes trusted native code and system dependencies.
     #[allow(unsafe_code)]
     let library = unsafe { Library::load(path)? }.with_context(Capabilities {
-        dependencies: vec![dependency],
+        bindings: cordis_host::HostBindings {
+            dependencies: vec![dependency],
+            ..Default::default()
+        },
         ..Default::default()
     })?;
     let notifications = Service::<AbiService>::new("example.managed", "1").with_descriptor(

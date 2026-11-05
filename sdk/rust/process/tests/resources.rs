@@ -1,7 +1,6 @@
+use cordis_host::Dependency;
 use cordis_portable_example::resources::{CounterClient, CounterPlugin};
-use cordis_remote::{
-    Dependency, Endpoint, ProcessSpec, RemoteResource, RemoteService, Value, json,
-};
+use cordis_remote::{Endpoint, ProcessSpec, RemoteResource, RemoteService, Value, json};
 use cordis_runtime::{self as rt, Plugin, Runtime, Service};
 use cordis_sdk_runtime as native;
 use std::{
@@ -100,8 +99,8 @@ async fn structural_contracts_reject_drift_and_invalid_inputs_across_languages()
             let plugin = runtime
                 .install(
                     language_spec(Endpoint::Ipc, false, language)
-                        .requires(Dependency::new_json(&logger, dependency, |_, _, _, _| {
-                            Box::pin(async { Ok(json!({})) })
+                        .requires(Dependency::json(&logger, dependency, |_, _, _, _| {
+                            Box::pin(async { Ok::<_, cordis_remote::Error>(json!({})) })
                         }))
                         .plugin("counters", &counters),
                 )
@@ -161,7 +160,7 @@ async fn structural_contracts_reject_drift_and_invalid_inputs_across_languages()
                 let client = runtime
                     .install(
                         language_spec(Endpoint::Ipc, true, language)
-                            .requires(Dependency::remote(&counters))
+                            .requires(Dependency::new(&counters).unwrap())
                             .plugin("client", &client_service),
                     )
                     .unwrap();
@@ -234,12 +233,12 @@ async fn invalid_dependency_result_is_unknown_after_native_execution() {
     let observed = called.clone();
     let python = std::env::var_os("CORDIS_TEST_PYTHON")
         .unwrap_or_else(|| if cfg!(windows) { "python" } else { "python3" }.into());
-    let mut spec = ProcessSpec::new(python).requires(Dependency::new_json(
+    let mut spec = ProcessSpec::new(python).requires(Dependency::json(
         &logger,
         Descriptor::new(interface).unwrap(),
         move |_, _, _, _| {
             observed.store(true, Ordering::SeqCst);
-            Box::pin(async { Ok(json!("wrong result type")) })
+            Box::pin(async { Ok::<_, cordis_remote::Error>(json!("wrong result type")) })
         },
     ));
     spec.args.push(cordis_test_contracts::PYTHON_RUNNER.into());
@@ -373,14 +372,14 @@ async fn scenario(mode: Option<(Endpoint, Language, Language)>) -> Vec<Value> {
         runtime
             .install(
                 language_spec(endpoint, false, provider_language)
-                    .requires(Dependency::new_json(
+                    .requires(Dependency::json(
                         &logger,
                         cordis_remote::Descriptor::new(cordis_portable_example::resources::generated::CounterLogClient::interface())
                         .unwrap(),
                         |log, _, _, value| {
                             Box::pin(async move {
                                 log.lock().unwrap().push(value);
-                                Ok(json!({}))
+                                Ok::<_, cordis_remote::Error>(json!({}))
                             })
                         },
                     ))
@@ -396,7 +395,7 @@ async fn scenario(mode: Option<(Endpoint, Language, Language)>) -> Vec<Value> {
         runtime
             .install(
                 language_spec(endpoint, true, client_language)
-                    .requires(Dependency::remote(&counters))
+                    .requires(Dependency::new(&counters).unwrap())
                     .plugin("client", &client),
             )
             .unwrap();
@@ -416,8 +415,8 @@ async fn scenario(mode: Option<(Endpoint, Language, Language)>) -> Vec<Value> {
                     "counters",
                     &counters,
                     json!({}),
-                    native::Capabilities {
-                        dependencies: vec![native::Dependency::new(
+                    cordis_host::HostBindings {
+                        dependencies: vec![cordis_host::Dependency::messages(
                             &logger,
                             cordis_sdk_core::Descriptor::new(
                                 cordis_portable_example::resources::generated::CounterLogClient::interface(),
@@ -429,9 +428,7 @@ async fn scenario(mode: Option<(Endpoint, Language, Language)>) -> Vec<Value> {
                                     cordis_sdk_core::Message::new(cordis_portable_example::resources::generated::data::google::protobuf::Empty {}).map_err(cordis_sdk_core::typed::violation)
                                 })
                             },
-                        )],
-                        ..Default::default()
-                    },
+                        )], ..Default::default() },
                 )
                 .unwrap(),
             )
@@ -443,8 +440,8 @@ async fn scenario(mode: Option<(Endpoint, Language, Language)>) -> Vec<Value> {
                     "client",
                     &client,
                     json!({}),
-                    native::Capabilities {
-                        dependencies: vec![native::Dependency::portable(&counters).unwrap()],
+                    cordis_host::HostBindings {
+                        dependencies: vec![cordis_host::Dependency::new(&counters).unwrap()],
                         ..Default::default()
                     },
                 )
@@ -553,7 +550,7 @@ async fn exported_resources_are_released_on_restart_and_old_handles_expire() {
             let provider = runtime
                     .install(
                         language_spec(endpoint, false, language)
-                            .requires(Dependency::new_json(
+                            .requires(Dependency::json(
                                 &logger,
                                 cordis_remote::Descriptor::new(
                                     cordis_portable_example::resources::generated::CounterLogClient::interface(),
@@ -562,7 +559,7 @@ async fn exported_resources_are_released_on_restart_and_old_handles_expire() {
                                 |log, _, _, value| {
                                     Box::pin(async move {
                                         log.lock().unwrap().push(value);
-                                        Ok(json!({}))
+                                        Ok::<_, cordis_remote::Error>(json!({}))
                                     })
                                 },
                             ))

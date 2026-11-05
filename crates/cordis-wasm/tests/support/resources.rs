@@ -8,6 +8,7 @@ pub fn bytes(name: &str) -> &'static [u8] {
             let target = root.join("target/wasm-resource-guest");
             let names = [
                 "wasm_resource_counter",
+                "wasm_workflows",
                 "wasm_structural_probe",
                 "wasm_resource_client",
                 "wasm_resource_probe",

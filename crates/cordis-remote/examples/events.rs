@@ -1,5 +1,7 @@
+use cordis_host::Dependency;
+use cordis_host::EventBinding;
 use cordis_portable_example::lifecycle::{EventsClient, LifecycleLogClient};
-use cordis_remote::{Dependency, Endpoint, EventBinding, ProcessSpec, RemoteService, Value, json};
+use cordis_remote::{Endpoint, ProcessSpec, RemoteService, Value, json};
 use cordis_sdk::*;
 use std::{
     path::PathBuf,
@@ -50,8 +52,8 @@ async fn main() -> Result<()> {
         })
         .provides(&logger()),
     )?;
-    let tick = Event::<cordis_remote::Bytes, cordis_remote::Bytes>::new("example.events.tick", "1");
-    let dependency = Dependency::new_json(
+    let tick = Event::<cordis_host::Body, cordis_host::Body>::new("example.events.tick", "1");
+    let dependency = Dependency::json(
         &logger(),
         cordis_remote::Descriptor::new(LifecycleLogClient::interface()).unwrap(),
         |log, ctx, _, args| {
@@ -60,7 +62,7 @@ async fn main() -> Result<()> {
                 if args == "subscriber.enter" {
                     log.entered.add_permits(1);
                 }
-                Ok(json!({}))
+                Ok::<_, cordis_remote::Error>(json!({}))
             })
         },
     );

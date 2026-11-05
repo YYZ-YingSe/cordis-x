@@ -1,9 +1,8 @@
-use crate::{AbiService, Bytes, Error, Instance, Payload, Result, Value, ffi::Op};
-use cordis_runtime::{BoxFuture, Context, Plugin, Service, WeakEffectHandle};
+use crate::{Bytes, Error, Instance, Payload, Result, Value, ffi::Op};
+use cordis_runtime::{Context, Plugin, WeakEffectHandle};
 use cordis_wire::local::Envelope;
 use std::{
     collections::BTreeMap,
-    fmt,
     sync::{
         Arc, Mutex, OnceLock, Weak,
         atomic::{AtomicU64, Ordering},
@@ -11,187 +10,27 @@ use std::{
 };
 use tokio::sync::Semaphore;
 
-type Acquire = dyn Fn(Context, String, Envelope) -> BoxFuture<'static, Result<crate::AbiResource>>
-    + Send
-    + Sync;
-type Invoke =
-    dyn Fn(Context, String, Envelope) -> BoxFuture<'static, Result<Envelope>> + Send + Sync;
-/// Explicit typed adapter for a dependency declared by the native library.
-#[derive(Clone)]
-pub struct Dependency {
-    declaration: Service<()>,
-    descriptor: Option<cordis_contract::Descriptor>,
-    invoke: Arc<Invoke>,
-    pub(crate) acquire: Option<Arc<Acquire>>,
-}
-impl fmt::Debug for Dependency {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Dependency")
-            .field(self.declaration.contract())
-            .finish()
-    }
-}
-impl Dependency {
-    pub(crate) fn contract(&self) -> &cordis_contract::ContractId {
-        self.declaration.contract()
-    }
-    pub(crate) fn descriptor(&self) -> &cordis_contract::Descriptor {
-        self.descriptor.as_ref().expect("validated binding")
-    }
-    pub fn new<T, F>(
-        service: &Service<T>,
-        descriptor: cordis_contract::Descriptor,
-        invoke: F,
-    ) -> Self
-    where
-        T: ?Sized + Send + Sync + 'static,
-        F: for<'a> Fn(&'a T, Context, String, Bytes) -> BoxFuture<'a, Result<Bytes>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let invoke = Arc::new(invoke);
-        Self::bind(
-            service,
-            Some(descriptor),
-            move |service, ctx, method, args| {
-                let invoke = invoke.clone();
-                Box::pin(async move {
-                    let bytes = invoke(
-                        service,
-                        ctx,
-                        method,
-                        args.one().map_err(|e| Error::InvalidInput(e.to_string()))?,
-                    )
-                    .await?;
-                    Ok(Payload::message(bytes).into())
-                })
-            },
-        )
-    }
-    /// Explicit JSON gateway for a host application whose service API is JSON.
-    pub fn new_json<T, F>(
-        service: &Service<T>,
-        descriptor: cordis_contract::Descriptor,
-        invoke: F,
-    ) -> Self
-    where
-        T: ?Sized + Send + Sync + 'static,
-        F: for<'a> Fn(&'a T, Context, String, Value) -> BoxFuture<'a, Result<Value>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let schema = descriptor.clone();
-        let invoke = Arc::new(invoke);
-        Self::new(service, descriptor, move |value, ctx, method, args| {
-            let schema = schema.clone();
-            let invoke = invoke.clone();
-            Box::pin(async move {
-                let signature =
-                    cordis_contract::portable::method(&schema.interface().methods, &method)
-                        .map_err(Error::InvalidInput)?;
-                let input = crate::body_json(&signature.args, &args)
-                    .map_err(|e| Error::InvalidInput(e.to_string()))?;
-                let result = invoke(value, ctx, method, input).await?;
-                crate::json_body(&signature.result, &result)
-                    .map_err(|e| Error::Unknown(e.to_string()))
-            })
-        })
-    }
-    fn bind<T, F>(
-        service: &Service<T>,
-        descriptor: Option<cordis_contract::Descriptor>,
-        invoke: F,
-    ) -> Self
-    where
-        T: ?Sized + Send + Sync + 'static,
-        F: for<'a> Fn(&'a T, Context, String, Envelope) -> BoxFuture<'a, Result<Envelope>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let declaration = Service::new(
-            service.contract().name.clone(),
-            service.contract().revision.clone(),
-        );
-        let service = service.clone();
-        let invoke = Arc::new(invoke);
-        Self {
-            declaration,
-            descriptor,
-            acquire: None,
-            invoke: Arc::new(move |ctx, method, args| {
-                let service = service.clone();
-                let invoke = invoke.clone();
-                Box::pin(async move {
-                    let dependency = ctx.dependency(&service)?;
-                    dependency
-                        .call(move |value, ctx| {
-                            Box::pin(async move { Ok(invoke(value, ctx, method, args).await) })
-                        })
-                        .await?
-                })
-            }),
-        }
-    }
-    /// Bind both value calls and caller-owned resources from an ABI service.
-    pub fn abi(service: &Service<AbiService>) -> Self {
-        let mut dependency = Self::bind(
-            service,
-            service.descriptor().cloned(),
-            |service, ctx, method, args| {
-                Box::pin(async move { service.invoke_envelope(&ctx, &method, args).await })
-            },
-        );
-        let service = service.clone();
-        dependency.acquire = Some(Arc::new(move |ctx, kind, args| {
-            let service = service.clone();
-            Box::pin(async move {
-                ctx.dependency(&service)?
-                    .call(move |service, ctx| {
-                        Box::pin(
-                            async move { Ok(service.acquire_envelope(&ctx, &kind, args).await) },
-                        )
-                    })
-                    .await?
-            })
-        }));
-        dependency
-    }
-}
-
 /// Host policy, checked against the extension manifest before instance creation.
 /// Effect capacity includes terminal tombstones to preserve cached outcomes.
 #[derive(Clone, Debug)]
 pub struct Capabilities {
-    pub validation: cordis_contract::Validation,
-    pub dependencies: Vec<Dependency>,
+    pub bindings: cordis_host::HostBindings,
     pub max_effects: usize,
     pub max_contexts: usize,
     pub max_callbacks: usize,
     pub managed: crate::ManagedLimits,
-    pub events: Vec<crate::EventBinding>,
-    pub middleware: Vec<crate::MiddlewareBinding>,
     pub reactive: crate::ReactiveLimits,
-    pub factories: Vec<crate::FactoryBinding>,
-    pub provisions: Vec<crate::ProvisionBinding>,
     pub composition: crate::CompositionLimits,
 }
 impl Default for Capabilities {
     fn default() -> Self {
         Self {
-            validation: cordis_contract::Validation::Checked,
-            dependencies: vec![],
+            bindings: cordis_host::HostBindings::default(),
             max_effects: 1024,
             max_contexts: 256,
             max_callbacks: 16,
             managed: crate::ManagedLimits::default(),
-            events: vec![],
-            middleware: vec![],
             reactive: crate::ReactiveLimits::default(),
-            factories: vec![],
-            provisions: vec![],
             composition: crate::CompositionLimits::default(),
         }
     }
@@ -202,6 +41,9 @@ impl Capabilities {
         manifest: Option<&Value>,
         interfaces: Option<&BTreeMap<String, cordis_contract::Descriptor>>,
     ) -> Result<()> {
+        self.bindings
+            .validate()
+            .map_err(|e| Error::Contract(e.to_string()))?;
         if self.max_contexts == 0
             || self.max_callbacks == 0
             || self.max_callbacks > Semaphore::MAX_PERMITS
@@ -210,11 +52,9 @@ impl Capabilities {
         }
         self.managed.validate()?;
         let mut expected = cordis_wire::json!({});
-        for dependency in &self.dependencies {
-            let contract = dependency.declaration.contract();
-            let actual = dependency.descriptor.as_ref().ok_or_else(|| {
-                Error::Contract(format!("dependency {contract}: descriptor required"))
-            })?;
+        for dependency in &self.bindings.dependencies {
+            let contract = dependency.declaration().contract();
+            let actual = dependency.descriptor();
             let required = interfaces
                 .and_then(|m| m.get(contract.name.as_ref()))
                 .ok_or_else(|| {
@@ -243,10 +83,10 @@ impl Capabilities {
         Ok(())
     }
     pub(crate) fn declare(&self, mut plugin: Plugin) -> Plugin {
-        for dependency in &self.dependencies {
-            plugin = plugin.requires(&dependency.declaration);
+        for dependency in &self.bindings.dependencies {
+            plugin = plugin.requires(dependency.declaration());
         }
-        for binding in &self.provisions {
+        for binding in &self.bindings.provisions {
             plugin = plugin.provides(&binding.service);
         }
         plugin
@@ -333,11 +173,10 @@ struct Entry {
 impl Router {
     pub fn new(instance: Weak<Instance>, capabilities: Arc<Capabilities>, id: u64) -> Arc<Self> {
         let mut bound = (*capabilities).clone();
-        for dependency in &mut bound.dependencies {
-            dependency.descriptor = dependency
-                .descriptor
-                .take()
-                .map(|d| d.with_validation(bound.validation));
+        for dependency in &mut bound.bindings.dependencies {
+            *dependency = dependency
+                .clone()
+                .with_validation(bound.bindings.validation);
         }
         let capabilities = Arc::new(bound);
         let managed =
@@ -493,15 +332,16 @@ impl Router {
         let _permit = capacity.try_acquire().map_err(|_| Error::Overloaded)?;
         let dependency = self
             .capabilities
+            .bindings
             .dependencies
             .iter()
-            .find(|d| d.declaration.contract().name.as_ref() == name)
+            .find(|d| d.declaration().contract().name.as_ref() == name)
             .ok_or_else(|| Error::Refused {
                 code: "undeclared_dependency".into(),
                 message: name,
             })?;
-        let invoke = dependency.invoke.clone();
-        let descriptor = dependency.descriptor.as_ref().expect("validated binding");
+        let dependency = dependency.clone();
+        let descriptor = dependency.descriptor();
         let signature = cordis_contract::portable::method(&descriptor.interface().methods, &method)
             .map_err(Error::InvalidInput)?
             .clone();
@@ -509,8 +349,10 @@ impl Router {
         args.check(&signature.args).map_err(Error::InvalidInput)?;
         let instance = self.instance.clone();
         ctx.operation(move |ctx| async move {
-            let outcome = invoke(ctx.clone(), method, args)
+            let outcome = dependency
+                .invoke_wire(ctx.clone(), method, args)
                 .await
+                .map_err(Error::from)
                 .map_err(|e| e.check_declared(&signature.errors, "dependency errors"))
                 .and_then(|mut value| {
                     value.check(&signature.result).map_err(Error::Unknown)?;

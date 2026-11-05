@@ -21,55 +21,45 @@ pub enum Endpoint {
 #[derive(Clone, Debug)]
 pub struct ProcessSpec {
     /// Host-selected business validation, fixed for this installation.
-    pub validation: cordis_contract::Validation,
+    pub bindings: cordis_host::HostBindings,
     pub executable: PathBuf,
     pub args: Vec<String>,
     pub endpoint: Endpoint,
     pub timeout: Duration,
     /// Grace period after a managed task receives cancellation.
     pub task_stop_timeout: Duration,
-    pub dependencies: Vec<crate::Dependency>,
-    pub events: Vec<crate::EventBinding>,
-    pub middleware: Vec<crate::MiddlewareBinding>,
-    pub factories: Vec<crate::FactoryBinding>,
-    pub provisions: Vec<crate::ProvisionBinding>,
     pub composition: crate::CompositionLimits,
 }
 impl ProcessSpec {
     pub fn new(executable: impl Into<PathBuf>) -> Self {
         Self {
-            validation: cordis_contract::Validation::Checked,
+            bindings: cordis_host::HostBindings::default(),
             executable: executable.into(),
             args: Vec::new(),
             endpoint: Endpoint::Ipc,
             timeout: Duration::from_secs(10),
             task_stop_timeout: Duration::from_secs(5),
-            dependencies: Vec::new(),
-            events: Vec::new(),
-            middleware: Vec::new(),
-            factories: Vec::new(),
-            provisions: Vec::new(),
             composition: crate::CompositionLimits::default(),
         }
     }
-    pub fn middleware(mut self, binding: crate::MiddlewareBinding) -> Self {
-        self.middleware.push(binding);
+    pub fn middleware(mut self, binding: cordis_host::MiddlewareBinding) -> Self {
+        self.bindings.middleware.push(binding);
         self
     }
-    pub fn factory(mut self, binding: crate::FactoryBinding) -> Self {
-        self.factories.push(binding);
+    pub fn factory(mut self, binding: cordis_host::FactoryBinding) -> Self {
+        self.bindings.factories.push(binding);
         self
     }
-    pub fn provision(mut self, binding: crate::ProvisionBinding) -> Self {
-        self.provisions.push(binding);
+    pub fn provision(mut self, binding: cordis_host::ProvisionBinding) -> Self {
+        self.bindings.provisions.push(binding);
         self
     }
-    pub fn event(mut self, binding: crate::EventBinding) -> Self {
-        self.events.push(binding);
+    pub fn event(mut self, binding: cordis_host::EventBinding) -> Self {
+        self.bindings.events.push(binding);
         self
     }
-    pub fn requires(mut self, dependency: crate::Dependency) -> Self {
-        self.dependencies.push(dependency);
+    pub fn requires(mut self, dependency: cordis_host::Dependency) -> Self {
+        self.bindings.dependencies.push(dependency);
         self
     }
     pub fn plugin(self, name: impl Into<String>, service: &Service<RemoteService>) -> Plugin {
@@ -143,8 +133,8 @@ impl ProcessSpec {
     where
         F: Fn(&Context, Arc<RemoteService>) -> cordis_runtime::Result<()> + Send + Sync + 'static,
     {
-        let dependencies = self.dependencies.clone();
-        let provisions = self.provisions.clone();
+        let dependencies = self.bindings.dependencies.clone();
+        let provisions = self.bindings.provisions.clone();
         let publish = Arc::new(publish);
         let mut plugin = Plugin::new(name, move |ctx| {
             let spec = self.clone();
@@ -178,7 +168,7 @@ impl ProcessSpec {
         descriptor: cordis_contract::Descriptor,
         code: CodeLease,
     ) -> cordis_runtime::Result<Arc<RemoteService>> {
-        let descriptor = descriptor.with_validation(self.validation);
+        let descriptor = descriptor.with_validation(self.bindings.validation);
         let activation = ctx.activation();
         let router = crate::dependency::Router::new(&self)?;
         router.validate_primary(contract)?;
@@ -202,7 +192,7 @@ impl ProcessSpec {
         let session = owned.with(Clone::clone)?;
         let ready = session.request("hello", json!({
             "capabilities": {"dependency_resources":true,"metadata":true,"effects":true,"effect_sequences":true,"scopes":true,"tasks":true,"events":true,"middleware":true,"composition":true},
-            "validation": self.validation,
+            "validation": self.bindings.validation,
             "dependencies": declarations,
             "dependency_interfaces": dependency_interfaces,
             "events": events,
@@ -237,7 +227,8 @@ impl ProcessSpec {
             .cloned()
             .unwrap_or_else(|| json!({}))
             != declarations
-            || (!self.dependencies.is_empty() && ready["capabilities"]["reverse_calls"] != true)
+            || (!self.bindings.dependencies.is_empty()
+                && ready["capabilities"]["reverse_calls"] != true)
         {
             return Err(Error::Protocol(
                 "dependency declarations or reverse-call capability mismatch".into(),
@@ -245,7 +236,7 @@ impl ProcessSpec {
             .into());
         }
         if ready.get("events").cloned().unwrap_or_else(|| json!({})) != events
-            || (!self.events.is_empty() && ready["capabilities"]["events"] != true)
+            || (!self.bindings.events.is_empty() && ready["capabilities"]["events"] != true)
         {
             return Err(Error::Protocol("event declarations or capability mismatch".into()).into());
         }
@@ -254,7 +245,7 @@ impl ProcessSpec {
             .cloned()
             .unwrap_or_else(|| json!({}))
             != middleware
-            || (!self.middleware.is_empty() && ready["capabilities"]["middleware"] != true)
+            || (!self.bindings.middleware.is_empty() && ready["capabilities"]["middleware"] != true)
         {
             return Err(
                 Error::Protocol("middleware declarations or capability mismatch".into()).into(),
@@ -274,7 +265,7 @@ impl ProcessSpec {
             factories.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
         }
         if declared_composition != composition
-            || ((!self.factories.is_empty() || !self.provisions.is_empty())
+            || ((!self.bindings.factories.is_empty() || !self.bindings.provisions.is_empty())
                 && ready["capabilities"]["composition"] != true)
         {
             return Err(
@@ -293,7 +284,7 @@ impl ProcessSpec {
         let http = ready["http"]
             .as_str()
             .map(|url| {
-                Http::local(url, session.timeout(), self.validation)
+                Http::local(url, session.timeout(), self.bindings.validation)
                     .map(|http| Arc::new(http) as Arc<dyn InvocationBackend>)
             })
             .transpose()?;

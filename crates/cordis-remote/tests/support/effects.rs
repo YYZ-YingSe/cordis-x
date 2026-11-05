@@ -1,5 +1,6 @@
 use super::*;
-use cordis_remote::{Dependency, Value};
+use cordis_host::Dependency;
+use cordis_remote::Value;
 use std::sync::atomic::AtomicBool;
 
 fn subscriptions() -> Service<RemoteService> {
@@ -68,7 +69,7 @@ pub(super) fn lifecycle_log_plugin(log: Arc<Log>) -> Plugin {
     log_plugin_for(log, Service::new("example.lifecycle-log", "1"))
 }
 pub(super) fn lifecycle_log_dependency() -> Dependency {
-    Dependency::new_json(
+    Dependency::json(
         &Service::<Log>::new("example.lifecycle-log", "1"),
         cordis_remote::Descriptor::new(
             cordis_portable_example::lifecycle::LifecycleLogClient::interface(),
@@ -77,7 +78,7 @@ pub(super) fn lifecycle_log_dependency() -> Dependency {
         |log, ctx, method, args| {
             Box::pin(async move {
                 record(log, ctx, method, args).await?;
-                Ok(json!({}))
+                Ok::<_, cordis_remote::Error>(json!({}))
             })
         },
     )

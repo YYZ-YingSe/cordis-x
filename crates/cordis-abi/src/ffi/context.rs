@@ -141,7 +141,7 @@ impl Module {
                     instance,
                     method,
                     args,
-                    scope.router.capabilities.validation,
+                    scope.router.capabilities.bindings.validation,
                 )
                 .await;
         };
@@ -174,7 +174,7 @@ impl Module {
             submit(
                 self.release,
                 matches!(op, Op::Acquire),
-                scope.router.capabilities.validation,
+                scope.router.capabilities.bindings.validation,
                 |completion| unsafe {
                     if let Some(dispatch) = extension.resources {
                         resources::dispatch(
@@ -394,7 +394,7 @@ unsafe extern "C" fn invoke(
             (
                 read_text(dependency, &mut budget)?,
                 read_text(method, &mut budget)?,
-                read_payload(args, &mut budget, router.capabilities.validation)?,
+                read_payload(args, &mut budget, router.capabilities.bindings.validation)?,
             )
         };
         Ok(async move {
@@ -522,7 +522,7 @@ unsafe extern "C" fn managed_call(
             let args = read_slice(args, 1)?.first().ok_or_else(invalid_value)?;
             (
                 read_text(label, &mut budget)?,
-                read_payload(args, &mut budget, router.capabilities.validation)?,
+                read_payload(args, &mut budget, router.capabilities.bindings.validation)?,
             )
         };
         Ok(async move {
@@ -640,7 +640,7 @@ unsafe extern "C" fn reactive_call(
             let args = read_slice(args, 1)?.first().ok_or_else(invalid_value)?;
             (
                 read_text(alias, &mut budget)?,
-                read_payload(args, &mut budget, router.capabilities.validation)?,
+                read_payload(args, &mut budget, router.capabilities.bindings.validation)?,
             )
         };
         Ok(async move {
@@ -755,7 +755,7 @@ unsafe extern "C" fn composition_call(
             let args = read_slice(args, 1)?.first().ok_or_else(invalid_value)?;
             (
                 read_text(alias, &mut budget)?,
-                read_payload(args, &mut budget, router.capabilities.validation)?,
+                read_payload(args, &mut budget, router.capabilities.bindings.validation)?,
             )
         };
         Ok(async move { router.compose(grant, operation, target, alias, args).await })

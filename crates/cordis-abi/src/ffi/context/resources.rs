@@ -118,7 +118,7 @@ unsafe extern "C" fn call(
             (
                 read_text(dependency, &mut budget)?,
                 read_text(method, &mut budget)?,
-                read_payload(args, &mut budget, router.capabilities.validation)?,
+                read_payload(args, &mut budget, router.capabilities.bindings.validation)?,
             )
         };
         Ok(async move {

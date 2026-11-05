@@ -1,4 +1,4 @@
-use crate::{Error, Result, Value, json, resource::WeakRemoteResource};
+use crate::{Error, Result, Value, json};
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex, OnceLock},
@@ -12,7 +12,7 @@ pub(crate) struct Resources {
 }
 pub(crate) struct Entry {
     grant: String,
-    resource: OnceLock<WeakRemoteResource>,
+    resource: OnceLock<cordis_host::WeakResource>,
 }
 impl Resources {
     pub fn reserve(&self, payload: &Value) -> Result<(String, Arc<Entry>)> {
@@ -36,7 +36,7 @@ impl Resources {
         entries.insert(id.clone(), entry.clone());
         Ok((id, entry))
     }
-    pub fn get(&self, payload: &Value) -> Result<WeakRemoteResource> {
+    pub fn get(&self, payload: &Value) -> Result<cordis_host::WeakResource> {
         let id = text(payload, "resource")?;
         let grant = text(payload, "grant")?;
         let entry = self
@@ -53,7 +53,7 @@ impl Resources {
     }
 }
 impl Entry {
-    pub fn commit(&self, id: String, resource: crate::RemoteResource) -> Value {
+    pub fn commit(&self, id: String, resource: cordis_host::Resource) -> Value {
         let _ = self.resource.set(resource.downgrade());
         success(json!({"resource":id,"grant":self.grant}))
     }

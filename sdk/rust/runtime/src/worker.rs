@@ -23,7 +23,8 @@ impl Service {
         let signature =
             cordis_contract::portable::method(&self.descriptor.interface().methods, method)
                 .map_err(|e| refused("unknown_method", e))?;
-        args.check(&signature.args)
+        let args = args
+            .bind(&signature.args)
             .map_err(|e| refused("invalid_argument", e))?;
         let value = self
             .client
@@ -57,7 +58,7 @@ enum Action {
     Callback(u64, Value),
     MessageCallback(u64, Payload),
     Listener(u64, Payload),
-    Middleware(u64, Payload, rt::Next<Payload, Payload>),
+    Middleware(u64, Payload, rt::Next<cordis_host::Body, cordis_host::Body>),
     Forget(u64),
     Close,
 }
@@ -98,7 +99,7 @@ enum StoredCallback {
     Listener(Listener),
 }
 pub(crate) struct Instance {
-    pub capabilities: Arc<Capabilities>,
+    pub capabilities: Arc<HostBindings>,
     pub primary: cordis_sdk_core::Contract,
     client: mpsc::WeakSender<Message>,
     callbacks: RefCell<BTreeMap<u64, StoredCallback>>,
@@ -226,7 +227,7 @@ impl Frame {
     }
 }
 impl Client {
-    pub async fn start<P: Plugin>(config: Value, capabilities: Arc<Capabilities>) -> Result<Self> {
+    pub async fn start<P: Plugin>(config: Value, capabilities: Arc<HostBindings>) -> Result<Self> {
         let (sender, mut receiver) = mpsc::channel::<Message>(64);
         let weak = sender.downgrade();
         let (ready, result) = oneshot::channel();
@@ -311,12 +312,20 @@ impl Client {
                                         Ok(Value::Null)
                                     }
                                     Action::Invoke(method, args) => {
+                                        if !P::TYPED_DISPATCH {
+                                            args.validate(args.validation())
+                                                .map_err(|e| refused("invalid_argument", e))?;
+                                        }
                                         return plugin
                                             .invoke(ctx, method, args)
                                             .await
                                             .map(Response::Message);
                                     }
                                     Action::Acquire(kind, args) => {
+                                        if !P::TYPED_DISPATCH {
+                                            args.validate(args.validation())
+                                                .map_err(|e| refused("invalid_argument", e))?;
+                                        }
                                         // Reserve before user code can acquire anything. A panic or
                                         // Unknown keeps the reservation and blocks instance closure.
                                         let id = instance.reserve_resource()?;
@@ -341,8 +350,12 @@ impl Client {
                                         }
                                     }
                                     Action::ResourceCall(id, method, args) => {
-                                        return instance
-                                            .resource(id)?
+                                        let resource = instance.resource(id)?;
+                                        if !resource.typed_dispatch() {
+                                            args.validate(args.validation())
+                                                .map_err(|e| refused("invalid_argument", e))?;
+                                        }
+                                        return resource
                                             .invoke(ctx, method, args)
                                             .await
                                             .map(Response::Message);
@@ -476,7 +489,7 @@ impl Client {
         ctx: rt::Context,
         id: u64,
         args: Payload,
-        next: rt::Next<Payload, Payload>,
+        next: rt::Next<cordis_host::Body, cordis_host::Body>,
     ) -> Result<Payload> {
         self.send(Some(ctx.snapshot()), Action::Middleware(id, args, next))
             .await?

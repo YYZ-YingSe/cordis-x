@@ -13,7 +13,7 @@ fn orders() -> Service<RemoteService> {
 }
 
 fn log_dependency() -> Dependency {
-    Dependency::new_json(&logger(), logger_descriptor(), write_log)
+    Dependency::json(&logger(), logger_descriptor(), write_log)
 }
 
 fn price_spec(endpoint: Endpoint) -> ProcessSpec {
@@ -235,7 +235,7 @@ async fn typescript_to_cpp_to_native_dependencies_restart_and_cleanup_in_order()
         let price = rt
             .install(price_spec(endpoint).plugin("pricing", &pricing()))
             .unwrap();
-        let mut spec = ProcessSpec::new("node").requires(Dependency::remote(&pricing()));
+        let mut spec = ProcessSpec::new("node").requires(Dependency::new(&pricing()).unwrap());
         spec.endpoint = endpoint;
         spec.args = vec![
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -367,7 +367,7 @@ async fn pricing_dependency_shape_drift_is_rejected_before_activation() {
     methods.get_mut("write").unwrap().result =
         cordis_remote::MessageContract::standard("google.protobuf.StringValue");
     let mut spec = price_spec(Endpoint::Ipc);
-    spec.dependencies = vec![Dependency::new_json(
+    spec.bindings.dependencies = vec![Dependency::json(
         &logger(),
         cordis_remote::Descriptor::new(interface).unwrap(),
         write_log,

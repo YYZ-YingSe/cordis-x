@@ -1,10 +1,9 @@
+use cordis_host::Dependency;
 use cordis_portable_example::resources::{CounterClient, CounterPlugin};
 use cordis_runtime::{self as rt, Plugin, Runtime, Service};
 use cordis_sdk_core::{Value, json};
 use cordis_sdk_runtime as native;
-use cordis_wasm::{
-    Capabilities, ContextComponent, ContextResource, ContextService, Dependency, Limits,
-};
+use cordis_wasm::{Capabilities, ContextComponent, ContextResource, ContextService, Limits};
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -120,7 +119,8 @@ async fn scenario(wasm: Option<(bool, bool)>) -> Vec<Value> {
                 "wasm_resource_counter"
             },
             Capabilities {
-                dependencies: vec![Dependency::new_json(
+                bindings: cordis_host::HostBindings {
+                    dependencies: vec![Dependency::json(
                     &logger,
                     cordis_contract::Descriptor::new(
                         cordis_portable_example::resources::generated::CounterLogClient::interface(
@@ -130,10 +130,12 @@ async fn scenario(wasm: Option<(bool, bool)>) -> Vec<Value> {
                     |log, _, _, value| {
                         Box::pin(async move {
                             log.lock().unwrap().push(value);
-                            Ok(json!({}))
+                            Ok::<_, cordis_wasm::Error>(json!({}))
                         })
                     },
                 )],
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         );
@@ -154,7 +156,10 @@ async fn scenario(wasm: Option<(bool, bool)>) -> Vec<Value> {
                 "wasm_resource_client"
             },
             Capabilities {
-                dependencies: vec![Dependency::wasm(&counters)],
+                bindings: cordis_host::HostBindings {
+                    dependencies: vec![Dependency::new(&counters).unwrap()],
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         );
@@ -178,8 +183,8 @@ async fn scenario(wasm: Option<(bool, bool)>) -> Vec<Value> {
                     "counters",
                     &counters,
                     json!({}),
-                    native::Capabilities {
-                        dependencies: vec![native::Dependency::new(
+                    cordis_host::HostBindings {
+                        dependencies: vec![cordis_host::Dependency::messages(
                             &logger,
                             cordis_sdk_core::Descriptor::new(
                                 cordis_portable_example::resources::generated::CounterLogClient::interface(),
@@ -191,9 +196,7 @@ async fn scenario(wasm: Option<(bool, bool)>) -> Vec<Value> {
                                     cordis_sdk_core::Message::new(cordis_portable_example::resources::generated::data::google::protobuf::Empty {}).map_err(cordis_sdk_core::typed::violation)
                                 })
                             },
-                        )],
-                        ..Default::default()
-                    },
+                        )], ..Default::default() },
                 )
                 .unwrap(),
             )
@@ -205,8 +208,8 @@ async fn scenario(wasm: Option<(bool, bool)>) -> Vec<Value> {
                     "client",
                     &client,
                     json!({}),
-                    native::Capabilities {
-                        dependencies: vec![native::Dependency::portable(&counters).unwrap()],
+                    cordis_host::HostBindings {
+                        dependencies: vec![cordis_host::Dependency::new(&counters).unwrap()],
                         ..Default::default()
                     },
                 )

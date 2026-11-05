@@ -1,7 +1,8 @@
 #![cfg(unix)]
+use cordis_host::Dependency;
 use cordis_runtime::*;
 use cordis_wasm::{
-    Capabilities, ContextComponent, ContextService as PortableService, Dependency, Limits, Wasi,
+    Capabilities, ContextComponent, ContextService as PortableService, Limits, Wasi,
 };
 use cordis_wasm::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -26,34 +27,40 @@ async fn cpp_portable_component_runs_reentrant_callbacks() {
     .await
     .unwrap();
     let caps = Capabilities {
-        dependencies: vec![Dependency::new_json(
-            &logger,
-            cordis_contract::Descriptor::new(
-                cordis_contract::portable::decode(
-                    &cordis_example_contracts::resources::portable::PORTABLELOG
-                        .parse::<Value>()
-                        .unwrap(),
+        bindings: cordis_host::HostBindings {
+            dependencies: vec![Dependency::json(
+                &logger,
+                cordis_contract::Descriptor::new(
+                    cordis_contract::portable::decode(
+                        &cordis_example_contracts::resources::portable::PORTABLELOG
+                            .parse::<Value>()
+                            .unwrap(),
+                    )
+                    .unwrap()
+                    .interface()
+                    .clone(),
                 )
-                .unwrap()
-                .interface()
-                .clone(),
-            )
-            .unwrap(),
-            |logger, _, _, value| {
-                Box::pin(async move {
-                    logger.lock().unwrap().push(value.clone());
-                    Ok(value)
-                })
-            },
-        )],
-        events: [("message".into(), Event::new("example.message", "1"))].into(),
-        middleware: [("chain".into(), Middleware::new("example.chain", "1"))].into(),
-        factories: [(
-            "worker".into(),
-            Arc::new(|_| Ok(Plugin::new("child", |_| async { Ok(()) })))
-                as Arc<dyn Fn(cordis_wasm::Bytes) -> cordis_wasm::Result<Plugin> + Send + Sync>,
-        )]
-        .into(),
+                .unwrap(),
+                |logger, _, _, value| {
+                    Box::pin(async move {
+                        logger.lock().unwrap().push(value.clone());
+                        Ok::<_, cordis_wasm::Error>(value)
+                    })
+                },
+            )],
+            events: vec![cordis_host::EventBinding::new(
+                "message",
+                &Event::new("example.message", "1"),
+            )],
+            middleware: vec![cordis_host::MiddlewareBinding::new(
+                "chain",
+                &Middleware::new("example.chain", "1"),
+            )],
+            factories: vec![cordis_host::FactoryBinding::new("worker", |_| {
+                Ok(Plugin::new("child", |_| async { Ok(()) }))
+            })],
+            ..Default::default()
+        },
         wasi: Some(Wasi::default()),
         ..Default::default()
     };

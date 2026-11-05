@@ -451,7 +451,7 @@ async fn broker_reverse_calls_keep_version_dependencies_and_caller_effects_after
             )
             .unwrap();
         log.ready().await.unwrap();
-        let mut spec = ProcessSpec::new("").requires(cordis_remote::Dependency::new_json(
+        let mut spec = ProcessSpec::new("").requires(cordis_host::Dependency::json(
             &logger,
             version_log_descriptor(),
             {
@@ -478,7 +478,7 @@ async fn broker_reverse_calls_keep_version_dependencies_and_caller_effects_after
                                 .map_err(|e| cordis_remote::Error::Resource(e.to_string()))?;
                             effects.lock().unwrap().push(effect);
                         }
-                        Ok(json!(log.0))
+                        Ok::<_, cordis_remote::Error>(json!(log.0))
                     })
                 }
             },

@@ -1,7 +1,6 @@
-use cordis_abi::{
-    AbiService as PortableService, Capabilities, Dependency, EventBinding, FactoryBinding, Library,
-    MiddlewareBinding,
-};
+use cordis_abi::{AbiService as PortableService, Capabilities, Library};
+use cordis_host::Dependency;
+use cordis_host::{EventBinding, FactoryBinding, MiddlewareBinding};
 use cordis_runtime::*;
 use cordis_sdk_core::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -26,43 +25,46 @@ async fn portable_rust_cdylib_runs_reentrant_callbacks() {
     .await
     .unwrap();
     let caps = Capabilities {
-        dependencies: vec![Dependency::new_json(
-            &logger,
-            cordis_sdk_core::Descriptor::new(
-                cordis_sdk_core::contract::decode(
-                    &cordis_example_contracts::resources::portable::PORTABLELOG
-                        .parse::<Value>()
-                        .unwrap(),
+        bindings: cordis_host::HostBindings {
+            dependencies: vec![Dependency::json(
+                &logger,
+                cordis_sdk_core::Descriptor::new(
+                    cordis_sdk_core::contract::decode(
+                        &cordis_example_contracts::resources::portable::PORTABLELOG
+                            .parse::<Value>()
+                            .unwrap(),
+                    )
+                    .unwrap()
+                    .interface()
+                    .clone(),
                 )
-                .unwrap()
-                .interface()
-                .clone(),
-            )
-            .unwrap(),
-            |logger, _, _, value| {
-                Box::pin(async move {
-                    if value == json!({"reject":true}) {
-                        return Err(cordis_abi::Error::Rejected {
-                            code: "logger_rejected".into(),
-                            message: "business error".into(),
-                        });
-                    }
-                    logger.lock().unwrap().push(value.clone());
-                    Ok(value)
-                })
-            },
-        )],
-        events: vec![EventBinding::new(
-            "message",
-            &Event::new("example.message", "1"),
-        )],
-        middleware: vec![MiddlewareBinding::new(
-            "chain",
-            &Middleware::new("example.chain", "1"),
-        )],
-        factories: vec![FactoryBinding::new("worker", |_| {
-            Ok(Plugin::new("child", |_| async { Ok(()) }))
-        })],
+                .unwrap(),
+                |logger, _, _, value| {
+                    Box::pin(async move {
+                        if value == json!({"reject":true}) {
+                            return Err(cordis_abi::Error::Rejected {
+                                code: "logger_rejected".into(),
+                                message: "business error".into(),
+                            });
+                        }
+                        logger.lock().unwrap().push(value.clone());
+                        Ok(value)
+                    })
+                },
+            )],
+            events: vec![EventBinding::new(
+                "message",
+                &Event::new("example.message", "1"),
+            )],
+            middleware: vec![MiddlewareBinding::new(
+                "chain",
+                &Middleware::new("example.chain", "1"),
+            )],
+            factories: vec![FactoryBinding::new("worker", |_| {
+                Ok(Plugin::new("child", |_| async { Ok(()) }))
+            })],
+            ..Default::default()
+        },
         ..Default::default()
     };
     let service = Service::<PortableService>::new("example.portable-rust", "1").with_descriptor(

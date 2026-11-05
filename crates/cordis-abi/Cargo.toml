@@ -11,6 +11,7 @@ license.workspace = true
 loader = ["dep:cordis-loader"]
 
 [dependencies]
+cordis-host.workspace = true
 cordis-runtime.workspace = true
 cordis-contract.workspace = true
 cordis-kernel.workspace = true

@@ -2,13 +2,15 @@
 #![forbid(unsafe_code)]
 mod compiler;
 mod engine;
+mod host;
+mod host_failure;
 pub use compiler::{CacheLimits, Compiler, CompilerStats};
 mod wasi;
 pub use wasi::{Directory, Wasi};
 #[cfg(feature = "loader")]
 pub mod loader;
 mod managed;
-pub use managed::{Capabilities, ContextComponent, ContextResource, ContextService, Dependency};
+pub use managed::{Capabilities, ContextComponent, ContextResource, ContextService};
 mod bindings {
     include!(concat!(env!("OUT_DIR"), "/plugin_bindings.rs"));
 }
@@ -524,6 +526,8 @@ impl WasmService {
     ) -> Result<WasmResource> {
         // Retain fresh definition authority even when the caller drops a wait
         // inside its ServiceHandle callback before the guest returns.
+        let released = Arc::new(Mutex::new(None));
+        let cleanup_result = released.clone();
         let definition = context.clone();
         let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
         let resource = context
@@ -551,39 +555,44 @@ impl WasmService {
                         kind,
                     })
                 },
-                |ticket, context| async move {
-                    let id = match &ticket.acquired {
-                        Ok(id) => *id,
-                        Err(
-                            Error::Rejected { .. }
-                            | Error::Refused { .. }
-                            | Error::InvalidInput(_)
-                            | Error::Overloaded
-                            | Error::Closed,
-                        ) => return Ok(()),
-                        Err(error) => return Err(error.clone().into()),
-                    };
-                    let instance = ticket.instance.clone();
-                    let outcome = tokio::task::spawn_blocking(move || {
-                        let mut state = instance.state.lock().unwrap();
-                        if let Some(error) = &state.fault {
-                            return Err(error.clone());
+                move |ticket, context| async move {
+                    let result: cordis_runtime::Result<()> = async {
+                        let id = match &ticket.acquired {
+                            Ok(id) => *id,
+                            Err(
+                                Error::Rejected { .. }
+                                | Error::Refused { .. }
+                                | Error::InvalidInput(_)
+                                | Error::Overloaded
+                                | Error::Closed,
+                            ) => return Ok(()),
+                            Err(error) => return Err(error.clone().into()),
+                        };
+                        let instance = ticket.instance.clone();
+                        let outcome = tokio::task::spawn_blocking(move || {
+                            let mut state = instance.state.lock().unwrap();
+                            if let Some(error) = &state.fault {
+                                return Err(error.clone());
+                            }
+                            let result = state.guest.as_mut().ok_or(Error::Closed)?.release(id);
+                            if let Err(error @ Error::Unknown(_)) = &result {
+                                state.fault.get_or_insert(error.clone());
+                            }
+                            result?;
+                            state.resources -= 1;
+                            Ok::<_, Error>(())
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(Error::Unknown(e.to_string())));
+                        if let Err(error @ Error::Unknown(_)) = &outcome {
+                            ticket.instance.fault(error.clone());
+                            let _ = context.fail(error.to_string());
                         }
-                        let result = state.guest.as_mut().ok_or(Error::Closed)?.release(id);
-                        if let Err(error @ Error::Unknown(_)) = &result {
-                            state.fault.get_or_insert(error.clone());
-                        }
-                        result?;
-                        state.resources -= 1;
-                        Ok::<_, Error>(())
-                    })
-                    .await
-                    .unwrap_or_else(|e| Err(Error::Unknown(e.to_string())));
-                    if let Err(error @ Error::Unknown(_)) = &outcome {
-                        ticket.instance.fault(error.clone());
-                        let _ = context.fail(error.to_string());
+                        outcome.map_err(Into::into)
                     }
-                    outcome.map_err(Into::into)
+                    .await;
+                    *cleanup_result.lock().unwrap() = Some(result.clone().map_err(Error::from));
+                    result
                 },
             )
             .await?;
@@ -596,7 +605,7 @@ impl WasmService {
             }
             return Err(error);
         }
-        Ok(WasmResource { resource })
+        Ok(WasmResource { resource, released })
     }
 }
 
@@ -613,6 +622,7 @@ struct Ticket {
 #[derive(Clone)]
 pub struct WasmResource {
     resource: Resource<Ticket>,
+    released: Arc<Mutex<Option<Result<()>>>>,
 }
 impl WasmResource {
     pub async fn invoke_json(&self, method: &str, args: Value) -> Result<Value> {
@@ -633,6 +643,16 @@ impl WasmResource {
     }
 
     pub async fn invoke(&self, method: &str, args: Bytes) -> Result<Bytes> {
+        self.invoke_envelope(method, Payload::message(args).into())
+            .await?
+            .one()
+            .map_err(|e| Error::InvalidInput(e.to_string()))
+    }
+    pub(crate) async fn invoke_envelope(
+        &self,
+        method: &str,
+        mut args: cordis_wire::local::Envelope,
+    ) -> Result<cordis_wire::local::Envelope> {
         if method.len() > cordis_component::MAX_BYTES {
             return Err(Error::InvalidInput("method too long".into()));
         }
@@ -650,10 +670,7 @@ impl WasmResource {
                                 .map_err(Error::InvalidInput)?;
                         let signature = contract::method(&factory.methods, &method)
                             .map_err(Error::InvalidInput)?;
-                        signature
-                            .args
-                            .check_binary(&args)
-                            .map_err(Error::InvalidInput)?;
+                        args.check(&signature.args).map_err(Error::InvalidInput)?;
                         Ok::<_, Error>(signature.clone())
                     })();
                     let signature = match signature {
@@ -662,23 +679,17 @@ impl WasmResource {
                     };
                     let result = ticket
                         .instance
-                        .run(
-                            &context,
-                            Op::ResourceCall(id),
-                            method,
-                            Payload::message(args),
-                        )
+                        .run(&context, Op::ResourceCall(id), method, args.into_wire())
                         .await
                         .map(|reply| match reply {
-                            Reply::Value(value) => value,
+                            Reply::Value(value) => {
+                                cordis_wire::local::Envelope::from(Payload::message(value))
+                            }
                             _ => unreachable!(),
                         })
                         .map_err(|e| e.check_declared(&signature.errors, "resource errors"))
-                        .and_then(|value| {
-                            signature
-                                .result
-                                .check_binary(&value)
-                                .map_err(Error::Unknown)?;
+                        .and_then(|mut value| {
+                            value.check(&signature.result).map_err(Error::Unknown)?;
                             Ok(value)
                         });
                     if let Err(error @ Error::Unknown(_)) = &result {
@@ -724,4 +735,43 @@ pub(crate) fn json_body(shape: &cordis_contract::MessageContract, value: &Value)
 pub(crate) fn body_json(shape: &cordis_contract::MessageContract, bytes: &Bytes) -> Result<Value> {
     let value = shape.parse_binary(bytes).map_err(Error::Unknown)?;
     serde_json::to_value(&value).map_err(engine::unknown)
+}
+
+#[derive(Clone)]
+struct WeakWasmResource {
+    resource: cordis_runtime::WeakResource<Ticket>,
+    released: Arc<Mutex<Option<Result<()>>>>,
+}
+impl WasmResource {
+    fn downgrade(&self) -> WeakWasmResource {
+        WeakWasmResource {
+            resource: self.resource.downgrade(),
+            released: self.released.clone(),
+        }
+    }
+}
+impl WeakWasmResource {
+    async fn invoke_envelope(
+        &self,
+        method: &str,
+        args: cordis_wire::local::Envelope,
+    ) -> Result<cordis_wire::local::Envelope> {
+        WasmResource {
+            resource: self.resource.upgrade().ok_or(Error::Closed)?,
+            released: self.released.clone(),
+        }
+        .invoke_envelope(method, args)
+        .await
+    }
+    async fn dispose(&self) -> Result<()> {
+        if let Some(effect) = self.resource.effect() {
+            effect.dispose().await.map_err(Into::into)
+        } else {
+            self.released
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or(Err(Error::Closed))
+        }
+    }
 }

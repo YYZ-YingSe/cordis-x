@@ -1,64 +1,19 @@
 //! Explicit plugin factories and staged Value provisions over native Context.
 use crate::{
-    Bytes, Error, Payload, Result, Value,
+    Error, Payload, Result, Value,
     context::{Router, next_id},
     ffi::Reply,
     json,
 };
 use cordis_contract::ContractId;
-use cordis_runtime::{Plugin, Service, WeakPluginHandle};
+use cordis_runtime::WeakPluginHandle;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fmt,
     sync::{Arc, Mutex},
 };
 use tokio::sync::Semaphore;
 
-type Factory = dyn Fn(Bytes) -> cordis_runtime::Result<Plugin> + Send + Sync;
-/// A named, trusted definition factory. It must not acquire external resources:
-/// acquisition belongs in the returned plugin's initializer and effects.
-#[derive(Clone)]
-pub struct FactoryBinding {
-    alias: String,
-    factory: Arc<Factory>,
-}
-impl FactoryBinding {
-    pub fn new<F>(alias: impl Into<String>, factory: F) -> Self
-    where
-        F: Fn(Bytes) -> cordis_runtime::Result<Plugin> + Send + Sync + 'static,
-    {
-        Self {
-            alias: alias.into(),
-            factory: Arc::new(factory),
-        }
-    }
-}
-impl fmt::Debug for FactoryBinding {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("FactoryBinding").field(&self.alias).finish()
-    }
-}
-#[derive(Clone)]
-pub struct ProvisionBinding {
-    alias: String,
-    pub(crate) service: Service<Bytes>,
-}
-impl fmt::Debug for ProvisionBinding {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ProvisionBinding")
-            .field(&self.alias)
-            .field(self.service.contract())
-            .finish()
-    }
-}
-impl ProvisionBinding {
-    pub fn new(alias: impl Into<String>, service: &Service<Bytes>) -> Self {
-        Self {
-            alias: alias.into(),
-            service: service.clone(),
-        }
-    }
-}
+use cordis_host::Body;
 #[derive(Clone, Debug)]
 pub struct CompositionLimits {
     /// Includes disposed child handles; IDs are never reused in an instance.
@@ -83,14 +38,14 @@ impl crate::Capabilities {
             return Err(Error::InvalidInput("invalid Composition capacity".into()));
         }
         let mut factories = BTreeSet::new();
-        for binding in &self.factories {
+        for binding in &self.bindings.factories {
             if !valid_alias(&binding.alias) || !factories.insert(binding.alias.clone()) {
                 return Err(Error::Contract("invalid or duplicate factory alias".into()));
             }
         }
         let mut expected = json!({"factories": factories, "provisions": {}});
         let mut slots = BTreeSet::new();
-        for binding in &self.provisions {
+        for binding in &self.bindings.provisions {
             let contract = binding.service.contract();
             if !valid_alias(&binding.alias) || contract.name.is_empty() || contract.revision.is_empty()
                 || contract == primary || !slots.insert(contract.clone())
@@ -179,6 +134,7 @@ impl Router {
                 let ctx = self.context(grant)?;
                 let factory = self
                     .capabilities
+                    .bindings
                     .factories
                     .iter()
                     .find(|f| f.alias == alias)
@@ -212,7 +168,7 @@ impl Router {
                             };
                             // No registry lock or Tokio executor thread spans host factory code.
                             let child = tokio::task::spawn_blocking(move || {
-                                ctx.install_with(|| factory(args))
+                                ctx.install_with(|| factory(Body::from_bytes(args)))
                             })
                             .await
                             .map_err(|e| Error::Runtime(format!("factory failed: {e}")))??;
@@ -278,6 +234,7 @@ impl Router {
                 let ctx = self.context(grant)?;
                 let binding = self
                     .capabilities
+                    .bindings
                     .provisions
                     .iter()
                     .find(|p| p.alias == alias)
@@ -287,7 +244,9 @@ impl Router {
                     })?;
                 ctx.provide(
                     &binding.service,
-                    Arc::new(args.one().map_err(|e| Error::InvalidInput(e.to_string()))?),
+                    Arc::new(Body::from_bytes(
+                        args.one().map_err(|e| Error::InvalidInput(e.to_string()))?,
+                    )),
                 )?;
                 Value::Null
             }

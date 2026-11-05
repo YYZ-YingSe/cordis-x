@@ -1,5 +1,6 @@
 use super::*;
 use crate::json;
+use cordis_host::Body;
 use cordis_runtime::{
     EffectStep, Inverse, Next, TaskHandle, WeakEffectHandle, WeakEffectSequence, WeakPluginHandle,
     WeakScopeHandle,
@@ -26,13 +27,13 @@ enum Handle {
     Dispatch(tokio::sync::watch::Receiver<Option<Result<Payload>>>),
     Sequence(WeakEffectSequence),
     Plugin(WeakPluginHandle),
-    Resource(resources::WeakContextResource),
+    Resource(cordis_host::WeakResource),
 }
 pub(super) struct Router {
     instance: Weak<Instance>,
     entries: Mutex<BTreeMap<String, Entry>>,
     handles: Mutex<BTreeMap<String, Handle>>,
-    next: Mutex<BTreeMap<String, Next<Bytes, Bytes>>>,
+    next: Mutex<BTreeMap<String, Next<Body, Body>>>,
     ids: AtomicU64,
 }
 pub(super) fn token() -> Result<String> {
@@ -235,26 +236,22 @@ impl Router {
                 let dependency = instance
                     .module
                     .capabilities
+                    .bindings
                     .dependencies
                     .iter()
-                    .find(|d| d.declaration.contract().name.as_ref() == name)
+                    .find(|d| d.declaration().contract().name.as_ref() == name)
                     .ok_or_else(|| refused("undeclared_dependency", name))?;
                 let method = text(args, "method")?;
-                let signature = contract::method(
-                    &dependency
-                        .descriptor
-                        .as_ref()
-                        .expect("validated binding")
-                        .interface()
-                        .methods,
-                    method,
-                )
-                .map_err(Error::InvalidInput)?;
+                let signature =
+                    contract::method(&dependency.descriptor().interface().methods, method)
+                        .map_err(Error::InvalidInput)?;
                 let mut value =
                     Envelope::from(Payload::message(payload.one().map_err(invalid_payload)?));
                 value.check(&signature.args).map_err(Error::InvalidInput)?;
-                let result = (dependency.invoke)(ctx.clone(), method.into(), value)
+                let result = dependency
+                    .invoke_wire(ctx.clone(), method.into(), value)
                     .await
+                    .map_err(Error::from)
                     .map_err(|e| e.check_declared(&signature.errors, "dependency errors"))
                     .and_then(|mut value| {
                         value.check(&signature.result).map_err(unknown)?;
@@ -278,24 +275,20 @@ impl Router {
                 let dependency = instance
                     .module
                     .capabilities
+                    .bindings
                     .dependencies
                     .iter()
-                    .find(|d| d.declaration.contract().name.as_ref() == name)
+                    .find(|d| d.declaration().contract().name.as_ref() == name)
                     .ok_or_else(|| refused("undeclared_dependency", name))?;
-                let acquire = dependency.acquire.as_ref().ok_or_else(|| {
-                    refused("unsupported_resource", "dependency has no resource binding")
-                })?;
+                let factory = dependency.resource_contract(&kind).map_err(Error::from)?;
                 let mut value =
                     Envelope::from(Payload::message(payload.one().map_err(invalid_payload)?));
-                let factory = contract::resource(
-                    dependency.descriptor.as_ref().expect("validated binding"),
-                    &kind,
-                )
-                .map_err(Error::InvalidInput)?;
                 value.check(&factory.args).map_err(Error::InvalidInput)?;
                 let grant = self.reserve()?;
-                let resource = acquire(ctx, kind, value)
+                let resource = dependency
+                    .acquire_wire(ctx, kind, value)
                     .await
+                    .map_err(Error::from)
                     .map_err(resources::uncertainty)?;
                 Ok(json!(grant.commit(Handle::Resource(resource.downgrade()))).into())
             }
@@ -305,12 +298,13 @@ impl Router {
                     _ => return Err(Error::Closed),
                 };
                 resource
-                    .invoke(
+                    .invoke_bytes(
                         text(args, "method")?,
                         payload.one().map_err(invalid_payload)?,
                     )
                     .await
                     .map(Payload::message)
+                    .map_err(Error::from)
                     .map_err(resources::uncertainty)
             }
             "dependency-resource-dispose" => {
@@ -329,6 +323,7 @@ impl Router {
                     .dispose()
                     .await
                     .map(|_| Value::Null.into())
+                    .map_err(Error::from)
                     .map_err(resources::uncertainty)
             }
             "install" => {
@@ -336,17 +331,18 @@ impl Router {
                 let factory = instance
                     .module
                     .capabilities
-                    .factories
-                    .get(name)
+                    .bindings
+                    .factory(name)
                     .ok_or_else(|| refused("undeclared_factory", name))?
                     .clone();
                 let config = payload.one().map_err(invalid_payload)?;
                 let grant = self.reserve()?;
-                let child =
-                    tokio::task::spawn_blocking(move || ctx.install_with(|| Ok(factory(config)?)))
-                        .await
-                        .map_err(unknown)?
-                        .map_err(Error::from)?;
+                let child = tokio::task::spawn_blocking(move || {
+                    ctx.install_with(|| factory(Body::from_bytes(config)))
+                })
+                .await
+                .map_err(unknown)?
+                .map_err(Error::from)?;
                 Ok(json!(grant.commit(Handle::Plugin(child.downgrade()))).into())
             }
             "provide" => {
@@ -354,10 +350,13 @@ impl Router {
                 let service = instance
                     .module
                     .capabilities
-                    .provisions
-                    .get(name)
+                    .bindings
+                    .provision(name)
                     .ok_or_else(|| refused("undeclared_provision", name))?;
-                ctx.provide(service, Arc::new(payload.one().map_err(invalid_payload)?))?;
+                ctx.provide(
+                    service,
+                    Arc::new(Body::from_bytes(payload.one().map_err(invalid_payload)?)),
+                )?;
                 Ok(Value::Null.into())
             }
             "emit" | "event-emit" => {
@@ -365,10 +364,10 @@ impl Router {
                 let event = instance
                     .module
                     .capabilities
-                    .events
-                    .get(name)
+                    .bindings
+                    .event(name)
                     .ok_or_else(|| refused("undeclared_event", name))?;
-                let value = payload.one().map_err(invalid_payload)?;
+                let value = Body::from_bytes(payload.one().map_err(invalid_payload)?);
                 let grant = if command == "event-emit" {
                     Some(self.reserve()?)
                 } else {
@@ -383,12 +382,16 @@ impl Router {
                     let (send, receive) = tokio::sync::watch::channel(None);
                     tokio::spawn(async move {
                         send.send_replace(Some(
-                            dispatch.join().await.map(flows_payload).map_err(Into::into),
+                            dispatch
+                                .join()
+                                .await
+                                .map_err(Error::from)
+                                .and_then(flows_payload),
                         ));
                     });
                     Ok(json!(grant.commit(Handle::Dispatch(receive))).into())
                 } else {
-                    Ok(flows_payload(dispatch.join().await?))
+                    flows_payload(dispatch.join().await?)
                 }
             }
             "event-join" | "event-status" => {
@@ -414,18 +417,18 @@ impl Router {
                     .get(text(args, "grant")?)
                     .cloned()
                     .ok_or(Error::Closed)?;
-                next.run(payload.one().map_err(invalid_payload)?)
+                next.run(Body::from_bytes(payload.one().map_err(invalid_payload)?))
                     .await
-                    .map(Payload::message)
-                    .map_err(Into::into)
+                    .map_err(Error::from)
+                    .and_then(|v| v.into_bytes().map(Payload::message).map_err(unknown))
             }
             "run" => {
                 let name = text(args, "name")?;
                 let chain = instance
                     .module
                     .capabilities
-                    .middleware
-                    .get(name)
+                    .bindings
+                    .middleware(name)
                     .cloned()
                     .ok_or_else(|| refused("undeclared_middleware", name))?;
                 let id = callback_id(args)?;
@@ -433,22 +436,30 @@ impl Router {
                 chain
                     .run(
                         &ctx,
-                        payload.one().map_err(invalid_payload)?,
+                        Body::from_bytes(payload.one().map_err(invalid_payload)?),
                         move |args, ctx| {
                             let weak = weak.clone();
                             async move {
                                 weak.upgrade()
                                     .ok_or(Error::Closed)?
-                                    .callback_payload(&ctx, id, Payload::message(args))
+                                    .callback_payload(
+                                        &ctx,
+                                        id,
+                                        Payload::message(
+                                            args.into_bytes().map_err(Error::InvalidInput)?,
+                                        ),
+                                    )
                                     .await
-                                    .and_then(|value| value.one().map_err(unknown))
+                                    .and_then(|value| {
+                                        value.one().map(Body::from_bytes).map_err(unknown)
+                                    })
                                     .map_err(Into::into)
                             }
                         },
                     )
                     .await
-                    .map(Payload::message)
-                    .map_err(Into::into)
+                    .map_err(Error::from)
+                    .and_then(|v| v.into_bytes().map(Payload::message).map_err(unknown))
             }
             _ => self
                 .dispatch(
@@ -484,14 +495,17 @@ impl Router {
                     && !instance
                         .module
                         .capabilities
+                        .bindings
                         .dependencies
                         .iter()
-                        .any(|d| d.declaration.contract() == contract)
+                        .any(|d| d.declaration().contract() == contract)
                     && !instance
                         .module
                         .capabilities
+                        .bindings
                         .provisions
-                        .values()
+                        .iter()
+                        .map(|p| &p.service)
                         .any(|p| p.contract() == contract)
                 {
                     return Err(refused("undeclared_metadata", contract.to_string()));
@@ -722,8 +736,8 @@ impl Router {
                 let event = instance
                     .module
                     .capabilities
-                    .events
-                    .get(name)
+                    .bindings
+                    .event(name)
                     .ok_or_else(|| refused("undeclared_event", name))?;
                 let grant = self.reserve()?;
                 let id = callback_id(&args)?;
@@ -734,7 +748,13 @@ impl Router {
                         async move {
                             let instance = weak.upgrade().ok_or(cordis_runtime::Error::Closed)?;
                             let value = instance
-                                .callback_payload(&ctx, id, Payload::message(args))
+                                .callback_payload(
+                                    &ctx,
+                                    id,
+                                    Payload::message(
+                                        args.into_bytes().map_err(Error::InvalidInput)?,
+                                    ),
+                                )
                                 .await?;
                             parse_flow(value).map_err(Into::into)
                         }
@@ -747,8 +767,8 @@ impl Router {
                 let chain = instance
                     .module
                     .capabilities
-                    .middleware
-                    .get(name)
+                    .bindings
+                    .middleware(name)
                     .ok_or_else(|| refused("undeclared_middleware", name))?;
                 let grant = self.reserve()?;
                 let id = callback_id(&args)?;
@@ -769,10 +789,15 @@ impl Router {
                                 .callback_payload(
                                     &ctx,
                                     id,
-                                    Payload::with_message(json!({"next":key}), args),
+                                    Payload::with_message(
+                                        json!({"next":key}),
+                                        args.into_bytes().map_err(Error::InvalidInput)?,
+                                    ),
                                 )
                                 .await
-                                .and_then(|value| value.one().map_err(unknown));
+                                .and_then(|value| {
+                                    value.one().map(Body::from_bytes).map_err(unknown)
+                                });
                             instance.router.next.lock().unwrap().remove(&key);
                             result.map_err(Into::into)
                         }
@@ -824,7 +849,7 @@ impl Drop for Scope {
 fn invalid_payload(error: impl ToString) -> Error {
     Error::InvalidInput(error.to_string())
 }
-fn flows_payload(flows: Vec<std::ops::ControlFlow<Bytes>>) -> Payload {
+fn flows_payload(flows: Vec<std::ops::ControlFlow<Body>>) -> Result<Payload> {
     let mut tags = Vec::with_capacity(flows.len());
     let mut messages = Vec::new();
     for flow in flows {
@@ -832,22 +857,24 @@ fn flows_payload(flows: Vec<std::ops::ControlFlow<Bytes>>) -> Payload {
             cordis_runtime::Continue(()) => tags.push(json!("continue")),
             cordis_runtime::Break(value) => {
                 tags.push(json!("break"));
-                messages.push(value);
+                messages.push(value.into_bytes().map_err(unknown)?);
             }
         }
     }
-    Payload {
+    Ok(Payload {
         control: Value::Array(tags),
         messages,
-    }
+    })
 }
-fn parse_flow(value: Payload) -> Result<std::ops::ControlFlow<Bytes>> {
+fn parse_flow(value: Payload) -> Result<std::ops::ControlFlow<Body>> {
     if value.control.as_object().is_none_or(|o| o.len() != 1) {
         return Err(unknown("invalid event flow"));
     }
     match value.control["kind"].as_str() {
         Some("continue") if value.messages.is_empty() => Ok(cordis_runtime::Continue(())),
-        Some("break") => Ok(cordis_runtime::Break(value.one().map_err(unknown)?)),
+        Some("break") => Ok(cordis_runtime::Break(Body::from_bytes(
+            value.one().map_err(unknown)?,
+        ))),
         _ => Err(unknown("invalid event flow")),
     }
 }

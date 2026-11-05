@@ -1,5 +1,7 @@
+use cordis_host::Dependency;
+use cordis_host::MiddlewareBinding;
 use cordis_portable_example::lifecycle::{LifecycleLogClient, PipelineClient};
-use cordis_remote::{Dependency, Endpoint, MiddlewareBinding, ProcessSpec, RemoteService, json};
+use cordis_remote::{Endpoint, ProcessSpec, RemoteService, json};
 use cordis_sdk::*;
 use std::{
     path::PathBuf,
@@ -21,20 +23,18 @@ async fn main() -> Result<()> {
         })
         .provides(&logger),
     )?;
-    let log = Dependency::new_json(
+    let log = Dependency::json(
         &logger,
         cordis_remote::Descriptor::new(LifecycleLogClient::interface()).unwrap(),
         |_, ctx, _, args| {
             Box::pin(async move {
                 println!("owner {}: {args}", ctx.owner().fiber.0);
-                Ok(json!({}))
+                Ok::<_, cordis_remote::Error>(json!({}))
             })
         },
     );
-    let pipeline = Middleware::<cordis_remote::Bytes, cordis_remote::Bytes>::new(
-        "example.middleware.request",
-        "1",
-    );
+    let pipeline =
+        Middleware::<cordis_host::Body, cordis_host::Body>::new("example.middleware.request", "1");
     let remote = Service::<RemoteService>::new("example.middleware", "1")
         .with_descriptor(cordis_remote::Descriptor::new(PipelineClient::interface()).unwrap());
     let mut cpp = ProcessSpec::new(

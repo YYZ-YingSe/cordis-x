@@ -24,7 +24,7 @@ pub(super) fn start(instance: &Arc<Instance>, guest: Guest) {
     let weak = Arc::downgrade(instance);
     let timeout = instance.module.capabilities.call_timeout;
     let fuel = instance.module.limits.fuel_per_call;
-    let validation = instance.module.capabilities.validation;
+    let validation = instance.module.capabilities.bindings.validation;
     tokio::spawn(async move {
         let (expired, mut expiration) = mpsc::unbounded_channel::<Error>();
         let Guest {

@@ -8,6 +8,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+cordis-host.workspace = true
 cordis-contract.workspace = true
 cordis-sdk-core.workspace = true
 cordis-runtime.workspace = true

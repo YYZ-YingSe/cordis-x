@@ -213,6 +213,16 @@ impl RemoteResource {
         }
     }
     pub async fn invoke(&self, method: &str, args: Bytes) -> Result<Bytes> {
+        self.invoke_envelope(method, Payload::message(args).into())
+            .await?
+            .one()
+            .map_err(|e| Error::InvalidInput(e.to_string()))
+    }
+    pub(crate) async fn invoke_envelope(
+        &self,
+        method: &str,
+        mut args: cordis_wire::local::Envelope,
+    ) -> Result<cordis_wire::local::Envelope> {
         let method = method.to_owned();
         self.resource
             .call(move |ticket, context| {
@@ -227,10 +237,7 @@ impl RemoteResource {
                         .map_err(Error::InvalidInput)?;
                         let signature = cordis_contract::portable::method(&schema.methods, &method)
                             .map_err(Error::InvalidInput)?;
-                        signature
-                            .args
-                            .check_binary(&args)
-                            .map_err(Error::InvalidInput)?;
+                        args.check(&signature.args).map_err(Error::InvalidInput)?;
                         Ok::<_, Error>(signature)
                     })();
                     let signature = match signature {
@@ -241,26 +248,23 @@ impl RemoteResource {
                         .acquired
                         .as_ref()
                         .expect("only confirmed tickets become public handles");
-                    let result = ticket
+                    let mut result = ticket
                         .client
                         .execute(
                             &context,
                             ticket.endpoint,
                             "resource_call",
-                            Payload::with_message(
+                            args.with_control(
                                 json!({"resource":id,"owner":ticket.owner,"method":method}),
-                                args,
-                            )
-                            .into(),
+                            ),
                         )
                         .await
-                        .and_then(|value| value.one().map_err(Into::into))
                         .map_err(|e| e.check_declared(&signature.errors, "resource errors"));
                     if let Err(error @ Error::Protocol(_)) = &result {
                         ticket.client.invalidate(&context, error.clone()).await;
                     }
-                    if let Ok(value) = &result
-                        && let Err(message) = signature.result.check_binary(value)
+                    if let Ok(value) = &mut result
+                        && let Err(message) = value.check(&signature.result)
                     {
                         let error = Error::Protocol(message);
                         ticket.client.invalidate(&context, error.clone()).await;
@@ -287,13 +291,17 @@ pub(crate) struct WeakRemoteResource {
     released: Arc<Mutex<Option<Result<()>>>>,
 }
 impl WeakRemoteResource {
-    pub async fn invoke(&self, method: &str, args: Bytes) -> Result<Bytes> {
+    pub async fn invoke_envelope(
+        &self,
+        method: &str,
+        args: cordis_wire::local::Envelope,
+    ) -> Result<cordis_wire::local::Envelope> {
         let resource = self.resource.upgrade().ok_or(Error::Closed)?;
         RemoteResource {
             resource,
             released: self.released.clone(),
         }
-        .invoke(method, args)
+        .invoke_envelope(method, args)
         .await
     }
     pub async fn dispose(&self) -> Result<()> {

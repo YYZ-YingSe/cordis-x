@@ -2,7 +2,8 @@ use super::effects::{
     Log, lifecycle_log_dependency as log_dependency, lifecycle_log_plugin as log_plugin,
 };
 use super::*;
-use cordis_remote::{EventBinding, Value};
+use cordis_host::EventBinding;
+use cordis_remote::Value;
 
 fn events() -> Service<RemoteService> {
     Service::new("example.events", "1").with_descriptor(
@@ -12,16 +13,16 @@ fn events() -> Service<RemoteService> {
         .unwrap(),
     )
 }
-fn tick_body() -> cordis_remote::Bytes {
-    cordis_sdk_core::Message::from_json(<cordis_portable_example::lifecycle::data::lifecycle::TickValue as cordis_sdk_core::typed::Codec>::contract().clone(),&json!({"value":"0"})).unwrap().encode(cordis_wire::MAX_MESSAGE).unwrap()
+fn tick_body() -> cordis_host::Body {
+    cordis_sdk_core::Message::from_json(<cordis_portable_example::lifecycle::data::lifecycle::TickValue as cordis_sdk_core::typed::Codec>::contract().clone(),&json!({"value":"0"})).unwrap().into()
 }
-fn tick() -> Event<cordis_remote::Bytes, cordis_remote::Bytes> {
+fn tick() -> Event<cordis_host::Body, cordis_host::Body> {
     Event::new("example.events.tick", "1")
 }
 fn spec(
     backend: Backend,
     endpoint: Endpoint,
-    event: &Event<cordis_remote::Bytes, cordis_remote::Bytes>,
+    event: &Event<cordis_host::Body, cordis_host::Body>,
 ) -> ProcessSpec {
     let mut spec = backend.spec("events");
     if matches!(endpoint, Endpoint::Ipc) {
@@ -108,15 +109,12 @@ async fn portable_events(endpoint: Endpoint) {
         );
         assert!(tick().parallel(&ctx, tick_body()).await.unwrap().is_empty());
         assert!(
-            Event::<cordis_remote::Bytes, cordis_remote::Bytes>::new(
-                "example.events.tick",
-                "other"
-            )
-            .in_realm(RealmId(72))
-            .parallel(&ctx, tick_body())
-            .await
-            .unwrap()
-            .is_empty()
+            Event::<cordis_host::Body, cordis_host::Body>::new("example.events.tick", "other")
+                .in_realm(RealmId(72))
+                .parallel(&ctx, tick_body())
+                .await
+                .unwrap()
+                .is_empty()
         );
         invoke_json(&handle, "unsubscribe", json!("first"))
             .await
@@ -124,10 +122,10 @@ async fn portable_events(endpoint: Endpoint) {
         invoke_json(&handle, "unsubscribe", json!("first"))
             .await
             .unwrap();
-        assert_eq!(
-            event.parallel(&ctx, tick_body()).await.unwrap(),
-            vec![Continue(())]
-        );
+        assert!(matches!(
+            event.parallel(&ctx, tick_body()).await.unwrap().as_slice(),
+            [Continue(())]
+        ));
         bounded(owner.dispose()).await.unwrap();
         bounded(rt.shutdown()).await.unwrap();
         assert_eq!(
@@ -350,7 +348,7 @@ fn probe_service() -> Service<RemoteService> {
         cordis_remote::Descriptor::new(cordis_remote::Interface::value_dispatch(true)).unwrap(),
     )
 }
-fn probe_tick() -> Event<cordis_remote::Bytes, cordis_remote::Bytes> {
+fn probe_tick() -> Event<cordis_host::Body, cordis_host::Body> {
     Event::new("example.tick", "1")
 }
 fn peer(mode: &str) -> (ProcessSpec, PathBuf) {
@@ -604,4 +602,8 @@ async fn typed_event_inputs_are_isolated_and_duplicate_registration_is_atomic() 
             2
         );
     }
+}
+
+fn wire_json(value: Value) -> cordis_host::Body {
+    super::wire_json(value).into()
 }

@@ -1,6 +1,8 @@
+use cordis_host::Dependency;
+use cordis_host::HostBindings;
 use cordis_runtime as rt;
 use cordis_sdk_core::{self as core, *};
-use cordis_sdk_runtime::{Capabilities, Dependency, Resource as NativeResource, Service};
+use cordis_sdk_runtime::{Resource as NativeResource, Service};
 use std::{
     cell::RefCell,
     future::Future,
@@ -268,8 +270,8 @@ impl Fixture {
                     "probe",
                     &service,
                     Value::Null,
-                    Capabilities {
-                        dependencies: vec![Dependency::new(
+                    HostBindings {
+                        dependencies: vec![Dependency::messages(
                             &logger,
                             Descriptor::new(Interface::value_dispatch(true)).unwrap(),
                             |control, ctx, method, args| {
@@ -689,8 +691,8 @@ async fn shared_counter_example_keeps_the_original_caller_as_resource_owner() {
                 "counters",
                 &counters,
                 json!({}),
-                Capabilities {
-                    dependencies: vec![Dependency::new(
+                HostBindings {
+                    dependencies: vec![Dependency::messages(
                         &logger,
                         Descriptor::new(cordis_portable_example::resources::generated::CounterLogClient::interface()).unwrap(),
                         |logs, _, _, value| {
@@ -715,8 +717,8 @@ async fn shared_counter_example_keeps_the_original_caller_as_resource_owner() {
                 "client",
                 &service,
                 json!({}),
-                Capabilities {
-                    dependencies: vec![Dependency::portable(&counters).unwrap()],
+                HostBindings {
+                    dependencies: vec![Dependency::new(&counters).unwrap()],
                     ..Default::default()
                 },
             )
@@ -764,10 +766,10 @@ async fn public_resource_handles_respect_child_scope_and_callback_authority() {
                 "scope-client",
                 &service,
                 Value::Null,
-                Capabilities {
+                HostBindings {
                     dependencies: vec![
-                        Dependency::portable(
-                            &rt::Service::new("probe", "1")
+                        Dependency::new(
+                            &rt::Service::<Service>::new("probe", "1")
                                 .with_descriptor(Descriptor::new(Probe::interface()).unwrap()),
                         )
                         .unwrap(),

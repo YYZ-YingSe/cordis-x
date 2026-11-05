@@ -1,6 +1,7 @@
+use cordis_host::Dependency;
 use cordis_portable_example::context::{ContextClient, ContextLogClient};
 use cordis_sdk::*;
-use cordis_wasm::{Capabilities, ContextComponent, ContextService, Dependency, Limits, Wasi, json};
+use cordis_wasm::{Capabilities, ContextComponent, ContextService, Limits, Wasi, json};
 use std::sync::{Arc, Mutex};
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -56,17 +57,20 @@ async fn main() -> Result<()> {
     let handle: ServiceHandle<Broker<ContextService>> = saved.lock().unwrap().take().unwrap();
     let activation = client.snapshot().activation;
     let caps = Capabilities {
+        bindings: cordis_host::HostBindings {
+            dependencies: vec![Dependency::json(
+                &logger,
+                cordis_contract::Descriptor::new(ContextLogClient::interface()).unwrap(),
+                |_, ctx, _, args| {
+                    Box::pin(async move {
+                        println!("logger cleanup={}: {args}", ctx.is_cleanup());
+                        Ok::<_, cordis_wasm::Error>(args)
+                    })
+                },
+            )],
+            ..Default::default()
+        },
         wasi: Some(Wasi::default()),
-        dependencies: vec![Dependency::new_json(
-            &logger,
-            cordis_contract::Descriptor::new(ContextLogClient::interface()).unwrap(),
-            |_, ctx, _, args| {
-                Box::pin(async move {
-                    println!("logger cleanup={}: {args}", ctx.is_cleanup());
-                    Ok(args)
-                })
-            },
-        )],
         ..Capabilities::default()
     };
     let mut old: Option<PluginHandle> = None;

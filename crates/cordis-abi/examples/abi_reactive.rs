@@ -1,6 +1,6 @@
-use cordis_abi::{
-    AbiService, Capabilities, Dependency, EventBinding, Library, MiddlewareBinding, Value, json,
-};
+use cordis_abi::{AbiService, Capabilities, Library, Value, json};
+use cordis_host::Dependency;
+use cordis_host::{EventBinding, MiddlewareBinding};
 use cordis_portable_example::lifecycle::{LifecycleLogClient, ReactiveClient};
 use cordis_sdk::*;
 use std::sync::{Arc, Mutex};
@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
         .provides(&logger),
     )?;
     log_plugin.ready().await?;
-    let dependency = Dependency::new_json(
+    let dependency = Dependency::json(
         &logger,
         cordis_contract::Descriptor::new(LifecycleLogClient::interface()).unwrap(),
         |_, ctx, method, args| {
@@ -41,15 +41,18 @@ async fn main() -> Result<()> {
     // in-process example assumes trusted native code and system dependencies.
     #[allow(unsafe_code)]
     let library = unsafe { Library::load(path)? }.with_context(Capabilities {
-        dependencies: vec![dependency],
-        events: vec![EventBinding::new(
-            "notice",
-            &Event::new("example.reactive.notice", "1"),
-        )],
-        middleware: vec![MiddlewareBinding::new(
-            "calculate",
-            &Middleware::new("example.reactive.calculate", "1"),
-        )],
+        bindings: cordis_host::HostBindings {
+            dependencies: vec![dependency],
+            events: vec![EventBinding::new(
+                "notice",
+                &Event::new("example.reactive.notice", "1"),
+            )],
+            middleware: vec![MiddlewareBinding::new(
+                "calculate",
+                &Middleware::new("example.reactive.calculate", "1"),
+            )],
+            ..Default::default()
+        },
         ..Default::default()
     })?;
     let notifications = Service::<AbiService>::new("example.reactive", "1")

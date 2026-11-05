@@ -10,31 +10,9 @@ use std::{
 };
 use tokio::sync::watch;
 
-/// An installation-owned mapping. Peers select aliases, never arbitrary realms.
-#[derive(Clone)]
-pub struct EventBinding {
-    alias: String,
-    event: Event<Bytes, Bytes>,
-}
-impl std::fmt::Debug for EventBinding {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("EventBinding")
-            .field(&self.alias)
-            .field(self.event.contract())
-            .field(&self.event.realm())
-            .finish()
-    }
-}
-impl EventBinding {
-    pub fn new(alias: impl Into<String>, event: &Event<Bytes, Bytes>) -> Self {
-        Self {
-            alias: alias.into(),
-            event: event.clone(),
-        }
-    }
-}
+use cordis_host::{Body, EventBinding};
 pub(crate) struct Events {
-    bindings: BTreeMap<String, Event<Bytes, Bytes>>,
+    bindings: BTreeMap<String, Event<Body, Body>>,
     listeners: Mutex<BTreeMap<String, Arc<Listener>>>,
     dispatches: Mutex<BTreeMap<String, Dispatch>>,
     next_call: Arc<AtomicU64>,
@@ -73,7 +51,7 @@ impl Events {
     pub fn declarations(&self) -> Value {
         Value::Object(self.bindings.iter().map(|(alias, event)| (alias.clone(), json!({"name":event.contract().name.as_ref(),"revision":event.contract().revision.as_ref(),"realm":event.realm().0.to_string()}))).collect())
     }
-    fn event(&self, payload: &Value) -> Result<Event<Bytes, Bytes>> {
+    fn event(&self, payload: &Value) -> Result<Event<Body, Body>> {
         self.bindings
             .get(&crate::scope::text(payload, "event")?)
             .cloned()
@@ -150,7 +128,7 @@ impl Events {
                                     "event_call",
                                     Payload::with_message(
                                         json!({"listener":id,"call":format!("v{call}")}),
-                                        args,
+                                        args.into_bytes().map_err(Error::InvalidInput)?,
                                     ),
                                 )
                                 .await
@@ -207,9 +185,9 @@ impl Events {
         }
         let grant = grant()?;
         let dispatch = if serial {
-            event.emit_serial(ctx, args)
+            event.emit_serial(ctx, Body::from_bytes(args))
         } else {
-            event.emit(ctx, args)
+            event.emit(ctx, Body::from_bytes(args))
         }
         .map_err(crate::resource::runtime_error)?;
         let (tx, result) = watch::channel(None);
@@ -240,7 +218,13 @@ impl Events {
                             ControlFlow::Continue(()) => tags.push(json!("continue")),
                             ControlFlow::Break(bytes) => {
                                 tags.push(json!("break"));
-                                result.messages.push(bytes);
+                                match bytes.into_bytes() {
+                                    Ok(bytes) => result.messages.push(bytes),
+                                    Err(error) => {
+                                        let _ = tx.send(Some(json!({"kind":"unknown", "error":{"code":"encoding", "message":error}}).into()));
+                                        return;
+                                    }
+                                }
                             }
                         }
                     }
@@ -328,7 +312,7 @@ fn grant() -> Result<String> {
     getrandom::fill(&mut bytes).map_err(|e| Error::Io(e.to_string()))?;
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
-fn parse_flow(value: Payload) -> Result<ControlFlow<Bytes>> {
+fn parse_flow(value: Payload) -> Result<ControlFlow<Body>> {
     match value.control["kind"].as_str() {
         Some("continue")
             if value.control.as_object().is_some_and(|v| v.len() == 1)
@@ -337,7 +321,7 @@ fn parse_flow(value: Payload) -> Result<ControlFlow<Bytes>> {
             Ok(ControlFlow::Continue(()))
         }
         Some("break") if value.control.as_object().is_some_and(|v| v.len() == 1) => {
-            Ok(ControlFlow::Break(value.one()?))
+            Ok(ControlFlow::Break(Body::from_bytes(value.one()?)))
         }
         _ => Err(Error::Protocol("invalid event control flow".into())),
     }

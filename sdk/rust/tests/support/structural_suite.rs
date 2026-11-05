@@ -10,8 +10,8 @@ fn observer() -> Service<Mutex<Vec<Value>>> {
     Service::new("test.observer", "1")
 }
 fn capabilities(log: &Service<Mutex<Vec<Value>>>, invalid_result: bool) -> backend::Capabilities {
-    backend::Capabilities {
-        dependencies: vec![backend::Dependency::new_json(
+    backend::Capabilities {bindings: cordis_host::HostBindings {
+        dependencies: vec![cordis_host::Dependency::json(
             log,
             Descriptor::new(dependency_interface()).unwrap(),
             move |log, _, method, value| {
@@ -48,7 +48,7 @@ fn capabilities(log: &Service<Mutex<Vec<Value>>>, invalid_result: bool) -> backe
                     }
                 })
             },
-        )],
+        )], ..Default::default() },
         ..Default::default()
     }
 }
@@ -169,12 +169,12 @@ fn dependency_structure_is_checked_before_instance_creation() {
         unreachable!()
     };
     methods.get_mut("echo").unwrap().args = MessageContract::standard("google.protobuf.StringValue");
-    let caps = backend::Capabilities {
-        dependencies: vec![backend::Dependency::new_json(
+    let caps = backend::Capabilities {bindings: cordis_host::HostBindings {
+        dependencies: vec![cordis_host::Dependency::json(
             &observer(),
             Descriptor::new(interface).unwrap(),
-            |_, _, _, _| Box::pin(async { panic!("preflight must not invoke dependency") }),
-        )],
+            |_, _, _, _| -> cordis_runtime::BoxFuture<'_, Result<Value, backend::Error>> { Box::pin(async { panic!("preflight must not invoke dependency") }) },
+        )], ..Default::default() },
         ..Default::default()
     };
     assert!(matches!(load(caps), Err(backend::Error::Contract(_))));

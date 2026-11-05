@@ -148,14 +148,19 @@ impl Fixture {
         let lib = library(
             "abi_resource_probe",
             Capabilities {
-                dependencies: vec![Dependency::new_json(
-                    &logger,
-                    cordis_sdk_core::Descriptor::new(cordis_sdk_core::Interface::value_dispatch(
-                        true,
-                    ))
-                    .unwrap(),
-                    |control, ctx, method, args| Box::pin(control.invoke_json(ctx, method, args)),
-                )],
+                bindings: cordis_host::HostBindings {
+                    dependencies: vec![Dependency::json(
+                        &logger,
+                        cordis_sdk_core::Descriptor::new(
+                            cordis_sdk_core::Interface::value_dispatch(true),
+                        )
+                        .unwrap(),
+                        |control, ctx, method, args| {
+                            Box::pin(control.invoke_json(ctx, method, args))
+                        },
+                    )],
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         );
@@ -175,7 +180,10 @@ impl Fixture {
                     "abi_resource_probe_client"
                 },
                 Capabilities {
-                    dependencies: vec![Dependency::abi(&counters)],
+                    bindings: cordis_host::HostBindings {
+                        dependencies: vec![Dependency::new(&counters).unwrap()],
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
             );

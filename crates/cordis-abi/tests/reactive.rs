@@ -1,15 +1,19 @@
+use cordis_host::{EventBinding, MiddlewareBinding};
 include!("support/context.rs");
-use cordis_abi::{EventBinding, MiddlewareBinding};
-fn event() -> Event<cordis_abi::Bytes, cordis_abi::Bytes> {
+
+fn event() -> Event<cordis_host::Body, cordis_host::Body> {
     Event::new("example.tick", "1")
 }
-fn chain() -> Middleware<cordis_abi::Bytes, cordis_abi::Bytes> {
+fn chain() -> Middleware<cordis_host::Body, cordis_host::Body> {
     Middleware::new("example.chain", "1")
 }
 fn reactive_caps() -> Capabilities {
     Capabilities {
-        events: vec![EventBinding::new("tick", &event())],
-        middleware: vec![MiddlewareBinding::new("chain", &chain())],
+        bindings: cordis_host::HostBindings {
+            events: vec![EventBinding::new("tick", &event())],
+            middleware: vec![MiddlewareBinding::new("chain", &chain())],
+            ..caps().bindings
+        },
         ..caps()
     }
 }
@@ -40,10 +44,13 @@ fn negotiation_and_binding_mismatches_fail_before_creation() {
     assert!(!Files::new("cordis_abi_managed").load().supports_reactive());
     assert!(files.load().with_context(caps()).is_err());
     let mut config = reactive_caps();
-    config.events.push(EventBinding::new("tick", &event()));
+    config
+        .bindings
+        .events
+        .push(EventBinding::new("tick", &event()));
     assert!(files.load().with_context(config).is_err());
     let mut config = reactive_caps();
-    config.middleware = vec![MiddlewareBinding::new(
+    config.bindings.middleware = vec![MiddlewareBinding::new(
         "chain",
         &Middleware::new("example.chain", "2"),
     )];
@@ -481,7 +488,7 @@ async fn host_bound_realms_are_isolated() {
     let files = Files::new("cordis_abi_reactive");
     let other = RealmId(913);
     let mut capabilities = reactive_caps();
-    capabilities.events = vec![EventBinding::new("tick", &event().in_realm(other))];
+    capabilities.bindings.events = vec![EventBinding::new("tick", &event().in_realm(other))];
     let rig = rig(&files, cordis_wire::json!({}), capabilities).await;
     invoke_json(&rig.handle, "on", json!({"id":"isolated"}))
         .await
@@ -504,7 +511,7 @@ async fn host_bound_realms_are_isolated() {
     let ctx = saved.lock().unwrap().clone().unwrap();
     assert!(
         event()
-            .parallel(&ctx, wire_json(json!(1)))
+            .parallel(&ctx, wire_json(json!(1)).into())
             .await
             .unwrap()
             .is_empty()
@@ -512,7 +519,7 @@ async fn host_bound_realms_are_isolated() {
     assert_eq!(
         event()
             .in_realm(other)
-            .parallel(&ctx, wire_json(json!(1)))
+            .parallel(&ctx, wire_json(json!(1)).into())
             .await
             .unwrap()
             .len(),

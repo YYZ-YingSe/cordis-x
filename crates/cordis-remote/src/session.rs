@@ -119,7 +119,7 @@ impl Session {
         let (writes, mut outgoing) = mpsc::channel::<Bytes>(CAPACITY * 10);
         let (reads_tx, mut reads) = mpsc::channel(CAPACITY);
         let read_tx = reads_tx.clone();
-        let validation = spec.validation;
+        let validation = spec.bindings.validation;
         let reader = tokio::spawn(async move {
             loop {
                 let result = frame::read(&mut stdout, validation).await;
