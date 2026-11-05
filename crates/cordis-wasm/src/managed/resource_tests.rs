@@ -152,8 +152,29 @@ async fn store_recovery(cpp: bool) {
         }
     }
     drop((owner, provider, consumer, runtime));
-    for weak in stores.lock().unwrap().iter() {
-        assert!(weak.upgrade().is_none());
+    let stores = stores.lock().unwrap().clone();
+    // Runtime recovery finishes before the executor necessarily drops retired
+    // service values. Wait for final reclamation without retaining a strong
+    // reference or holding the observation mutex across a scheduling point.
+    // A bounded wait still detects references that survive completed cleanup.
+    if tokio::time::timeout(Duration::from_secs(5), async {
+        while stores.iter().any(|weak| weak.strong_count() != 0) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .is_err()
+    {
+        let retained: Vec<_> = ["provider", "consumer"]
+            .into_iter()
+            .zip(&stores)
+            .map(|(role, weak)| (role, weak.strong_count()))
+            .filter(|(_, count)| *count != 0)
+            .collect();
+        panic!(
+            "{} component instances retained after cleanup: {retained:?}",
+            if cpp { "C++" } else { "Rust" },
+        );
     }
 }
 
