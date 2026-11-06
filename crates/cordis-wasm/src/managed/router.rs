@@ -419,12 +419,11 @@ impl Router {
                     )
                 } else {
                     let value = wait_result(&mut result).await;
-                    if result.borrow().is_some() {
-                        if let Some(Handle::Dispatch(_, observed)) =
+                    if result.borrow().is_some()
+                        && let Some(Handle::Dispatch(_, observed)) =
                             self.handles.lock().unwrap().get_mut(text(args, "grant")?)
-                        {
-                            *observed = true;
-                        }
+                    {
+                        *observed = true;
                     }
                     value
                 }

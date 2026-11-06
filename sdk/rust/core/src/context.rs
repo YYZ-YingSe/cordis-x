@@ -42,10 +42,10 @@ impl Context {
             Operation::SequenceReady { sequence } => Some((sequence.1.clone(), 1)),
             _ => None,
         };
-        if let Some((cache, key)) = &observation {
-            if let Some(result) = cache.borrow().get(key).cloned() {
-                return Box::pin(async move { result });
-            }
+        if let Some((cache, key)) = &observation
+            && let Some(result) = cache.borrow().get(key).cloned()
+        {
+            return Box::pin(async move { result });
         }
         let reply = self.submit(operation);
         Box::pin(async move {

@@ -587,13 +587,11 @@ impl PluginHandle {
                 if active
                     && let Some(waiter) = self.waiter
                     && let Ok(waiting) = state.kernel.snapshot(waiter.fiber)
+                    && waiting.activation == Some(waiter)
+                    && waiting.state == Lifecycle::Loading
+                    && state.kernel.depends_on(self.id, waiter.fiber)
                 {
-                    if waiting.activation == Some(waiter)
-                        && waiting.state == Lifecycle::Loading
-                        && state.kernel.depends_on(self.id, waiter.fiber)
-                    {
-                        return Err(Error::WouldDeadlock);
-                    }
+                    return Err(Error::WouldDeadlock);
                 }
                 let snapshot = self
                     .observation
