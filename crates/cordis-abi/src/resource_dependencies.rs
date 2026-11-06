@@ -27,6 +27,9 @@ impl Resources {
     fn reserve(&self) -> Result<(u64, Arc<OnceLock<cordis_host::WeakResource>>)> {
         let mut entries = self.entries.lock().unwrap();
         if entries.len() >= 4096 {
+            entries.retain(|_, e| !e.get().is_some_and(cordis_host::WeakResource::is_released));
+        }
+        if entries.len() >= 4096 {
             return Err(Error::Overloaded);
         }
         let id = next_id()?;
@@ -126,7 +129,23 @@ impl Router {
                         .acquire_wire(ctx, method, args)
                         .await
                         .map_err(Error::from)
-                        .map_err(uncertainty)?;
+                        .map_err(uncertainty);
+                    let resource = match resource {
+                        Ok(value) => value,
+                        Err(error) => {
+                            if matches!(
+                                error,
+                                Error::Rejected { .. }
+                                    | Error::Refused { .. }
+                                    | Error::Overloaded
+                                    | Error::InvalidInput(_)
+                                    | Error::Closed
+                            ) {
+                                router.resources.entries.lock().unwrap().remove(&id);
+                            }
+                            return Err(error);
+                        }
+                    };
                     let _ = entry.set(resource.downgrade());
                     return Ok(Reply {
                         value: Value::Null.into(),

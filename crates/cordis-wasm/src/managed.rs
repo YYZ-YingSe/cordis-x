@@ -148,7 +148,8 @@ impl ContextComponent {
             || limits.pending_calls == 0
             || limits.pending_calls > 1024
             || limits.memory_bytes == 0
-            || limits.fuel_per_call == 0
+            || limits.fuel_on_admission == 0
+            || limits.initialization_fuel == 0
             || limits.resources > Semaphore::MAX_PERMITS
             || capabilities.max_handles == 0
             || capabilities.max_calls == 0
@@ -512,10 +513,10 @@ impl Module {
     fn instantiate(&self, instance: Weak<Instance>, probe: bool) -> Result<Guest> {
         let limits = StoreLimitsBuilder::new()
             .memory_size(self.limits.memory_bytes)
-            .table_elements(4096)
-            .instances(8)
-            .tables(8)
-            .memories(1)
+            .table_elements(self.limits.table_elements)
+            .instances(self.limits.core_instances)
+            .tables(self.limits.tables)
+            .memories(self.limits.memories)
             .trap_on_grow_failure(true)
             .build();
         let empty = Wasi::default();
@@ -533,7 +534,9 @@ impl Module {
             },
         );
         store.limiter(|s| &mut s.limits);
-        store.set_fuel(self.limits.fuel_per_call).map_err(unknown)?;
+        store
+            .set_fuel(self.limits.initialization_fuel)
+            .map_err(unknown)?;
         store
             .fuel_async_yield_interval(Some(10_000))
             .map_err(unknown)?;

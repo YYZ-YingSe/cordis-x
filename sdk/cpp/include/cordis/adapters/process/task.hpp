@@ -1,10 +1,12 @@
 #pragma once
+#include <cordis/core/observation.hpp>
 #include "context.hpp"
 
 namespace cordis::process {
 using TaskCallback = std::function<Async<void>(Context)>;
 
 class Task {
+  cordis::detail::Observation<void> completion;
   std::shared_ptr<DependencyChannel> channel;
   std::string id, grant;
   Async<Json> request(std::string command) const {
@@ -22,7 +24,7 @@ public:
       : channel(std::move(channel)), id(std::move(id)),
         grant(std::move(grant)) {}
   Async<void> join() const {
-    return cordis::detail::invoke_owned(
+    return completion.observe(
         [*this]() -> Async<void> { (co_await request("task_join")); });
   }
   Async<Json> snapshot() const {
@@ -54,16 +56,22 @@ public:
     std::string id;
     {
       std::lock_guard lock(mutex);
-      if (next >= 4096)
-        throw Refusal("tasks_exhausted", "task history full");
+      if (next == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
+      if (entries.size() >= 4096) std::erase_if(entries, [](const auto &item) { return item.second->started && !item.second->running; });
+      if (entries.size() >= 4096) throw Refusal("overloaded", "live capacity reached");
       id = "t" + std::to_string(++next);
       // Store before registration: execution/cancellation can precede its
       // reply.
       entries.emplace(id, entry);
     }
     Json args = {{"context", context}, {"task", id}, {"label", label}};
-    const auto reply =
-        co_await channel->request("task_register", std::move(args));
+    Json reply;
+    try { reply = co_await channel->request("task_register", std::move(args)); }
+    catch (const Refusal &) {
+      decltype(entries)::node_type refused;
+      { std::lock_guard lock(mutex); refused = entries.extract(id); }
+      throw;
+    }
     const auto grant = reply.at("grant").get<std::string>();
     if (reply.at("task") != id || grant.size() != 32 ||
         !std::all_of(grant.begin(), grant.end(), [](char c) {

@@ -1,3 +1,4 @@
+import { Completion } from './retention.ts';
 import type { Message } from '../../core/message.ts';
 import { payload, controlOnly } from '../../protocols/session/messages.ts';
 import { Refusal } from '../../core/error.ts';
@@ -56,6 +57,7 @@ function handle(session: WeakRef<DependencyChannel>, resource: string, grant: st
       return Promise.reject(new Refusal('invalid_handle', 'resource belongs to another session'));
     return current.request(dispose, resource, grant, method, args);
   };
+  const completion = new Completion<void>();
   return Object.freeze({
     async invoke(ctx: Context, method: string, args: Message) {
       const result = await request(ctx, false, method, args);
@@ -63,7 +65,9 @@ function handle(session: WeakRef<DependencyChannel>, resource: string, grant: st
       return result;
     },
     async dispose(ctx: Context) {
-      await request(ctx, true, '', undefined);
+      const current = contexts.get(ctx);
+      if (!current || session.deref() !== current.channel) throw new Refusal('invalid_handle', 'resource belongs to another session');
+      await completion.observe(async () => { await request(ctx, true, '', undefined); });
     },
   });
 }

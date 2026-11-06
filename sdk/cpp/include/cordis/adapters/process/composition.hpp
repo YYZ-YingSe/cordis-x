@@ -1,4 +1,5 @@
 #pragma once
+#include <cordis/core/observation.hpp>
 #include "context.hpp"
 
 namespace cordis::process {
@@ -29,6 +30,7 @@ inline Json check_composition(Json manifest) {
   return manifest;
 }
 class Child {
+  cordis::detail::Observation<void> completion;
   std::shared_ptr<DependencyChannel> channel;
   Json identity;
   Async<Json> call(std::string command) const {
@@ -67,7 +69,7 @@ public:
         [*this]() -> Async<Json> { co_return co_await call("child_status"); });
   }
   Async<void> dispose() const {
-    return cordis::detail::invoke_owned(
+    return completion.observe(
         [*this]() -> Async<void> { co_await call("child_dispose"); });
   }
 };

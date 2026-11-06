@@ -102,6 +102,9 @@ impl Composition {
         {
             let mut entries = self.entries.lock().unwrap();
             if entries.len() >= self.limits.children {
+                entries.retain(|_, e| !e.as_ref().is_some_and(|e| e.child.is_retired()));
+            }
+            if entries.len() >= self.limits.children {
                 return Err(Error::Overloaded);
             }
             if entries.contains_key(&id) {

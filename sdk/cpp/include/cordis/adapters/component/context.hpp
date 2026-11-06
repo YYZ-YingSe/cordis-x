@@ -47,7 +47,7 @@ struct Callbacks {
   std::map<uint64_t, std::shared_ptr<Callback>> entries;
   uint64_t next = 0;
   uint64_t insert(CallbackFunction run, bool once = false) {
-    if (entries.size() >= 4096 || next >= 65536)
+    if (entries.size() >= 4096 || next >= static_cast<uint64_t>(max_integer))
       throw Refusal("overloaded", "callback capacity reached");
     auto callback = std::make_shared<Callback>();
     callback->run = std::move(run);

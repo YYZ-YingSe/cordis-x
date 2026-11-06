@@ -292,6 +292,9 @@ pub(super) struct WeakContextResource {
     released: Arc<Mutex<Option<Result<()>>>>,
 }
 impl WeakContextResource {
+    pub(crate) fn is_released(&self) -> bool {
+        self.resource.is_released()
+    }
     pub async fn invoke_envelope(
         &self,
         method: &str,

@@ -131,8 +131,9 @@ fn fixture() -> (Host<Probe>, mpsc::Receiver<cordis_wire::Bytes>) {
             active: Cell::new(false),
             attempted: Cell::new(false),
             closing: Cell::new(false),
-            seen: RefCell::default(),
+            seen: cordis_wire::operations::Incoming::new(cordis_wire::operations::DEFAULT_SLOTS),
             inflight: Cell::new(0),
+            max_inflight: Cell::new(16),
             idle: Notify::new(),
             lanes: std::array::from_fn(|_| Cell::new(0)),
             url: None,
@@ -214,7 +215,7 @@ fn request(n: u64, command: &str, mut payload: Value) -> Request {
     }
     Request {
         session: "a".repeat(32),
-        operation: n.to_string(),
+        operation: format!("0:{n}"),
         command: command.into(),
         payload,
         activation: Identity {
@@ -250,7 +251,7 @@ async fn start(host: &Host<Probe>, capabilities: Value) -> Value {
                     "contract":{"name":"test.counter","revision":"1"},
                     "interface":Probe::interface(), "dependency_interfaces":Probe::dependency_interfaces(),
                     "dependencies":{"test.upstream":"1"}, "events":{}, "middleware":{},
-                    "composition":{"factories":[],"provisions":{}}, "validation":"checked",
+                    "composition":{"factories":[],"provisions":{}}, "max_inflight":16,"validation":"checked",
                     "capabilities":capabilities
                 }),
             )
@@ -282,6 +283,35 @@ async fn host_without_dependency_resource_capability_is_rejected_locally() {
             );
         })
         .await;
+}
+
+#[tokio::test]
+async fn successful_resource_turnover_exceeds_the_former_session_history() {
+    let (host, _) = fixture();
+    start(&host, json!({})).await;
+    let owner = "b".repeat(32);
+    for n in 0..8192 {
+        let resource = host
+            .execute(&request(
+                3 + n * 2,
+                "resource_acquire",
+                json!({"kind":"counter", "args":null, "owner":owner}),
+            ))
+            .await
+            .unwrap();
+        host.execute(&request(
+            4 + n * 2,
+            "resource_release",
+            json!({"resource":resource.control["resource"], "owner":owner}),
+        ))
+        .await
+        .unwrap();
+    }
+    assert_eq!(host.plugin.acquired.get(), 8192);
+    assert_eq!(host.plugin.closed.get(), 8192);
+    host.execute(&request(20_000, "deactivate", json!({})))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

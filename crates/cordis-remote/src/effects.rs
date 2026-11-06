@@ -33,6 +33,9 @@ impl Effects {
             return Err(Error::InvalidInput("duplicate effect ID".into()));
         }
         if entries.len() >= 4096 {
+            entries.retain(|_, e| !e.handle.get().is_some_and(WeakEffectHandle::is_released));
+        }
+        if entries.len() >= 4096 {
             return Err(Error::Overloaded);
         }
         let mut random = [0u8; 16];

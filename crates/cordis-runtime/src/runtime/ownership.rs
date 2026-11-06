@@ -36,6 +36,9 @@ impl Runtime {
         let mut edges = BTreeMap::new();
         let mut changes = Vec::new();
         for (handle, parent) in updates {
+            if handle.observation.lock().unwrap().is_some() {
+                return Err(cordis_kernel::Error::Retired(handle.id).into());
+            }
             if edges.insert(handle.id, *parent).is_some() {
                 return Err(Error::Message("duplicate ownership update".into()));
             }

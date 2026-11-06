@@ -1,3 +1,5 @@
+import { Identities, makeRoom, Completion, registration } from './retention.ts';
+import { OperationInbox } from '../../protocols/session/operations.ts';
 import type { Message } from '../../core/message.ts';
 import { payload, controlOnly, type Payload } from '../../protocols/session/messages.ts';
 import type { EventFlow } from '../../core/events.ts';
@@ -19,8 +21,9 @@ export class Subscription {
     this.listener = listener;
     this.grant = grant;
   }
-  async dispose(): Promise<void> {
-    await this.channel.request('event_dispose', { listener: this.listener, grant: this.grant });
+  private disposeCompletion = new Completion<void>();
+  dispose(): Promise<void> {
+    return this.disposeCompletion.observe(async () => { await this.channel.request('event_dispose', { listener: this.listener, grant: this.grant }); });
   }
 }
 export class Dispatch {
@@ -32,7 +35,9 @@ export class Dispatch {
     this.dispatch = dispatch;
     this.grant = grant;
   }
-  async join(): Promise<EventFlow[]> {
+  private completion = new Completion<EventFlow[]>();
+  join(): Promise<EventFlow[]> { return this.completion.observe(() => this.joinOnce()); }
+  private async joinOnce(): Promise<EventFlow[]> {
     const reply = await this.channel.requestPayload('event_join', payload({ dispatch: this.dispatch, grant: this.grant }));
     const result = reply.control;
     if (!result || typeof result !== 'object' || Array.isArray(result))
@@ -61,9 +66,9 @@ export class Dispatch {
 type Entry = { callback?: EventCallback; running: number };
 export class EventRegistry {
   private entries = new Map<string, Entry>();
-  private seen = new Set<string>();
-  private nextListener = 0;
-  private nextDispatch = 0;
+  private seen = new OperationInbox();
+  private nextListener = new Identities();
+  private nextDispatch = new Identities();
   private declarations: Record<string, { name: string; revision: string }>;
   constructor(declarations: Record<string, { name: string; revision: string }>) {
     this.declarations = declarations;
@@ -90,10 +95,10 @@ export class EventRegistry {
     callback: EventCallback,
   ): Promise<Subscription> {
     this.check(event);
-    if (this.nextListener >= 4096) throw new Refusal('events_exhausted', 'listener history full');
-    const listener = `l${++this.nextListener}`;
+    makeRoom(this.entries, 4096, (e) => !e.callback && !e.running);
+    const listener = this.nextListener.next('l');
     this.entries.set(listener, { callback, running: 0 });
-    const reply = await channel.request('event_register', { context, event, listener });
+    const reply = await registration(channel.request('event_register', { context, event, listener }), () => this.entries.delete(listener));
     return new Subscription(channel, listener, this.grant(reply, 'listener', listener));
   }
   async emit(
@@ -104,18 +109,16 @@ export class EventRegistry {
     mode: 'parallel' | 'serial',
   ): Promise<Dispatch> {
     this.check(event);
-    if (this.nextDispatch >= 4096) throw new Refusal('events_exhausted', 'dispatch history full');
-    const dispatch = `d${++this.nextDispatch}`;
+
+    const dispatch = this.nextDispatch.next('d');
     const reply = controlOnly(await channel.requestPayload('event_emit', payload({ context, event, mode, dispatch }, args)));
     return new Dispatch(channel, dispatch, this.grant(reply, 'dispatch', dispatch));
   }
   async invoke(listener: string, call: string, args: Message, ctx: Context): Promise<Payload> {
     const entry = this.entries.get(listener);
-    if (!entry?.callback || !/^v[0-9]{1,20}$/.test(call) || this.seen.has(call))
+    if (!entry?.callback || !call.startsWith('v'))
       throw new Refusal('closed', 'event callback unavailable');
-    if (this.seen.size >= 4096)
-      throw new Refusal('session_exhausted', 'event callback history full');
-    this.seen.add(call);
+    const finish = this.seen.admit(call.slice(1));
     entry.running++;
     try {
       const flow = (await entry.callback(args, ctx)) ?? Continue();
@@ -126,6 +129,7 @@ export class EventRegistry {
     } finally {
       await ctx.finish();
       entry.running--;
+      finish();
     }
   }
   release(listener: string) {

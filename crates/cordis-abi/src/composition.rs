@@ -158,6 +158,11 @@ impl Router {
                             {
                                 let mut children = router.composition.children.lock().unwrap();
                                 if children.len() >= router.capabilities.composition.children {
+                                    children.retain(|_, e| {
+                                        !e.as_ref().is_some_and(WeakPluginHandle::is_retired)
+                                    });
+                                }
+                                if children.len() >= router.capabilities.composition.children {
                                     return Err(Error::Overloaded);
                                 }
                                 children.insert(id, None);

@@ -1,5 +1,6 @@
 #pragma once
 #include "async.hpp"
+#include "observation.hpp"
 #include "error.hpp"
 #include "message.hpp"
 #include "value.hpp"
@@ -18,6 +19,7 @@ struct ResourceAccess;
 // An owned dependency capability, distinct from the Resource business object.
 // Copies do not transfer ownership; every operation uses a current Context.
 class ResourceHandle {
+  detail::Observation<void> completion_;
   std::any state_;
   explicit ResourceHandle(std::any state) : state_(std::move(state)) {}
   friend class Context;
@@ -44,7 +46,7 @@ class Effect {
 
 public:
   explicit Effect(std::function<Async<void>()> dispose)
-      : dispose_(std::move(dispose)) {}
+      : dispose_(detail::observed<void>(std::move(dispose))) {}
   Async<void> dispose() const { return detail::invoke_owned(dispose_); }
 };
 struct Inverse {
@@ -75,7 +77,7 @@ public:
   EffectSequence(std::function<Async<std::string>()> ready,
                  std::function<Async<void>()> dispose,
                  std::function<Async<Value>()> snapshot)
-      : ready_(std::move(ready)), dispose_(std::move(dispose)),
+      : ready_(std::move(ready)), dispose_(detail::observed<void>(std::move(dispose))),
         snapshot_(std::move(snapshot)) {}
   Async<std::string> ready() const { return detail::invoke_owned(ready_); }
   Async<void> dispose() const { return detail::invoke_owned(dispose_); }
@@ -91,7 +93,7 @@ public:
         std::function<Async<void>()> dispose,
         std::function<Async<Value>()> snapshot,
         std::function<Async<Value>(std::function<Async<Value>(Context)>)> run)
-      : ready_(std::move(ready)), dispose_(std::move(dispose)),
+      : ready_(std::move(ready)), dispose_(detail::observed<void>(std::move(dispose))),
         snapshot_(std::move(snapshot)), run_(std::move(run)) {}
   Async<void> ready() const { return detail::invoke_owned(ready_); }
   Async<void> dispose() const { return detail::invoke_owned(dispose_); }
@@ -107,7 +109,7 @@ class Task {
 public:
   Task(std::function<Async<void>()> join,
        std::function<Async<Value>()> snapshot)
-      : join_(std::move(join)), snapshot_(std::move(snapshot)) {}
+      : join_(detail::observed<void>(std::move(join))), snapshot_(std::move(snapshot)) {}
   Async<void> join() const { return detail::invoke_owned(join_); }
   Async<Value> snapshot() const { return detail::invoke_owned(snapshot_); }
 };
@@ -123,7 +125,7 @@ class Dispatch {
 public:
   Dispatch(std::function<Async<std::vector<Flow>>()> join,
            std::function<Async<Value>()> snapshot)
-      : join_(std::move(join)), snapshot_(std::move(snapshot)) {}
+      : join_(detail::observed<std::vector<Flow>>(std::move(join))), snapshot_(std::move(snapshot)) {}
   Async<std::vector<Flow>> join() const { return detail::invoke_owned(join_); }
   Async<Value> snapshot() const { return detail::invoke_owned(snapshot_); }
 };
@@ -147,7 +149,7 @@ public:
         std::function<Async<Value>()> status,
         std::function<Async<void>()> dispose)
       : ready_(std::move(ready)), settled_(std::move(settled)),
-        status_(std::move(status)), dispose_(std::move(dispose)) {}
+        status_(std::move(status)), dispose_(detail::observed<void>(std::move(dispose))) {}
   Async<Value> ready() const { return detail::invoke_owned(ready_); }
   Async<Value> settled() const { return detail::invoke_owned(settled_); }
   Async<Value> status() const { return detail::invoke_owned(status_); }

@@ -13,6 +13,7 @@ pub(crate) struct Resources {
 pub(crate) struct Entry {
     grant: String,
     resource: OnceLock<cordis_host::WeakResource>,
+    rejected: std::sync::atomic::AtomicBool,
 }
 impl Resources {
     pub fn reserve(&self, payload: &Value) -> Result<(String, Arc<Entry>)> {
@@ -25,6 +26,15 @@ impl Resources {
             return Err(Error::InvalidInput("duplicate resource ID".into()));
         }
         if entries.len() >= 4096 {
+            entries.retain(|_, e| {
+                !e.rejected.load(std::sync::atomic::Ordering::Acquire)
+                    && !e
+                        .resource
+                        .get()
+                        .is_some_and(cordis_host::WeakResource::is_released)
+            });
+        }
+        if entries.len() >= 4096 {
             return Err(Error::Overloaded);
         }
         let mut bytes = [0; 16];
@@ -32,6 +42,7 @@ impl Resources {
         let entry = Arc::new(Entry {
             grant: bytes.iter().map(|b| format!("{b:02x}")).collect(),
             resource: OnceLock::new(),
+            rejected: std::sync::atomic::AtomicBool::new(false),
         });
         entries.insert(id.clone(), entry.clone());
         Ok((id, entry))
@@ -53,6 +64,10 @@ impl Resources {
     }
 }
 impl Entry {
+    pub fn reject(&self) {
+        self.rejected
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
     pub fn commit(&self, id: String, resource: cordis_host::Resource) -> Value {
         let _ = self.resource.set(resource.downgrade());
         success(json!({"resource":id,"grant":self.grant}))

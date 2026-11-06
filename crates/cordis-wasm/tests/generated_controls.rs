@@ -342,7 +342,7 @@ async fn generated_controls_run_through_rust_and_cpp_wasm() {
             let module = cordis_wasm::ContextComponent::from_bytes(
                 &bytes,
                 cordis_wasm::Limits {
-                    fuel_per_call: 100_000_000,
+                    fuel_on_admission: 100_000_000,
                     ..Default::default()
                 },
                 cordis_wasm::Capabilities {

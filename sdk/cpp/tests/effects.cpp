@@ -362,7 +362,7 @@ static void event_regression() {
   });
   auto request = peer.next();
   auto callback = executor.start(
-      [&] { return events->invoke("l1", "v1", test::body(7), context()); });
+      [&] { return events->invoke("l1", "v0:2", test::body(7), context()); });
   auto dependency = peer.next();
   try {
     events->release("l1");
@@ -384,10 +384,10 @@ static void event_regression() {
     check(e.code == "closed");
   }
   try {
-    executor.wait(events->invoke("l1", "v1", test::body(nullptr), context()));
+    executor.wait(events->invoke("l1", "v0:2", test::body(nullptr), context()));
     check(false);
   } catch (const cordis::process::RpcError &e) {
-    check(e.code == "closed");
+    check(e.code == "duplicate_operation");
   }
   auto disposing = executor.start([&] { return subscription.dispose(); });
   request = peer.next();

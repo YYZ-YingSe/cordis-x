@@ -2,10 +2,7 @@ use crate::{Bytes, Error, Payload, Result, Value, json, session::WeakSession};
 use cordis_runtime::{Context, Middleware, Next, WeakEffectHandle};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::{
-        Arc, Mutex, OnceLock,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use cordis_host::{Body, MiddlewareBinding};
@@ -23,7 +20,7 @@ struct Continuation {
 }
 #[derive(Default)]
 struct Calls {
-    next: AtomicU64,
+    slots: Arc<cordis_wire::operations::Outgoing>,
     active: Mutex<BTreeMap<String, Continuation>>,
 }
 struct Frame {
@@ -82,6 +79,9 @@ impl Middlewares {
             return Err(Error::InvalidInput("duplicate middleware handler".into()));
         }
         if entries.len() >= 4096 {
+            entries.retain(|_, e| !e.handle.get().is_some_and(WeakEffectHandle::is_released));
+        }
+        if entries.len() >= 4096 {
             return Err(Error::Overloaded);
         }
         let entry = Arc::new(Handler {
@@ -138,7 +138,8 @@ impl Middlewares {
                 );
                 async move {
                     let result = async {
-                        let call = call_id(&calls)?;
+                        let _call_slot = calls.slots.acquire().ok_or(Error::Overloaded)?;
+                        let call = format!("w{}", _call_slot.id);
                         let grant = grant()?;
                         let session = session
                             .upgrade()
@@ -229,12 +230,14 @@ impl Middlewares {
             runs.insert(run.clone());
         }
         let calls = self.calls.clone();
-        middleware
+        let run_id = run.clone();
+        let result = middleware
             .run(ctx, Body::from_bytes(args), move |args, ctx| {
                 let (run, session, calls) = (run.clone(), session.clone(), calls.clone());
                 async move {
                     let result = async {
-                        let call = call_id(&calls)?;
+                        let _call_slot = calls.slots.acquire().ok_or(Error::Overloaded)?;
+                        let call = format!("w{}", _call_slot.id);
                         session
                             .upgrade()
                             .ok_or_else(|| Error::HostLost("terminal host lost".into()))?
@@ -256,17 +259,13 @@ impl Middlewares {
                 }
             })
             .await
-            .map_err(runtime_error)?
-            .into_bytes()
-            .map_err(Error::Protocol)
+            .map_err(runtime_error)
+            .and_then(|v| v.into_bytes().map_err(Error::Protocol));
+        if !matches!(result, Err(Error::OutcomeUnknown(_))) {
+            self.runs.lock().unwrap().remove(&run_id);
+        }
+        result
     }
-}
-fn call_id(calls: &Calls) -> Result<String> {
-    let n = calls.next.fetch_add(1, Ordering::Relaxed);
-    if n >= 4096 {
-        return Err(Error::Overloaded);
-    }
-    Ok(format!("w{n}"))
 }
 fn grant() -> Result<String> {
     let mut bytes = [0u8; 16];

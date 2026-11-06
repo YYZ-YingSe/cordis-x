@@ -92,7 +92,7 @@ impl RawProcess {
         };
         let request = result.request(
             "hello",
-            json!({"validation":"checked", "contract":{"name":"example.calculator","revision":"1"}, "interface": cordis_contract::portable::encode(calculator().descriptor().unwrap()), "dependency_interfaces": {}}),
+            json!({"max_inflight":16,"validation":"checked", "contract":{"name":"example.calculator","revision":"1"}, "interface": cordis_contract::portable::encode(calculator().descriptor().unwrap()), "dependency_interfaces": {}}),
         );
         assert_eq!(result.exchange(request).await["outcome"]["kind"], "success");
         let request = result.request("activate", json!(null));
@@ -102,7 +102,7 @@ impl RawProcess {
     fn request(&mut self, command: &str, payload: cordis_remote::Value) -> cordis_remote::Value {
         self.next += 1;
         json!({"session":self.session,"activation":{"incarnation":"1","fiber":"1","epoch":"1"},
-            "operation":self.next.to_string(),"command":command,"payload":payload})
+            "operation":format!("{}:{}", self.next % 256, self.next / 256 + 1),"command":command,"payload":payload})
     }
     // JSON is the assertion language of this fault-injection fixture. Its wire
     // is exclusively the generated protobuf carrier with independent bodies.
@@ -530,3 +530,54 @@ use backends::{Backend, python, python_spec};
 mod cpp;
 #[cfg(unix)]
 use cpp::{binary, test_calculator};
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn configured_hotspot_accepts_one_hundred_callers_over_both_transports() {
+    for &backend in Backend::ALL {
+        for endpoint in [Endpoint::Ipc, Endpoint::Http] {
+            let runtime = Runtime::new();
+            let mut spec = backend.spec("calculator");
+            spec.max_inflight = 100;
+            spec.endpoint = endpoint;
+            let provider = runtime
+                .install(spec.plugin("hotspot", &calculator()))
+                .unwrap();
+            bounded(provider.ready()).await.unwrap();
+            let saved = Arc::new(Mutex::new(None));
+            let capture = saved.clone();
+            let consumer = runtime
+                .install(
+                    Plugin::new("callers", move |ctx| {
+                        let saved = capture.clone();
+                        async move {
+                            *saved.lock().unwrap() = Some(ctx.dependency(&calculator())?);
+                            Ok(())
+                        }
+                    })
+                    .requires(&calculator()),
+                )
+                .unwrap();
+            bounded(consumer.ready()).await.unwrap();
+            let handle = saved.lock().unwrap().take().unwrap();
+            let start = Arc::new(tokio::sync::Barrier::new(101));
+            let mut jobs = tokio::task::JoinSet::new();
+            for n in 0..100 {
+                let (handle, start) = (handle.clone(), start.clone());
+                jobs.spawn(async move {
+                    start.wait().await;
+                    let value = json!({"n":n,"data":"x".repeat(4096)});
+                    let result = call(&handle, endpoint, "echo", value.clone())
+                        .await
+                        .unwrap();
+                    assert_eq!(result["n"].as_f64(), Some(f64::from(n)));
+                    assert_eq!(result["data"], value["data"]);
+                });
+            }
+            start.wait().await;
+            while let Some(result) = bounded(jobs.join_next()).await {
+                result.unwrap();
+            }
+            bounded(runtime.shutdown()).await.unwrap();
+        }
+    }
+}

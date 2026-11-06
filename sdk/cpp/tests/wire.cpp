@@ -1,3 +1,4 @@
+#include <cordis/protocols/session/operations.hpp>
 #include <cordis/adapters/process/wire.hpp>
 #include <sstream>
 using namespace cordis::session;
@@ -14,6 +15,26 @@ template <class F> static void rejected(F run) {
   throw std::runtime_error("invalid wire accepted");
 }
 int main() {
+  {
+    OperationOutbox outgoing(2);
+    OperationInbox incoming(2);
+    const auto slow = outgoing.allocate();
+    auto held = incoming.admit(slow);
+    for (unsigned n = 0; n < 100000; ++n) {
+      const auto fast = outgoing.allocate();
+      { auto admitted = incoming.admit(fast);
+        rejected([&] { incoming.admit(fast); });
+        rejected([&] { outgoing.allocate(); }); }
+      check(outgoing.complete(fast));
+      rejected([&] { incoming.admit(fast); });
+      check(!outgoing.complete(fast));
+    }
+    rejected([&] { incoming.admit("2:1"); });
+    check(!OperationId::parse("00:1"));
+    check(!OperationId::parse("0:0"));
+    check(!OperationId::parse("0:18446744073709551616"));
+  }
+
   // Parsed strings transfer ownership; retaining them does not retain or borrow
   // the soon-to-be-destroyed protobuf carrier.
   cordis::transport::Payload parsed;

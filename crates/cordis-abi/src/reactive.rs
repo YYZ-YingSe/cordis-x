@@ -7,10 +7,7 @@ use cordis_runtime::{Context, Next, WeakEffectHandle};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::ControlFlow,
-    sync::{
-        Arc, Mutex, OnceLock,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::{Arc, Mutex, OnceLock},
 };
 use tokio::sync::{Semaphore, watch};
 
@@ -20,7 +17,6 @@ pub struct ReactiveLimits {
     pub subscriptions: usize,
     pub dispatches: usize,
     pub runs: usize,
-    pub calls: usize,
     pub active_dispatches: usize,
     pub active_callbacks: usize,
     pub active_runs: usize,
@@ -31,7 +27,6 @@ impl Default for ReactiveLimits {
             subscriptions: 1024,
             dispatches: 4096,
             runs: 4096,
-            calls: 16384,
             active_dispatches: 16,
             active_callbacks: 32,
             active_runs: 16,
@@ -96,9 +91,13 @@ fn declaration(map: &mut Value, alias: &str, contract: &cordis_contract::Contrac
 struct Registry {
     callbacks: BTreeSet<u64>,
     subscriptions: BTreeMap<u64, Arc<Subscription>>,
-    dispatches: BTreeMap<u64, watch::Receiver<Option<Result<Payload>>>>,
+    dispatches: BTreeMap<u64, Dispatch>,
     runs: usize,
     frames: BTreeMap<u64, Frame>,
+}
+struct Dispatch {
+    result: watch::Receiver<Option<Result<Payload>>>,
+    observed: bool,
 }
 struct Frame {
     grant: u64,
@@ -113,7 +112,6 @@ struct Subscription {
 }
 pub(crate) struct Reactive {
     entries: Mutex<Registry>,
-    calls: AtomicUsize,
     callbacks: Arc<Semaphore>,
     terminals: Arc<Semaphore>,
     runs: Semaphore,
@@ -126,7 +124,6 @@ impl Reactive {
         let waits = caps.max_callbacks.min(caps.max_contexts);
         Self {
             entries: Mutex::default(),
-            calls: AtomicUsize::new(0),
             callbacks: Arc::new(Semaphore::new(callbacks)),
             terminals: Arc::new(Semaphore::new(
                 caps.reactive.active_runs.min(caps.max_contexts),
@@ -231,7 +228,7 @@ impl Router {
                     .unwrap()
                     .dispatches
                     .get(&target)
-                    .cloned()
+                    .map(|d| d.result.clone())
                     .ok_or(Error::Closed)?;
                 if operation == 8 {
                     json!({"outcome":rx.borrow().as_ref().map(outcome)}).into()
@@ -243,6 +240,16 @@ impl Router {
                         .map_err(|_| Error::Overloaded)?;
                     loop {
                         if let Some(result) = rx.borrow().clone() {
+                            if let Some(dispatch) = self
+                                .reactive
+                                .entries
+                                .lock()
+                                .unwrap()
+                                .dispatches
+                                .get_mut(&target)
+                            {
+                                dispatch.observed = true;
+                            }
                             break result?;
                         }
                         rx.changed().await.map_err(|_| Error::Closed)?;
@@ -316,6 +323,18 @@ impl Router {
         let instance = self.instance.upgrade().ok_or(Error::Closed)?;
         let mut entries = self.reactive.entries.lock().unwrap();
         check_callback(&entries, callback)?;
+        if entries.subscriptions.len() >= self.capabilities.reactive.subscriptions {
+            let retired: Vec<_> = entries
+                .subscriptions
+                .iter()
+                .filter(|(_, e)| e.handle.get().is_some_and(WeakEffectHandle::is_released))
+                .map(|(id, e)| (*id, e.callback))
+                .collect();
+            for (id, callback) in retired {
+                entries.subscriptions.remove(&id);
+                entries.callbacks.remove(&callback);
+            }
+        }
         if entries.subscriptions.len() >= self.capabilities.reactive.subscriptions {
             return Err(Error::Overloaded);
         }
@@ -469,11 +488,14 @@ impl Router {
             .ok_or_else(|| Error::InvalidInput("missing dispatch mode".into()))?;
         let input = args.one().map_err(invalid_payload)?;
         let mut entries = self.reactive.entries.lock().unwrap();
+        if entries.dispatches.len() >= self.capabilities.reactive.dispatches {
+            entries.dispatches.retain(|_, d| !d.observed);
+        }
         if entries.dispatches.len() >= self.capabilities.reactive.dispatches
             || entries
                 .dispatches
                 .values()
-                .filter(|d| d.borrow().is_none())
+                .filter(|d| d.result.borrow().is_none())
                 .count()
                 >= self.capabilities.reactive.active_dispatches
         {
@@ -487,7 +509,13 @@ impl Router {
             event.emit(&ctx, Body::from_bytes(input))
         }?;
         let (tx, rx) = watch::channel(None);
-        entries.dispatches.insert(id, rx);
+        entries.dispatches.insert(
+            id,
+            Dispatch {
+                result: rx,
+                observed: false,
+            },
+        );
         tokio::spawn(async move {
             let _instance = instance;
             let result = dispatch
@@ -561,6 +589,11 @@ impl Router {
         // C++ owns this one-shot callback until this synchronous host call ends.
         // An unknown terminal retains its captures and native failed inverse.
         let failure = unknown.lock().unwrap().clone();
+        if failure.is_none() {
+            let mut entries = self.reactive.entries.lock().unwrap();
+            entries.runs -= 1;
+            entries.callbacks.remove(&callback);
+        }
         failure
             .map_or(result, Err)?
             .into_bytes()
@@ -582,12 +615,6 @@ impl Router {
         let _permit = capacity
             .clone()
             .try_acquire_owned()
-            .map_err(|_| Error::Overloaded)?;
-        self.reactive
-            .calls
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < self.capabilities.reactive.calls).then(|| n + 1)
-            })
             .map_err(|_| Error::Overloaded)?;
         instance
             .managed_payload(ctx.clone(), operation, callback, args)

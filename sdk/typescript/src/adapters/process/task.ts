@@ -1,3 +1,4 @@
+import { Identities, makeRoom, Completion, registration } from './retention.ts';
 import { Refusal } from '../../core/error.ts';
 import { RpcError } from './context.ts';
 import type { Context, DependencyChannel } from './context.ts';
@@ -15,8 +16,9 @@ export class Task {
     this.task = task;
     this.grant = grant;
   }
-  async join(): Promise<void> {
-    await this.channel.request('task_join', { task: this.task, grant: this.grant });
+  private joinCompletion = new Completion<void>();
+  join(): Promise<void> {
+    return this.joinCompletion.observe(async () => { await this.channel.request('task_join', { task: this.task, grant: this.grant }); });
   }
   snapshot(): Promise<Value> {
     return this.channel.request('task_status', { task: this.task, grant: this.grant });
@@ -43,7 +45,7 @@ type Entry = {
 };
 export class TaskRegistry {
   private entries = new Map<string, Entry>();
-  private next = 0;
+  private next = new Identities();
   async register(
     channel: DependencyChannel,
     context: string,
@@ -52,8 +54,8 @@ export class TaskRegistry {
   ): Promise<Task> {
     if (Buffer.byteLength(label) > 1024)
       throw new Refusal('invalid_argument', 'task label too long');
-    if (this.next >= 4096) throw new Refusal('tasks_exhausted', 'task history full');
-    const task = `t${++this.next}`;
+    makeRoom(this.entries, 4096, (e) => e.started && !e.running);
+    const task = this.next.next('t');
     const entry: Entry = {
       callback,
       started: false,
@@ -62,7 +64,7 @@ export class TaskRegistry {
     };
     // A callback or cancellation may arrive before the registration acknowledgement.
     this.entries.set(task, entry);
-    const reply = await channel.request('task_register', { context, task, label });
+    const reply = await registration(channel.request('task_register', { context, task, label }), () => this.entries.delete(task));
     if (
       !reply ||
       typeof reply !== 'object' ||

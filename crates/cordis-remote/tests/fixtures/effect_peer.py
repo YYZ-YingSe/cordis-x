@@ -26,7 +26,7 @@ def reverse(request, command, payload, action):
     global next_operation
     next_operation += 1
     callback = {key: request[key] for key in ('session', 'activation')}
-    callback.update(operation=str(next_operation), command=command, payload=payload)
+    callback.update(operation=f"{next_operation % 256}:{next_operation // 256 + 1}", command=command, payload=payload)
     pending[callback['operation']] = (request, action)
     send(callback)
 

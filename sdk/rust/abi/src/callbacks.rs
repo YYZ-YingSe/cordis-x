@@ -120,13 +120,20 @@ pub struct Registry {
 }
 impl Registry {
     pub fn id(&self, prefix: char) -> Result<String> {
-        if self.next.get() >= 65536 {
-            return Err(refused("exhausted", "callback history full"));
-        }
-        self.next.set(self.next.get() + 1);
+        self.next.set(
+            self.next
+                .get()
+                .checked_add(1)
+                .ok_or_else(|| refused("exhausted", "callback identity exhausted"))?,
+        );
         Ok(format!("{prefix}{}", self.next.get()))
     }
     pub fn insert(&self, prefix: char, callback: Callback) -> Result<String> {
+        if self.entries.borrow().len() >= 4096 {
+            self.entries
+                .borrow_mut()
+                .retain(|_, e| e.callback.borrow().is_some() || e.running.get() != 0);
+        }
         if self.entries.borrow().len() >= 4096 {
             return Err(refused("overloaded", "callback capacity reached"));
         }
@@ -137,6 +144,11 @@ impl Registry {
         Ok(id)
     }
     pub fn insert_payload(&self, prefix: char, callback: WireCallback) -> Result<String> {
+        if self.entries.borrow().len() >= 4096 {
+            self.entries
+                .borrow_mut()
+                .retain(|_, e| e.callback.borrow().is_some() || e.running.get() != 0);
+        }
         if self.entries.borrow().len() >= 4096 {
             return Err(refused("overloaded", "callback capacity reached"));
         }
@@ -167,6 +179,11 @@ impl Registry {
         Ok(())
     }
     pub fn sequence(&self, producer: Producer) -> Result<String> {
+        if self.sequences.borrow().len() >= 256 {
+            self.sequences
+                .borrow_mut()
+                .retain(|_, e| e.producer.borrow().is_some() || e.running.get());
+        }
         if self.sequences.borrow().len() >= 256 {
             return Err(refused("overloaded", "sequence capacity reached"));
         }

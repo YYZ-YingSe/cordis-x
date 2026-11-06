@@ -12,7 +12,7 @@ use cordis_sdk_core::{ErrorInfo, Failure, Plugin, Result, Value, json, refused};
 use cordis_wire::{Outcome, Payload, RemoteError};
 use std::{
     cell::{Cell, RefCell},
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     rc::Rc,
 };
 

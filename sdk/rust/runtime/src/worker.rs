@@ -13,7 +13,11 @@ use std::{
 use tokio::sync::{Notify, mpsc, oneshot};
 
 #[derive(Clone)]
-pub(crate) struct Client(mpsc::Sender<Message>);
+pub(crate) struct Client(Arc<Mailboxes>);
+struct Mailboxes {
+    ordinary: mpsc::Sender<Message>,
+    cleanup: mpsc::Sender<Message>,
+}
 pub struct Service {
     pub(crate) client: Client,
     pub(crate) descriptor: Arc<cordis_contract::Descriptor>,
@@ -101,7 +105,7 @@ enum StoredCallback {
 pub(crate) struct Instance {
     pub capabilities: Arc<HostBindings>,
     pub primary: cordis_sdk_core::Contract,
-    client: mpsc::WeakSender<Message>,
+    client: std::sync::Weak<Mailboxes>,
     callbacks: RefCell<BTreeMap<u64, StoredCallback>>,
     next: Cell<u64>,
     resources: RefCell<BTreeMap<u64, Option<Rc<dyn ResourceObject>>>>,
@@ -229,7 +233,12 @@ impl Frame {
 impl Client {
     pub async fn start<P: Plugin>(config: Value, capabilities: Arc<HostBindings>) -> Result<Self> {
         let (sender, mut receiver) = mpsc::channel::<Message>(64);
-        let weak = sender.downgrade();
+        let (cleanup_sender, mut cleanup_receiver) = mpsc::channel::<Message>(64);
+        let mailboxes = Arc::new(Mailboxes {
+            ordinary: sender,
+            cleanup: cleanup_sender,
+        });
+        let weak = Arc::downgrade(&mailboxes);
         let (ready, result) = oneshot::channel();
         std::thread::Builder::new()
             .name("cordis-rust-plugin".into())
@@ -268,7 +277,13 @@ impl Client {
                     });
                     let _ = ready.send(Ok(()));
                     let mut jobs = tokio::task::JoinSet::new();
-                    while let Some(message) = receiver.recv().await {
+                    loop {
+                        let message = tokio::select! { biased;
+                            Some(message) = cleanup_receiver.recv() => Some(message),
+                            Some(message) = receiver.recv() => Some(message),
+                            else => None,
+                        };
+                        let Some(message) = message else { break };
                         if let Action::Close = message.action {
                             while jobs.join_next().await.is_some() {}
                             if !instance.resources.borrow().is_empty() {
@@ -407,13 +422,28 @@ impl Client {
             })
             .map_err(unknown)?;
         result.await.map_err(unknown)??;
-        Ok(Self(sender))
+        Ok(Self(mailboxes))
     }
     async fn send(&self, ctx: Option<rt::Context>, action: Action) -> Result<Response> {
         let (reply, result) = oneshot::channel();
-        self.0
-            .try_send(Message { ctx, action, reply })
-            .map_err(|e| refused("unavailable", e))?;
+        let cleanup = ctx.as_ref().is_some_and(rt::Context::is_cleanup)
+            || matches!(
+                action,
+                Action::Release(_) | Action::Forget(_) | Action::Close | Action::Lifecycle(false)
+            );
+        let message = Message { ctx, action, reply };
+        if cleanup {
+            self.0
+                .cleanup
+                .send(message)
+                .await
+                .map_err(|e| refused("closed", e))?;
+        } else {
+            self.0
+                .ordinary
+                .try_send(message)
+                .map_err(|e| refused("unavailable", e))?;
+        }
         result.await.map_err(unknown)?
     }
     pub async fn lifecycle(&self, ctx: &rt::Context, activate: bool) -> Result<()> {

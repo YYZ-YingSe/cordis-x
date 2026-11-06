@@ -24,8 +24,9 @@ pub struct Host<P> {
     active: Cell<bool>,
     attempted: Cell<bool>,
     closing: Cell<bool>,
-    seen: RefCell<BTreeSet<String>>,
+    seen: cordis_wire::operations::Incoming,
     inflight: Cell<usize>,
+    max_inflight: Cell<usize>,
     idle: Notify,
     lanes: [Cell<usize>; 9],
     pub url: Option<String>,
@@ -47,6 +48,12 @@ impl<P: Plugin> Host<P> {
         }
         let manifest = P::manifest();
         let args = &request.payload.control;
+        let max_inflight = args["max_inflight"]
+            .as_u64()
+            .filter(|n| (1..=128).contains(n))
+            .ok_or_else(|| refused("invalid_argument", "max_inflight must be in 1..=128"))?
+            as usize;
+        self.max_inflight.set(max_inflight);
         let validation = serde_json::from_value(args["validation"].clone())
             .map_err(|e| refused("invalid_argument", format!("validation: {e}")))?;
         let descriptor = &self.descriptor;
@@ -118,7 +125,7 @@ impl<P: Plugin> Host<P> {
         Ok(
             json!({"contract":args["contract"],"interface":cordis_sdk_core::contract::encode(descriptor),"dependency_interfaces":dependency_interfaces,"dependencies":*self.dependencies,"events":args["events"],"middleware":args["middleware"],"composition":composition,
             "http":self.url,"capabilities":{"multiplex":true,"reverse_calls":true,"effects":true,"effect_sequences":true,"scopes":true,
-            "tasks":true,"events":true,"middleware":true,"composition":true,"metadata":true,"streams":false,"resources":true,"dependency_resources":self.channel.dependency_resources.get(),"max_inflight":16,"max_message":cordis_wire::MAX_MESSAGE}}),
+            "tasks":true,"events":true,"middleware":true,"composition":true,"metadata":true,"streams":false,"resources":true,"dependency_resources":self.channel.dependency_resources.get(),"max_inflight":max_inflight,"max_message":cordis_wire::MAX_MESSAGE}}),
         )
     }
     async fn execute(&self, request: &Request) -> Result<Payload> {
@@ -142,15 +149,16 @@ impl<P: Plugin> Host<P> {
                 .session
                 .bytes()
                 .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-            || !decimal(&request.operation)
+            || cordis_wire::operations::Id::parse(&request.operation).is_none()
             || !identity(&request.activation)
         {
             return Err(refused("protocol", "invalid identity"));
         }
         if request.command == "hello" {
-            if !self.seen.borrow_mut().insert(request.operation.clone()) {
-                return Err(refused("duplicate_operation", "Hello operation reused"));
-            }
+            let _admission = self
+                .seen
+                .admit(cordis_wire::operations::Id::parse(&request.operation).unwrap())
+                .ok_or_else(|| refused("duplicate_operation", "Hello operation reused"))?;
             return self.hello(request).map(Into::into);
         }
         if self.channel.identity.borrow().as_ref()
@@ -158,11 +166,10 @@ impl<P: Plugin> Host<P> {
         {
             return Err(refused("stale_session", "identity mismatch"));
         }
-        if self.seen.borrow().len() >= 65536
-            || !self.seen.borrow_mut().insert(request.operation.clone())
-        {
-            return Err(refused("duplicate_operation", "operation unavailable"));
-        }
+        let _admission = self
+            .seen
+            .admit(cordis_wire::operations::Id::parse(&request.operation).unwrap())
+            .ok_or_else(|| refused("duplicate_operation", "operation unavailable"))?;
         let command = request.command.as_str();
         let args = &request.payload.control;
         let cleanup = matches!(
@@ -214,8 +221,10 @@ impl<P: Plugin> Host<P> {
         };
         let ctx = Context::from_backend(Rc::new(backend));
         let business = matches!(command, "call" | "resource_acquire" | "resource_call");
-        let counted =
-            business && self.active.get() && !self.closing.get() && self.inflight.get() < 16;
+        let counted = business
+            && self.active.get()
+            && !self.closing.get()
+            && self.inflight.get() < self.max_inflight.get();
         if counted {
             self.inflight.set(self.inflight.get() + 1);
         }
@@ -388,7 +397,7 @@ impl<P: Plugin> Host<P> {
                     Ok(Value::Null)
                 }
                 "event_call" | "middleware_call" | "middleware_terminal" => {
-                    self.registry.admit(text(args, "call")?)?;
+                    let _callback_admission = self.registry.admit(text(args, "call")?)?;
                     let (key, once) = match command {
                         "event_call" => ("listener", false),
                         "middleware_call" => ("handler", false),
@@ -427,7 +436,12 @@ impl<P: Plugin> Host<P> {
             | "middleware_release" | "resource_release" => 1,
             _ => 0,
         };
-        let result = if self.lanes[lane].get() >= 16 {
+        let result = if self.lanes[lane].get()
+            >= if lane == 0 {
+                self.max_inflight.get()
+            } else {
+                16
+            } {
             Err(refused("overloaded", "callback lane full"))
         } else {
             self.lanes[lane].set(self.lanes[lane].get() + 1);
@@ -445,7 +459,7 @@ impl<P: Plugin> Host<P> {
     }
 }
 pub async fn serve<P: Plugin>(options: Options) -> Result<()> {
-    let (send, mut output) = mpsc::channel(256);
+    let (send, mut output) = mpsc::channel(cordis_wire::operations::OUTPUT_FRAMES);
     let channel = Channel::new(send);
     let listener = if options.http {
         Some(
@@ -483,8 +497,9 @@ pub async fn serve<P: Plugin>(options: Options) -> Result<()> {
         active: Cell::new(false),
         attempted: Cell::new(false),
         closing: Cell::new(false),
-        seen: RefCell::default(),
+        seen: cordis_wire::operations::Incoming::new(cordis_wire::operations::DEFAULT_SLOTS),
         inflight: Cell::new(0),
+        max_inflight: Cell::new(16),
         idle: Notify::new(),
         lanes: std::array::from_fn(|_| Cell::new(0)),
         url,

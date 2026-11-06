@@ -4,7 +4,7 @@ use crate::{
     Context, FutureResult, LocalFuture, Message, MessageContract, Next, Result, Step, Value,
     refused,
 };
-use std::{any::Any, rc::Rc};
+use std::{any::Any, cell::RefCell, collections::BTreeMap, rc::Rc};
 
 pub type Callback = Rc<dyn Fn(Context, Value) -> FutureResult>;
 pub type MessageCallback = Rc<dyn Fn(Context, Message) -> crate::message::FutureResult>;
@@ -14,10 +14,13 @@ pub type Middleware = Rc<dyn Fn(Context, Message, Next) -> crate::message::Futur
 
 /// Opaque adapter-owned capability. There is no required wire representation.
 #[derive(Clone)]
-pub struct Handle(Rc<dyn Any>);
+pub struct Handle(
+    Rc<dyn Any>,
+    pub(crate) Rc<RefCell<BTreeMap<u8, Result<Value>>>>,
+);
 impl Handle {
     pub fn new<T: Any>(value: T) -> Self {
-        Self(Rc::new(value))
+        Self(Rc::new(value), Rc::default())
     }
     pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
         self.0.downcast_ref()

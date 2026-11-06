@@ -5,6 +5,25 @@ use serde_json::Value;
 
 pub const GROUP: &str = "cordis:group";
 
+/// Deployment input budgets, independent of any individual invocation frame.
+#[derive(Clone, Debug)]
+pub struct ConfigurationLimits {
+    pub bytes: usize,
+    pub nodes: usize,
+    pub depth: usize,
+    pub entries: usize,
+}
+impl Default for ConfigurationLimits {
+    fn default() -> Self {
+        Self {
+            bytes: 16 * 1024 * 1024,
+            nodes: 262_144,
+            depth: 64,
+            entries: 16_384,
+        }
+    }
+}
+
 /// JSON is a configuration representation, independent of any invocation codec.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -13,19 +32,45 @@ pub struct Configuration {
 }
 impl Configuration {
     pub fn from_json(input: &str) -> Result<Self> {
-        if input.len() > cordis_wire::MAX_MESSAGE {
+        Self::from_json_with_limits(input, &ConfigurationLimits::default())
+    }
+    pub fn from_json_with_limits(input: &str, limits: &ConfigurationLimits) -> Result<Self> {
+        if input.len() > limits.bytes {
             return Err(Error::InvalidConfig(
                 "configuration exceeds size limit".into(),
             ));
         }
-        let value: Self =
+        let value: Value =
             serde_json::from_str(input).map_err(|error| Error::InvalidConfig(error.to_string()))?;
-        cordis_wire::validate(
-            &serde_json::to_value(&value).map_err(|e| Error::InvalidConfig(e.to_string()))?,
-            0,
-        )
-        .map_err(|e| Error::InvalidConfig(e.to_string()))?;
-        Ok(value)
+        let mut remaining = limits.nodes;
+        let mut pending = vec![(&value, 0)];
+        while let Some((value, depth)) = pending.pop() {
+            if depth > limits.depth || remaining == 0 {
+                return Err(Error::InvalidConfig(
+                    "configuration depth/node limit exceeded".into(),
+                ));
+            }
+            remaining -= 1;
+            match value {
+                Value::Array(values) => pending.extend(values.iter().map(|v| (v, depth + 1))),
+                Value::Object(values) => pending.extend(values.values().map(|v| (v, depth + 1))),
+                _ => (),
+            }
+        }
+        let config: Self =
+            serde_json::from_value(value).map_err(|e| Error::InvalidConfig(e.to_string()))?;
+        let mut pending: Vec<_> = config.entries.iter().collect();
+        let mut entries = 0;
+        while let Some(entry) = pending.pop() {
+            entries += 1;
+            if entries > limits.entries {
+                return Err(Error::InvalidConfig(
+                    "configuration entry limit exceeded".into(),
+                ));
+            }
+            pending.extend(&entry.children);
+        }
+        Ok(config)
     }
 }
 

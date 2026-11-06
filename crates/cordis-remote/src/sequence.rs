@@ -4,19 +4,23 @@ use cordis_runtime::{
 };
 use std::{
     collections::BTreeMap,
-    sync::{
-        Arc, Mutex, OnceLock,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::{Arc, Mutex, OnceLock, atomic::Ordering},
 };
 use tokio::sync::watch;
 
 const MAX_SEQUENCES: usize = 256;
 const MAX_STEPS: usize = 4096;
-#[derive(Default)]
 pub(crate) struct Sequences {
     entries: Mutex<BTreeMap<String, Arc<Entry>>>,
-    steps: Arc<AtomicUsize>,
+    steps: Arc<tokio::sync::Semaphore>,
+}
+impl Default for Sequences {
+    fn default() -> Self {
+        Self {
+            entries: Mutex::default(),
+            steps: Arc::new(tokio::sync::Semaphore::new(MAX_STEPS)),
+        }
+    }
 }
 struct Entry {
     id: String,
@@ -27,6 +31,7 @@ struct Entry {
     cleanup_error: Mutex<Option<Error>>,
     released: Mutex<Option<Result<Value>>>,
     steps: Mutex<Vec<Arc<Ticket>>>,
+    next_step: std::sync::atomic::AtomicU64,
 }
 struct Ticket {
     number: String,
@@ -53,6 +58,9 @@ impl Sequences {
             return Err(Error::InvalidInput("duplicate sequence ID".into()));
         }
         if entries.len() >= MAX_SEQUENCES {
+            entries.retain(|_, e| !e.handle.get().is_some_and(WeakEffectSequence::is_released));
+        }
+        if entries.len() >= MAX_SEQUENCES {
             return Err(Error::Overloaded);
         }
         let mut random = [0u8; 16];
@@ -68,6 +76,7 @@ impl Sequences {
             cleanup_error: Mutex::new(None),
             released: Mutex::new(None),
             steps: Mutex::new(Vec::new()),
+            next_step: std::sync::atomic::AtomicU64::new(1),
         });
         let runner = entry.clone();
         let total = self.steps.clone();
@@ -225,21 +234,39 @@ impl Entry {
         self: Arc<Self>,
         ctx: Context,
         session: WeakSession,
-        total: Arc<AtomicUsize>,
+        total: Arc<tokio::sync::Semaphore>,
     ) -> EffectStep {
-        if total
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < MAX_STEPS).then_some(n + 1)
-            })
-            .is_err()
+        let permit = match total.try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => return self.fail(Error::Overloaded, None),
+        };
+        let number = match self
+            .next_step
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
         {
-            return self.fail(Error::Overloaded, None);
-        }
+            Ok(number) => number.to_string(),
+            Err(_) => {
+                return self.fail(
+                    Error::Refused {
+                        code: "exhausted".into(),
+                        message: "sequence identity space exhausted".into(),
+                    },
+                    None,
+                );
+            }
+        };
         // Record responsibility before sending a step. The native sequence lease
         // prevents recovery until this ticket has landed, including unknown results.
         let ticket = {
             let mut steps = self.steps.lock().unwrap();
-            let number = (steps.len() + 1).to_string();
+            if steps.len() >= MAX_STEPS {
+                steps.retain(|t| {
+                    matches!(
+                        t.state.lock().unwrap()["state"].as_str(),
+                        Some("pending" | "owned" | "unknown" | "failed")
+                    )
+                });
+            }
             let ticket = Arc::new(Ticket {
                 number,
                 state: Mutex::new(Value::Null),
@@ -287,6 +314,7 @@ impl Entry {
                         );
                         result.map(|_| ()).map_err(Into::into)
                     })
+                    .retain_capacity(permit)
                 });
                 if let Some(error) = error {
                     self.fail(error, inverse)
@@ -299,8 +327,7 @@ impl Entry {
             Err(error) => {
                 // Only bounded admission rejections certify no step ran. Any
                 // other failure (including malformed replies) is conservatively unknown.
-                let not_run = error == Error::Overloaded
-                    || matches!(&error, Error::Refused { code, .. } if matches!(code.as_str(), "overloaded" | "closed" | "session_exhausted" | "steps_exhausted"));
+                let not_run = crate::scope::not_executed(&error);
                 if not_run {
                     ticket.set("not_executed", Some(&error));
                     return self.fail(error, None);
@@ -319,7 +346,7 @@ impl Entry {
                         Err(failure.into())
                     },
                 );
-                self.fail(unknown, Some(inverse))
+                self.fail(unknown, Some(inverse.retain_capacity(permit)))
             }
         }
     }

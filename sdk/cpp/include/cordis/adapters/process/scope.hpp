@@ -1,10 +1,12 @@
 #pragma once
+#include <cordis/core/observation.hpp>
 #include "context.hpp"
 
 namespace cordis::process {
 using ScopeCallback = std::function<Async<Json>(Context)>;
 
 class Scope {
+  cordis::detail::Observation<void> completion;
   std::shared_ptr<DependencyChannel> channel;
   std::shared_ptr<ScopeRegistry> registry;
   std::string id, grant;
@@ -28,7 +30,7 @@ public:
         [*this]() -> Async<void> { (co_await request("scope_ready")); });
   }
   Async<void> dispose() const {
-    return cordis::detail::invoke_owned(
+    return completion.observe(
         [*this]() -> Async<void> { (co_await request("scope_dispose")); });
   }
   Async<Json> snapshot() const {
@@ -57,8 +59,7 @@ public:
     std::string id;
     {
       std::lock_guard lock(mutex);
-      if (next_scope >= 256)
-        throw Refusal("scopes_exhausted", "scope history full");
+      if (next_scope == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
       id = "c" + std::to_string(++next_scope);
     }
     Json args = {{"context", context}, {"scope", id}, {"label", label}};
@@ -80,8 +81,9 @@ public:
     std::string run;
     {
       std::lock_guard lock(mutex);
-      if (next_run >= 4096)
-        throw Refusal("runs_exhausted", "scope run history full");
+      if (next_run == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
+      if (runs.size() >= 4096) std::erase_if(runs, [](const auto &item) { return !item.second->callback && !item.second->running; });
+      if (runs.size() >= 4096) throw Refusal("overloaded", "live capacity reached");
       run = "u" + std::to_string(++next_run);
       runs.emplace(run, entry);
     }

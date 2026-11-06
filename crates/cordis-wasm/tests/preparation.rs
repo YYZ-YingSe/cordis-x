@@ -163,7 +163,7 @@ fn cached_code_still_checks_each_memory_budget_and_preflights_each_definition() 
             .component(
                 bytes,
                 Limits {
-                    fuel_per_call: 1,
+                    initialization_fuel: 1,
                     ..Limits::default()
                 }
             )

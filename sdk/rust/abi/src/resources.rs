@@ -12,7 +12,16 @@ pub struct Resources {
 impl Resources {
     pub fn reserve(&self, contract: cordis_sdk_core::ResourceContract) -> Result<(u64, Rc<Entry>)> {
         if self.entries.borrow().len() >= 4096 {
-            return Err(refused("overloaded", "resource history full"));
+            self.entries.borrow_mut().retain(|_, e| {
+                !e.completion
+                    .borrow()
+                    .as_ref()
+                    .and_then(|f| f.peek())
+                    .is_some_and(Result::is_ok)
+            });
+        }
+        if self.entries.borrow().len() >= 4096 {
+            return Err(refused("overloaded", "live resource capacity reached"));
         }
         let next = self
             .next

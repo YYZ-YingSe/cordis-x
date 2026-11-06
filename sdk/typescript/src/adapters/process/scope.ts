@@ -1,3 +1,4 @@
+import { Identities, makeRoom, Completion } from './retention.ts';
 import { Refusal } from '../../core/error.ts';
 import { RpcError } from './context.ts';
 import type { Context, DependencyChannel } from './context.ts';
@@ -24,8 +25,9 @@ export class Scope {
   async ready(): Promise<void> {
     await this.request('scope_ready');
   }
-  async dispose(): Promise<void> {
-    await this.request('scope_dispose');
+  private disposeCompletion = new Completion<void>();
+  dispose(): Promise<void> {
+    return this.disposeCompletion.observe(async () => { await this.request('scope_dispose'); });
   }
   snapshot(): Promise<Value> {
     return this.request('scope_status');
@@ -37,14 +39,14 @@ export class Scope {
 
 type Run = { scope: string; callback?: ScopeCallback; started: boolean; running: boolean };
 export class ScopeRegistry {
-  private nextScope = 0;
-  private nextRun = 0;
+  private nextScope = new Identities();
+  private nextRun = new Identities();
   private runs = new Map<string, Run>();
   async register(channel: DependencyChannel, context: string, label: string): Promise<Scope> {
     if (Buffer.byteLength(label) > 1024)
       throw new Refusal('invalid_argument', 'scope label too long');
-    if (this.nextScope >= 256) throw new Refusal('scopes_exhausted', 'scope history full');
-    const scope = `c${++this.nextScope}`;
+
+    const scope = this.nextScope.next('c');
     const reply = await channel.request('scope_register', { context, scope, label });
     if (
       !reply ||
@@ -63,8 +65,8 @@ export class ScopeRegistry {
     grant: string,
     callback: ScopeCallback,
   ): Promise<Value> {
-    if (this.nextRun >= 4096) throw new Refusal('runs_exhausted', 'scope run history full');
-    const run = `u${++this.nextRun}`;
+    makeRoom(this.runs, 4096, (e) => !e.callback && !e.running);
+    const run = this.nextRun.next('u');
     const entry: Run = { scope, callback, started: false, running: false };
     this.runs.set(run, entry);
     try {

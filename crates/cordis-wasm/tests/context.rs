@@ -357,7 +357,7 @@ async fn context_dependencies_effects_and_expiring_authority() {
     app.call("release", json!({})).await.unwrap();
     app.call("release", json!({})).await.unwrap();
     app.call("stale", json!({})).await.unwrap();
-    assert_eq!(app.client.effects().len(), 3);
+    assert_eq!(app.client.effects().len(), 2);
     app.provider.dispose().await.unwrap();
     assert_eq!(
         *app.log.lock().unwrap(),
@@ -604,8 +604,12 @@ async fn tasks_outlive_ordinary_call_deadlines() {
 #[tokio::test]
 async fn effect_admission_limit_does_not_fault_healthy_instance() {
     let app = app_with(|caps| caps.max_handles = 1).await;
-    app.call("subscribe", json!("one")).await.unwrap();
-    assert!(app.call("subscribe", json!("two")).await.is_err());
+    for _ in 0..100 {
+        app.call("subscribe", json!("one")).await.unwrap();
+        assert!(app.call("subscribe", json!("two")).await.is_err());
+        app.call("release", json!({})).await.unwrap();
+        app.call("release", json!({})).await.unwrap();
+    }
     assert_eq!(app.call("echo", json!(42)).await.unwrap(), json!(42.0));
     app.rt.shutdown().await.unwrap();
 }

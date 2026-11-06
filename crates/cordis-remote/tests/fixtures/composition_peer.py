@@ -17,8 +17,8 @@ def reverse(original, command, payload, action):
     global sequence
     sequence += 1
     request = {k: original[k] for k in ('session', 'activation')}
-    request.update(command=command, payload=payload, operation=str(sequence))
-    pending[str(sequence)] = (original, action)
+    request.update(command=command, payload=payload, operation=f"{sequence % 256}:{sequence // 256 + 1}")
+    pending[request['operation']] = (original, action)
     send(request)
 
 

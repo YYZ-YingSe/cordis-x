@@ -56,6 +56,9 @@ impl ResourceProvider for Resource {
     }
 }
 impl WeakResourceProvider for resource::WeakResource {
+    fn is_released(&self) -> bool {
+        self.is_released()
+    }
     fn invoke(&self, method: String, args: Body) -> rt::BoxFuture<'_, Result<Body>> {
         Box::pin(async move {
             let resource = self.upgrade()?;

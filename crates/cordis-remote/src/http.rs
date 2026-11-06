@@ -30,6 +30,7 @@ impl Http {
         }
         let client = reqwest::Client::builder()
             .no_proxy()
+            .pool_max_idle_per_host(16)
             .retry(reqwest::retry::never())
             .redirect(reqwest::redirect::Policy::none())
             .timeout(deadline)

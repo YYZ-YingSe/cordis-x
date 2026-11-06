@@ -227,7 +227,13 @@ impl Router {
                                 .map_err(Error::from)
                             {
                                 Ok(resource) => entry.commit(id, resource).into(),
-                                Err(error) => failure(error, true).into(),
+                                Err(error) => {
+                                    let result = failure(error, true);
+                                    if result["status"] != "unknown" {
+                                        entry.reject();
+                                    }
+                                    result.into()
+                                }
                             },
                         );
                     }

@@ -1,3 +1,4 @@
+import { Identities, makeRoom, Completion, registration } from './retention.ts';
 import { Refusal } from '../../core/error.ts';
 import { RpcError } from './context.ts';
 import type { Context, DependencyChannel } from './context.ts';
@@ -30,8 +31,9 @@ export class EffectSequence {
       throw new Refusal('protocol', 'invalid sequence completion');
     return reply.completion;
   }
-  async dispose(): Promise<void> {
-    await this.request('sequence_dispose');
+  private disposeCompletion = new Completion<void>();
+  dispose(): Promise<void> {
+    return this.disposeCompletion.observe(async () => { await this.request('sequence_dispose'); });
   }
   snapshot(): Promise<Value> {
     return this.request('sequence_status');
@@ -44,12 +46,12 @@ type SequenceRecord = {
   running: boolean;
   ended: boolean;
   released: boolean;
-  next: number;
+  next: bigint;
   steps: Map<string, StepRecord>;
 };
 export class SequenceRegistry {
   private entries = new Map<string, SequenceRecord>();
-  private nextId = 0;
+  private nextId = new Identities();
   private steps = 0;
   async register(
     channel: DependencyChannel,
@@ -59,18 +61,18 @@ export class SequenceRegistry {
   ): Promise<EffectSequence> {
     if (Buffer.byteLength(label) > 1024)
       throw new Refusal('invalid_argument', 'sequence label too long');
-    if (this.nextId >= 256) throw new Refusal('sequences_exhausted', 'sequence history full');
-    const sequence = `s${++this.nextId}`;
+    makeRoom(this.entries, 256, (e) => e.released);
+    const sequence = this.nextId.next('s');
     // Save the producer before requesting ownership, including acknowledgement loss.
     this.entries.set(sequence, {
       producer,
       running: false,
       ended: false,
       released: false,
-      next: 1,
+      next: 1n,
       steps: new Map(),
     });
-    const reply = await channel.request('sequence_register', { context, sequence, label });
+    const reply = await registration(channel.request('sequence_register', { context, sequence, label }), () => this.entries.delete(sequence));
     if (
       !reply ||
       typeof reply !== 'object' ||
@@ -92,7 +94,7 @@ export class SequenceRegistry {
     if (entry.released || entry.ended || entry.running)
       throw new Refusal('closed', 'sequence cannot advance');
     if (step !== String(entry.next)) throw new Refusal('invalid_step', 'step order mismatch');
-    if (this.steps >= 4096) throw new Refusal('steps_exhausted', 'step history full');
+    if (this.steps >= 4096) throw new Refusal('overloaded', 'unrecovered step capacity reached');
     this.steps++;
     entry.next++;
     entry.running = true;
@@ -108,7 +110,8 @@ export class SequenceRegistry {
       }
       // Save any inverse even when validating the result later fails.
       const inverse = result?.inverse;
-      entry.steps.set(step, { inverse, released: !inverse });
+      if (inverse) entry.steps.set(step, { inverse, released: false });
+      else this.steps--;
       if (
         !result ||
         typeof result.done !== 'boolean' ||
@@ -138,6 +141,7 @@ export class SequenceRegistry {
           await ctx.finish();
         }
         entry.released = true;
+        this.steps--;
         entry.inverse = undefined;
       });
     }

@@ -225,7 +225,11 @@ impl Context {
             },
         );
         let registration = registration?;
-        registry.insert(slot, middleware, handler(registration.context.clone()))?;
+        registry.insert(
+            slot,
+            middleware,
+            handler(registration.context().ok_or(Error::Closed)?),
+        )?;
         Ok(registration)
     }
 }

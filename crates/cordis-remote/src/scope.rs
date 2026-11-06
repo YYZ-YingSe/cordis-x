@@ -1,14 +1,14 @@
 use crate::{Error, Result, Value, json, session::WeakSession};
 use cordis_runtime::{Context, EffectStatus, WeakScopeHandle};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     sync::{Arc, Mutex},
 };
 
 #[derive(Default)]
 pub(crate) struct Scopes {
     entries: Mutex<BTreeMap<String, Arc<Entry>>>,
-    runs: Mutex<BTreeSet<String>>,
+    runs: Mutex<BTreeMap<String, Arc<Ticket>>>,
 }
 struct Entry {
     grant: String,
@@ -29,6 +29,9 @@ impl Scopes {
         let mut entries = self.entries.lock().unwrap();
         if entries.contains_key(&id) {
             return Err(Error::InvalidInput("duplicate scope ID".into()));
+        }
+        if entries.len() >= 256 {
+            entries.retain(|_, e| !e.handle.is_retired());
         }
         if entries.len() >= 256 {
             return Err(Error::Overloaded);
@@ -100,35 +103,51 @@ impl Scopes {
             }
             "scope_run" => {
                 let run = identifier(payload, "run", 'u')?;
+                let ticket = Arc::new(Ticket {
+                    id: run.clone(),
+                    state: Mutex::new("admitted"),
+                });
                 {
                     let mut runs = self.runs.lock().unwrap();
-                    if runs.contains(&run) {
+                    if runs.contains_key(&run) {
                         return Err(Error::InvalidInput("duplicate scope run".into()));
+                    }
+                    if runs.len() >= 4096 {
+                        runs.retain(|_, t| {
+                            !matches!(*t.state.lock().unwrap(), "completed" | "not_executed")
+                        });
                     }
                     if runs.len() >= 4096 {
                         return Err(Error::Overloaded);
                     }
-                    runs.insert(run.clone());
+                    runs.insert(run.clone(), ticket.clone());
                 }
-                let ticket = Arc::new(Ticket {
-                    id: run.clone(),
-                    state: Mutex::new("not_executed"),
-                });
-                entry.runs.lock().unwrap().push(ticket.clone());
-                handle
+                {
+                    let mut history = entry.runs.lock().unwrap();
+                    if history.len() >= 4096 {
+                        history.retain(|t| {
+                            !matches!(*t.state.lock().unwrap(), "completed" | "not_executed")
+                        });
+                    }
+                    history.push(ticket.clone());
+                }
+                let admission = ticket.clone();
+                let result = handle
                     .run(move |ctx| async move {
                         // This inverse is registered before any remote execution. A
                         // transport failure never turns pending work into clean work.
                         let guard = ticket.clone();
-                        ctx.defer("remote scope operation", move |_| async move {
-                            match *guard.state.lock().unwrap() {
-                                "completed" | "not_executed" => Ok(()),
-                                _ => {
-                                    Err(Error::OutcomeUnknown(format!("scope run {}", guard.id))
-                                        .into())
+                        let completion =
+                            ctx.defer("remote scope operation", move |_| async move {
+                                match *guard.state.lock().unwrap() {
+                                    "completed" | "not_executed" => Ok(()),
+                                    _ => Err(Error::OutcomeUnknown(format!(
+                                        "scope run {}",
+                                        guard.id
+                                    ))
+                                    .into()),
                                 }
-                            }
-                        })?;
+                            })?;
                         *ticket.state.lock().unwrap() = "pending";
                         let reply = match session.upgrade() {
                             Some(session) => {
@@ -172,18 +191,22 @@ impl Scopes {
                             ctx.fail(failure.to_string())?;
                             return Ok(Err(failure));
                         }
+                        let _ = completion.dispose().await;
                         Ok(result)
                     })
                     .await
-                    .map_err(crate::resource::runtime_error)?
+                    .map_err(crate::resource::runtime_error);
+                if *admission.state.lock().unwrap() == "admitted" {
+                    *admission.state.lock().unwrap() = "not_executed";
+                }
+                result?
             }
             _ => Err(Error::InvalidInput("unknown scope operation".into())),
         }
     }
 }
 pub(crate) fn not_executed(error: &Error) -> bool {
-    *error == Error::Overloaded
-        || matches!(error, Error::Refused { code, .. } if matches!(code.as_str(), "overloaded" | "closed" | "session_exhausted"))
+    matches!(error, Error::Overloaded | Error::Refused { .. })
 }
 pub(crate) fn parse_outcome(value: Value) -> Result<Result<Value>> {
     let invalid = || Error::Protocol("invalid callback outcome".into());

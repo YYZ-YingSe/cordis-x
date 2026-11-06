@@ -1,3 +1,4 @@
+import { Completion } from './retention.ts';
 import { Refusal } from '../../core/error.ts';
 import { DependencyChannel, RpcError } from './context.ts';
 import type { Value } from '../../core/value.ts';
@@ -36,7 +37,8 @@ export class Child {
   status(): Promise<Value> {
     return this.call('child_status');
   }
-  async dispose(): Promise<void> {
-    await this.call('child_dispose');
+  private disposeCompletion = new Completion<void>();
+  dispose(): Promise<void> {
+    return this.disposeCompletion.observe(async () => { await this.call('child_dispose'); });
   }
 }

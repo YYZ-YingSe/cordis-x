@@ -27,7 +27,16 @@ impl Resources {
             return Err(refused("invalid_argument", "invalid ownership grant"));
         }
         if self.entries.borrow().len() >= 4096 {
-            return Err(refused("overloaded", "resource history full"));
+            self.entries.borrow_mut().retain(|_, e| {
+                !e.completion
+                    .borrow()
+                    .as_ref()
+                    .and_then(|f| f.peek())
+                    .is_some_and(Result::is_ok)
+            });
+        }
+        if self.entries.borrow().len() >= 4096 {
+            return Err(refused("overloaded", "live resource capacity reached"));
         }
         let next = self
             .next

@@ -87,7 +87,7 @@ impl Drop for Active {
     }
 }
 pub async fn serve<P: Plugin>(listener: tokio::net::TcpListener, host: Rc<Host<P>>) {
-    let permits = std::sync::Arc::new(tokio::sync::Semaphore::new(32));
+    let permits = std::sync::Arc::new(tokio::sync::Semaphore::new(2 * (128 + 16)));
     let mut jobs = tokio::task::JoinSet::new();
     while let Ok((socket, _)) = listener.accept().await {
         let Ok(permit) = permits.clone().try_acquire_owned() else {

@@ -1,4 +1,5 @@
 #pragma once
+#include <cordis/core/observation.hpp>
 #include <cordis/adapters/abi/managed.hpp>
 
 namespace cordis::abi {
@@ -59,26 +60,28 @@ struct ReactiveHandle {
 };
 } // namespace detail
 class Subscription : private detail::ReactiveHandle {
+  cordis::detail::Observation<void> completion;
   friend class Context;
   using ReactiveHandle::ReactiveHandle;
 
 public:
   Subscription() = default;
   Async<void> dispose() const {
-    return cordis::detail::invoke_owned([*this]() -> Async<void> {
+    return completion.observe([*this]() -> Async<void> {
       (co_await call(CORDIS_ABI_SUBSCRIPTION_DISPOSE)).control_only();
       co_return;
     });
   }
 };
 class Dispatch : private detail::ReactiveHandle {
+  cordis::detail::Observation<std::vector<Flow>> completion;
   friend class Context;
   using ReactiveHandle::ReactiveHandle;
 
 public:
   Dispatch() = default;
   Async<std::vector<Flow>> join() const {
-    return cordis::detail::invoke_owned([*this]() -> Async<std::vector<Flow>> {
+    return completion.observe([*this]() -> Async<std::vector<Flow>> {
       co_return detail::flows(co_await call(CORDIS_ABI_DISPATCH_JOIN));
     });
   }

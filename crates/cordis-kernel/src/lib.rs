@@ -710,6 +710,41 @@ impl Kernel {
             .collect()
     }
 
+    /// Retire successful terminal leaves from scheduling state. Callers own
+    /// terminal observations; failed recovery and live ownership edges remain.
+    pub fn collect_retired(&mut self) -> Vec<Snapshot> {
+        let mut collected = Vec::new();
+        loop {
+            let parents: BTreeSet<_> = self
+                .fibers
+                .values()
+                .filter_map(|f| f.spec.parent.map(|a| a.fiber))
+                .collect();
+            let ids: Vec<_> = self
+                .fibers
+                .iter()
+                .filter_map(|(&id, f)| {
+                    (f.retired
+                        && f.state == Lifecycle::Inactive
+                        && !matches!(f.outcome, Some(Outcome::CleanupFailed(_)))
+                        && !parents.contains(&id))
+                    .then_some(id)
+                })
+                .collect();
+            if ids.is_empty() {
+                break;
+            }
+            for id in ids {
+                collected.push(self.snapshot(id).expect("terminal leaf"));
+                self.fibers.remove(&id);
+                self.dirty.remove(&id);
+            }
+        }
+        self.subscribers.retain(|_, ids| !ids.is_empty());
+        self.assert_invariants();
+        collected
+    }
+
     pub fn published(&self, slot: &Slot) -> Option<Activation> {
         self.published.get(slot).copied()
     }

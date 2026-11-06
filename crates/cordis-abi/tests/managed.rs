@@ -496,11 +496,18 @@ async fn managed_admission_limits_leave_no_untracked_cpp_callbacks() {
     invoke_json(&rig.handle, "sequence-dispose", Value::Null)
         .await
         .unwrap();
+    // A recovered sequence and its step reservation can be used again.
+    invoke_json(&rig.handle, "sequence-start", Value::Null)
+        .await
+        .unwrap();
     assert!(
-        invoke_json(&rig.handle, "sequence-start", Value::Null)
+        invoke_json(&rig.handle, "sequence-ready", Value::Null)
             .await
             .is_err()
     );
+    invoke_json(&rig.handle, "sequence-dispose", Value::Null)
+        .await
+        .unwrap();
     invoke_json(&rig.handle, "scope-create", Value::Null)
         .await
         .unwrap();
@@ -515,11 +522,23 @@ async fn managed_admission_limits_leave_no_untracked_cpp_callbacks() {
     invoke_json(&rig.handle, "task-join", Value::Null)
         .await
         .unwrap();
-    assert!(
-        invoke_json(&rig.handle, "task-start", Value::Null)
+    for _ in 0..100 {
+        let task = invoke_json(&rig.handle, "task-start", Value::Null)
             .await
-            .is_err()
-    );
+            .unwrap();
+        invoke_json(&rig.handle, "task-join", task).await.unwrap();
+    }
+    invoke_json(&rig.handle, "scope-dispose", Value::Null)
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        invoke_json(&rig.handle, "scope-create", Value::Null)
+            .await
+            .unwrap();
+        invoke_json(&rig.handle, "scope-dispose", Value::Null)
+            .await
+            .unwrap();
+    }
     bounded(rig.rt.shutdown()).await.unwrap();
     assert_eq!(files.count("destroy"), 1);
 }

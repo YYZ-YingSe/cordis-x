@@ -177,6 +177,9 @@ impl<T> Clone for WeakResource<T> {
     }
 }
 impl<T> WeakResource<T> {
+    pub fn is_released(&self) -> bool {
+        self.effect.is_released()
+    }
     /// Observe/dispose the original effect even after the business value drops.
     pub fn effect(&self) -> Option<crate::EffectHandle> {
         self.effect.upgrade()
@@ -186,7 +189,7 @@ impl<T> WeakResource<T> {
         Some(Resource {
             value: self.value.upgrade()?,
             gate: self.gate.upgrade()?,
-            context: effect.context.clone(),
+            context: effect.context()?,
             effect,
         })
     }

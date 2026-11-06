@@ -252,15 +252,17 @@ async fn undeclared_aliases_and_exhaustion_do_not_execute_factory() {
     ] {
         refused(install(&rig.handle, config).await.unwrap_err(), code);
     }
-    let id = install(&rig.handle, cordis_wire::json!({})).await.unwrap();
-    invoke_json(&rig.handle, "dispose", id).await.unwrap();
-    refused(
-        install(&rig.handle, cordis_wire::json!({}))
-            .await
-            .unwrap_err(),
-        "overloaded",
-    );
-    assert_eq!(state.calls.load(Ordering::Relaxed), 3);
+    for _ in 0..100 {
+        let id = install(&rig.handle, cordis_wire::json!({})).await.unwrap();
+        refused(
+            install(&rig.handle, cordis_wire::json!({}))
+                .await
+                .unwrap_err(),
+            "overloaded",
+        );
+        invoke_json(&rig.handle, "dispose", id).await.unwrap();
+    }
+    assert_eq!(state.calls.load(Ordering::Relaxed), 102);
     bounded(rig.rt.shutdown()).await.unwrap();
 }
 

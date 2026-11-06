@@ -1,4 +1,5 @@
 #pragma once
+#include <cordis/core/observation.hpp>
 #include "wire.hpp"
 #include <algorithm>
 #include <cordis/core/error.hpp>
@@ -16,6 +17,7 @@ using ::cordis::RpcError;
 using session::DependencyChannel;
 
 class Effect {
+  cordis::detail::Observation<void> completion;
   std::shared_ptr<DependencyChannel> channel;
   std::string effect, grant;
 
@@ -27,7 +29,7 @@ public:
   // Dropping a handle does not dispose; the Runtime still owns this
   // registration.
   Async<void> dispose() const {
-    return cordis::detail::invoke_owned([*this]() -> Async<void> {
+    return completion.observe([*this]() -> Async<void> {
       Json args = {{"effect", effect}, {"grant", grant}};
       co_await channel->request("effect_dispose", std::move(args));
     });
@@ -54,6 +56,7 @@ struct EffectStep {
   }
 };
 class EffectSequence {
+  cordis::detail::Observation<void> completion;
   std::shared_ptr<DependencyChannel> channel;
   std::string sequence, grant;
   Async<Json> request(std::string command) const {
@@ -81,7 +84,7 @@ public:
     });
   }
   Async<void> dispose() const {
-    return cordis::detail::invoke_owned(
+    return completion.observe(
         [*this]() -> Async<void> { (co_await request("sequence_dispose")); });
   }
   Async<Json> snapshot() const {
@@ -443,8 +446,9 @@ public:
     entry->cleanup = std::move(cleanup);
     {
       std::lock_guard lock(mutex);
-      if (next >= 4096)
-        throw Refusal("effects_exhausted", "effect history full");
+      if (next == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
+      if (entries.size() >= 4096) std::erase_if(entries, [](const auto &item) { std::lock_guard lock(item.second->mutex); return item.second->finished && !item.second->failure; });
+      if (entries.size() >= 4096) throw Refusal("overloaded", "live capacity reached");
       id = "e" + std::to_string(++next);
       entries.emplace(id, entry);
     }
@@ -452,7 +456,13 @@ public:
     // was cleaned. A release can arrive before the registration
     // acknowledgement.
     Json args = {{"context", context}, {"effect", id}, {"label", label}};
-    auto reply = co_await channel->request("effect_register", std::move(args));
+    Json reply;
+    try { reply = co_await channel->request("effect_register", std::move(args)); }
+    catch (const Refusal &) {
+      decltype(entries)::node_type refused;
+      { std::lock_guard lock(mutex); refused = entries.extract(id); }
+      throw;
+    }
     const auto grant = reply.at("grant").get<std::string>();
     if (reply.at("effect") != id || grant.size() != 32 ||
         !std::all_of(grant.begin(), grant.end(), [](char c) {
@@ -486,6 +496,7 @@ public:
 class SequenceRegistry {
   struct Step {
     std::optional<Inverse> inverse;
+    std::shared_ptr<std::atomic<std::size_t>> budget;
     bool started = false, finished = false;
     std::exception_ptr failure;
     std::mutex mutex;
@@ -512,8 +523,7 @@ class SequenceRegistry {
       co_await ctx.finish();
       lock.lock();
       failure = error;
-      if (!error)
-        inverse.reset();
+      if (!error) { inverse.reset(); --*budget; }
       finished = true;
       lock.unlock();
       changed.trigger();
@@ -535,7 +545,7 @@ class SequenceRegistry {
   std::mutex mutex;
   std::map<std::string, std::shared_ptr<Entry>> entries;
   std::uint64_t next_id = 0;
-  std::size_t total_steps = 0;
+  std::shared_ptr<std::atomic<std::size_t>> total_steps = std::make_shared<std::atomic<std::size_t>>(0);
   std::shared_ptr<Entry> get(std::string id) {
     std::lock_guard lock(mutex);
     auto found = entries.find(id);
@@ -555,14 +565,20 @@ public:
     std::string id;
     {
       std::lock_guard lock(mutex);
-      if (next_id >= 256)
-        throw Refusal("sequences_exhausted", "sequence history full");
+      if (next_id == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
+      if (entries.size() >= 256) std::erase_if(entries, [](const auto &item) { std::lock_guard lock(item.second->mutex); return item.second->released; });
+      if (entries.size() >= 256) throw Refusal("overloaded", "live capacity reached");
       id = "s" + std::to_string(++next_id);
       entries.emplace(id, entry);
     }
     Json args = {{"context", context}, {"sequence", id}, {"label", label}};
-    const auto reply =
-        co_await channel->request("sequence_register", std::move(args));
+    Json reply;
+    try { reply = co_await channel->request("sequence_register", std::move(args)); }
+    catch (const Refusal &) {
+      decltype(entries)::node_type refused;
+      { std::lock_guard lock(mutex); refused = entries.extract(id); }
+      throw;
+    }
     const auto grant = reply.at("grant").get<std::string>();
     if (reply.at("sequence") != id || grant.size() != 32 ||
         !std::all_of(grant.begin(), grant.end(), [](char c) {
@@ -579,12 +595,10 @@ public:
         throw Refusal("closed", "sequence cannot advance");
       if (number != std::to_string(entry->next))
         throw Refusal("invalid_step", "step order mismatch");
-      {
-        std::lock_guard registry_lock(mutex);
-        if (total_steps >= 4096)
-          throw Refusal("steps_exhausted", "step history full");
-        ++total_steps;
-      }
+      auto occupied = total_steps->load();
+      do {
+        if (occupied >= 4096) throw Refusal("overloaded", "unrecovered step capacity reached");
+      } while (!total_steps->compare_exchange_weak(occupied, occupied + 1));
       ++entry->next;
       entry->running = true;
     }
@@ -611,9 +625,11 @@ public:
     }
     auto step = std::make_shared<Step>();
     step->inverse = std::move(result.inverse);
+    step->budget = total_steps;
     {
       std::lock_guard lock(entry->mutex);
-      entry->steps.emplace(number, step);
+      if (step->inverse) entry->steps.emplace(number, step);
+      else --*total_steps;
       entry->ended = result.done;
     }
     if ((step->inverse && step->inverse->label.size() > 1024) ||
@@ -651,8 +667,7 @@ public:
     entry->producer = {};
   }
   bool released() {
-    // Never take an entry lock under the registry lock: advance reserves its
-    // global step budget while holding an entry's admission lock.
+    // Snapshot shared entries before inspecting their admission state.
     std::vector<std::shared_ptr<Entry>> snapshot;
     {
       std::lock_guard lock(mutex);

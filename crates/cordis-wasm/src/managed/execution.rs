@@ -23,7 +23,8 @@ pub(super) fn start(instance: &Arc<Instance>, guest: Guest) {
     *instance.worker.lock().unwrap() = Some(send);
     let weak = Arc::downgrade(instance);
     let timeout = instance.module.capabilities.call_timeout;
-    let fuel = instance.module.limits.fuel_per_call;
+    let fuel = instance.module.limits.fuel_on_admission;
+    let initialization_fuel = instance.module.limits.initialization_fuel;
     let validation = instance.module.capabilities.bindings.validation;
     tokio::spawn(async move {
         let (expired, mut expiration) = mpsc::unbounded_channel::<Error>();
@@ -44,7 +45,8 @@ pub(super) fn start(instance: &Arc<Instance>, guest: Guest) {
                                 let call = *call;
                                 // The finite Store budget bounds CPU consumption.
                                 // Refill only at admission, never in a guest loop.
-                                accessor.with(|mut access| access.as_context_mut().set_fuel(fuel)).map_err(unknown)?;
+                                let allowance = if matches!(call.command.as_str(), "create" | "activate") { initialization_fuel } else { fuel };
+                                accessor.with(|mut access| access.as_context_mut().set_fuel(allowance)).map_err(unknown)?;
                                 let guest = bindings.cordis_plugin_managed_service();
                                 let expired = expired.clone();
                                 let cancellation = call.context.clone();

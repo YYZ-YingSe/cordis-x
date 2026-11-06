@@ -328,18 +328,20 @@ async fn failed_inverse_caches_error_and_never_destroys_or_unloads_live_callback
 }
 
 #[tokio::test]
-async fn bounded_effect_tombstones_reject_registration_without_stranding_cpp_callback() {
+async fn released_effects_return_capacity_without_stranding_cpp_callback() {
     let files = Files::new("cordis_abi_context");
     let mut capabilities = caps();
     capabilities.max_effects = 1;
     let rig = rig(&files, cordis_wire::json!({}), capabilities).await;
-    let effect = invoke_json(&rig.handle, "subscribe", json!("first"))
-        .await
-        .unwrap();
-    invoke_json(&rig.handle, "dispose", effect).await.unwrap();
-    assert!(
-        matches!(invoke_json(&rig.handle, "subscribe", json!("extra")).await, Err(AbiError::Refused { code, .. }) if code == "overloaded")
-    );
+    for n in 0..100 {
+        let effect = invoke_json(&rig.handle, "subscribe", json!(format!("turn-{n}")))
+            .await
+            .unwrap();
+        assert!(
+            matches!(invoke_json(&rig.handle, "subscribe", json!("live-full")).await, Err(AbiError::Refused { code, .. }) if code == "overloaded")
+        );
+        invoke_json(&rig.handle, "dispose", effect).await.unwrap();
+    }
     bounded(rig.rt.shutdown()).await.unwrap();
     assert_eq!(files.count("destroy"), 1);
 }

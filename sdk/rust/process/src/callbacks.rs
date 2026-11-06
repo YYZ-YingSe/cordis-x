@@ -121,20 +121,28 @@ pub struct Registry {
     next: Cell<u64>,
     pub entries: RefCell<BTreeMap<String, Rc<Entry>>>,
     sequences: RefCell<BTreeMap<String, Rc<Sequence>>>,
-    seen: RefCell<BTreeSet<String>>,
+    event_calls: cordis_wire::operations::Incoming,
+    middleware_calls: cordis_wire::operations::Incoming,
 }
 impl Registry {
     pub fn id(&self, prefix: char) -> Result<String> {
-        if self.next.get() >= 65536 {
-            return Err(refused("exhausted", "callback history full"));
-        }
-        self.next.set(self.next.get() + 1);
+        self.next.set(
+            self.next
+                .get()
+                .checked_add(1)
+                .ok_or_else(|| refused("exhausted", "callback identity exhausted"))?,
+        );
         Ok(format!("{prefix}{}", self.next.get()))
     }
     pub fn insert(&self, prefix: char, callback: Callback) -> Result<String> {
         self.insert_payload(prefix, control_callback(callback))
     }
     pub fn insert_payload(&self, prefix: char, callback: WireCallback) -> Result<String> {
+        if self.entries.borrow().len() >= 4096 {
+            self.entries
+                .borrow_mut()
+                .retain(|_, e| e.callback.borrow().is_some() || e.running.get() != 0);
+        }
         if self.entries.borrow().len() >= 4096 {
             return Err(refused("overloaded", "callback capacity reached"));
         }
@@ -164,14 +172,27 @@ impl Registry {
         drop(removed);
         Ok(())
     }
-    pub fn admit(&self, call: &str) -> Result<()> {
-        let mut seen = self.seen.borrow_mut();
-        if seen.len() >= 65536 || !seen.insert(call.into()) {
-            return Err(refused("duplicate_callback", call));
-        }
-        Ok(())
+    pub fn admit(&self, call: &str) -> Result<cordis_wire::operations::Admission> {
+        let (prefix, value) = call
+            .split_at_checked(1)
+            .ok_or_else(|| refused("invalid_argument", "callback identity"))?;
+        let id = cordis_wire::operations::Id::parse(value)
+            .ok_or_else(|| refused("invalid_argument", "callback identity"))?;
+        let inbox = match prefix {
+            "v" => &self.event_calls,
+            "w" => &self.middleware_calls,
+            _ => return Err(refused("invalid_argument", "callback identity")),
+        };
+        inbox
+            .admit(id)
+            .ok_or_else(|| refused("duplicate_operation", call))
     }
     pub fn sequence(&self, producer: Producer) -> Result<String> {
+        if self.sequences.borrow().len() >= 256 {
+            self.sequences
+                .borrow_mut()
+                .retain(|_, e| e.producer.borrow().is_some() || e.running.get());
+        }
         if self.sequences.borrow().len() >= 256 {
             return Err(refused("overloaded", "sequence capacity reached"));
         }

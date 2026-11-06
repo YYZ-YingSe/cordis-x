@@ -50,7 +50,7 @@ test('listeners execute before registration acknowledgement, use fresh contexts,
     await child.invoke('logger', 'write', args);
     return Break(args);
   });
-  const running = registry.invoke('l1', 'v1', body(7), ctx());
+  const running = registry.invoke('l1', 'v0:2', body(7), ctx());
   assert.throws(() => registry.release('l1'), { code: 'listeners_running' });
   reply(1, null);
   assert.deepEqual(await running, payload({kind:'break'},body(7)));
@@ -58,7 +58,7 @@ test('listeners execute before registration acknowledgement, use fresh contexts,
   const subscription = await registration;
   await original.finish();
   await assert.rejects(saved!.invoke('logger', 'write', body(null)), { code: 'closed' });
-  await assert.rejects(registry.invoke('l1', 'v1', body(7), ctx()), { code: 'closed' });
+  await assert.rejects(registry.invoke('l1', 'v0:2', body(7), ctx()), { code: 'duplicate_operation' });
   const disposing = subscription.dispose();
   assert.deepEqual(sent[2].payload.control, { listener: 'l1', grant: 'f'.repeat(32) });
   registry.release('l1');
@@ -66,7 +66,7 @@ test('listeners execute before registration acknowledgement, use fresh contexts,
   reply(2, {});
   await disposing;
   assert.equal(registry.released, true);
-  await assert.rejects(registry.invoke('l1', 'v2', body(7), ctx()), { code: 'closed' });
+  await assert.rejects(registry.invoke('l1', 'v0:3', body(7), ctx()), { code: 'closed' });
 });
 test('business errors stay inside callback outcomes; dispatch handles survive their creating context', async () => {
   const { registry, ctx, reply } = setup();
@@ -76,7 +76,7 @@ test('business errors stay inside callback outcomes; dispatch handles survive th
   });
   reply(0, { listener: 'l1', grant: 'f'.repeat(32) });
   await registration;
-  await assert.rejects(registry.invoke('l1','v0',body(null),ctx()),{code:'closed',message:'business failure'});
+  await assert.rejects(registry.invoke('l1','v0:1',body(null),ctx()),{code:'closed',message:'business failure'});
   const emitting = original.emit('tick', body(null));
   reply(1, { dispatch: 'd1', grant: 'e'.repeat(32) });
   const dispatch = await emitting;
@@ -111,7 +111,7 @@ test('unknown events, expired contexts and cleanup registration reject locally; 
   const registration = ctx().on('tick', () => {});
   reply(0, { listener: 'l1', grant: 'f'.repeat(32) });
   await registration;
-  assert.deepEqual(await registry.invoke('l1', 'v1', body(null), ctx()), payload({kind:'continue'}));
+  assert.deepEqual(await registry.invoke('l1', 'v0:2', body(null), ctx()), payload({kind:'continue'}));
 });
 test('event joins and emissions retain independent capacity for callback dependencies', async () => {
   const { channel, reply } = setup();

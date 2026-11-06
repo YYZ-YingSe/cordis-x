@@ -11,7 +11,7 @@ mod target;
 pub mod watch;
 
 pub use artifact::ArtifactRef;
-pub use config::{Configuration, Entry, Intercept, Isolation, Realm};
+pub use config::{Configuration, ConfigurationLimits, Entry, Intercept, Isolation, Realm};
 pub use loader::{
     ApplyReport, EntrySnapshot, Loader, LoaderChanges, LoaderSnapshot, Phase, Plan,
     PreparationStats, ResolvedEntry,

@@ -29,7 +29,7 @@ impl Default for WatchOptions {
     fn default() -> Self {
         Self {
             debounce: Duration::from_millis(75),
-            max_bytes: cordis_wire::MAX_MESSAGE,
+            max_bytes: crate::ConfigurationLimits::default().bytes,
         }
     }
 }
@@ -114,11 +114,10 @@ impl<T: ConfigurationTarget> ConfigWatcher<T> {
         path: impl AsRef<Path>,
         options: WatchOptions,
     ) -> Result<Self, WatchError<T::Error>> {
-        if options.max_bytes == 0 || options.max_bytes > cordis_wire::MAX_MESSAGE {
-            return Err(WatchError::Options(format!(
-                "max_bytes must be in 1..={}",
-                cordis_wire::MAX_MESSAGE
-            )));
+        if options.max_bytes == 0 || options.max_bytes == usize::MAX {
+            return Err(WatchError::Options(
+                "max_bytes must be positive and leave room for an overflow sentinel".into(),
+            ));
         }
         if Instant::now().checked_add(options.debounce).is_none() {
             return Err(WatchError::Options("debounce exceeds timer range".into()));
@@ -304,7 +303,16 @@ fn read(
     }
     let config = String::from_utf8(bytes)
         .map_err(|e| InputError::Read(e.to_string()))
-        .and_then(|text| Configuration::from_json(&text).map_err(InputError::Parse));
+        .and_then(|text| {
+            Configuration::from_json_with_limits(
+                &text,
+                &crate::ConfigurationLimits {
+                    bytes: limit,
+                    ..Default::default()
+                },
+            )
+            .map_err(InputError::Parse)
+        });
     Ok(ReadResult::Parsed(digest, config))
 }
 

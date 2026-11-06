@@ -1,3 +1,4 @@
+import { OperationOutbox } from './operations.ts';
 import type { Message } from '../../core/message.ts';
 import { encodeFrame } from './binary.ts';
 import { payload, one, controlOnly, type Payload, type Request, type Response } from './messages.ts';
@@ -11,20 +12,20 @@ type Pending = { lane: number; command: string; resolve(value: Payload): void; r
 export class DependencyChannel {
   validation: import('../../core/validation.ts').Validation = 'checked';
   private pending = new Map<string, Pending>();
-  private next = 0;
+  private operations = new OperationOutbox();
   private session = '';
   private cleanupCalls = false;
   private metadataEnabled = false;
   private resourcesEnabled = false;
-  private nextResource = 0;
+  private nextResource = 0n;
   enableResources(enabled: boolean) {
     this.resourcesEnabled = enabled;
   }
   resourceId(): string {
     if (!this.resourcesEnabled)
       throw new Refusal('unsupported_resources', 'dependency resources unavailable');
-    if (this.nextResource >= 4096)
-      throw new Refusal('resources_exhausted', 'resource history full');
+    if (this.nextResource === 0xffffffffffffffffn)
+      throw new Refusal('resources_exhausted', 'resource identity space exhausted');
     return `r${++this.nextResource}`;
   }
   enableMetadata(enabled: boolean) {
@@ -94,9 +95,8 @@ export class DependencyChannel {
                                 : 0;
     if ([...this.pending.values()].filter((entry) => entry.lane === lane).length >= 16)
       return Promise.reject(new Refusal('overloaded', 'dependency call capacity reached'));
-    if (this.next >= 65536)
-      return Promise.reject(new Refusal('session_exhausted', 'dependency operation history full'));
-    const operation = String(++this.next);
+    let operation: string;
+    try { operation = this.operations.allocate(lane); } catch (error) { return Promise.reject(error); }
     let bytes: Uint8Array;
     try { bytes = encodeFrame({
         session: this.session,
@@ -104,11 +104,11 @@ export class DependencyChannel {
         operation,
         command,
         payload,
-      }); } catch (error) { return Promise.reject(new Refusal('invalid_argument', String(error))); }
+      }); } catch (error) { this.operations.complete(operation); return Promise.reject(new Refusal('invalid_argument', String(error))); }
     return new Promise((resolve, reject) => {
       this.pending.set(operation, { lane, command, resolve, reject });
       this.output!(bytes).catch((error) => {
-        this.pending.delete(operation);
+        this.close();
         reject(error);
       });
     });
@@ -122,6 +122,7 @@ export class DependencyChannel {
     if (!entry) throw new Error('unsolicited dependency response');
     const outcome = response.outcome;
     this.pending.delete(response.operation);
+    this.operations.complete(response.operation);
     if (outcome.kind === 'success') entry.resolve(outcome.value);
     else {
       const error = outcome.error;

@@ -3,10 +3,7 @@ use cordis_runtime::{Context, Event, WeakEffectHandle};
 use std::{
     collections::BTreeMap,
     ops::ControlFlow,
-    sync::{
-        Arc, Mutex, OnceLock,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, Mutex, OnceLock},
 };
 use tokio::sync::watch;
 
@@ -15,7 +12,7 @@ pub(crate) struct Events {
     bindings: BTreeMap<String, Event<Body, Body>>,
     listeners: Mutex<BTreeMap<String, Arc<Listener>>>,
     dispatches: Mutex<BTreeMap<String, Dispatch>>,
-    next_call: Arc<AtomicU64>,
+    next_call: Arc<cordis_wire::operations::Outgoing>,
 }
 struct Listener {
     grant: String,
@@ -27,6 +24,7 @@ struct Listener {
 struct Dispatch {
     grant: String,
     result: watch::Receiver<Option<Payload>>,
+    observed: bool,
 }
 impl Events {
     pub fn new(bindings: &[EventBinding]) -> Result<Self> {
@@ -45,7 +43,7 @@ impl Events {
             bindings: entries,
             listeners: Mutex::default(),
             dispatches: Mutex::default(),
-            next_call: Arc::new(AtomicU64::new(0)),
+            next_call: Arc::default(),
         })
     }
     pub fn declarations(&self) -> Value {
@@ -63,6 +61,9 @@ impl Events {
         let mut entries = self.listeners.lock().unwrap();
         if entries.contains_key(&id) {
             return Err(Error::InvalidInput("duplicate listener".into()));
+        }
+        if entries.len() >= 4096 {
+            entries.retain(|_, e| !e.handle.get().is_some_and(WeakEffectHandle::is_released));
         }
         if entries.len() >= 4096 {
             return Err(Error::Overloaded);
@@ -116,10 +117,8 @@ impl Events {
                     next.clone(),
                 );
                 async move {
-                    let call = next.fetch_add(1, Ordering::Relaxed);
-                    if call >= 4096 {
-                        return Err(Error::Overloaded.into());
-                    }
+                    let call = next.acquire().ok_or(Error::Overloaded)?;
+                    let call_id = format!("v{}", call.id);
                     let reply = match session.upgrade() {
                         Some(session) => {
                             session
@@ -127,7 +126,7 @@ impl Events {
                                     &ctx,
                                     "event_call",
                                     Payload::with_message(
-                                        json!({"listener":id,"call":format!("v{call}")}),
+                                        json!({"listener":id,"call":call_id}),
                                         args.into_bytes().map_err(Error::InvalidInput)?,
                                     ),
                                 )
@@ -174,6 +173,9 @@ impl Events {
         if entries.contains_key(&id) {
             return Err(Error::InvalidInput("duplicate dispatch".into()));
         }
+        if entries.len() >= 4096 {
+            entries.retain(|_, d| !d.observed);
+        }
         if entries.len() >= 4096
             || entries
                 .values()
@@ -196,6 +198,7 @@ impl Events {
             Dispatch {
                 grant: grant.clone(),
                 result,
+                observed: false,
             },
         );
         tokio::spawn(async move {
@@ -299,6 +302,9 @@ impl Events {
             }
             "event_join" => loop {
                 if let Some(value) = result.borrow().clone() {
+                    if let Some(dispatch) = self.dispatches.lock().unwrap().get_mut(&id) {
+                        dispatch.observed = true;
+                    }
                     return Ok(value);
                 }
                 result.changed().await.map_err(|_| Error::Closed)?;

@@ -64,12 +64,13 @@ struct Service {
 // suspended operation retains its lane permit without occupying a worker.
 class Lane {
   native::Runtime &runtime;
-  const std::size_t limit;
+  std::atomic<std::size_t> limit;
   std::atomic<std::size_t> pending{0};
 
 public:
   explicit Lane(native::Runtime &runtime, std::size_t limit = 16)
       : runtime(runtime), limit(limit) {}
+  void capacity(std::size_t value) { limit = value; }
   bool post(std::function<Async<void>()> task) {
     if (pending.fetch_add(1) >= limit) {
       --pending;
@@ -104,7 +105,7 @@ class Host {
     Async<Message> invoke(std::string method, Message args, Context ctx) {
       {
         std::lock_guard lock(mutex);
-        if (closing)
+        if (closing || !resource)
           throw Refusal("closed", "resource is closing");
         ++calls;
       }
@@ -142,6 +143,7 @@ class Host {
         co_await drained_calls;
       std::exception_ptr error;
       try {
+        if (!resource) throw std::runtime_error("resource acquisition unresolved");
         co_await native::with_cleanup([&] { return resource->close(ctx); },
                                       [ctx] { return ctx.finish(); });
         resource.reset();
@@ -169,7 +171,8 @@ class Host {
   Identity activation;
   bool greeted = false, active = false, activation_attempted = false;
   std::size_t inflight = 0;
-  std::set<std::string> seen;
+  std::size_t max_inflight = 16;
+  OperationInbox seen;
   std::map<std::string, std::shared_ptr<ResourceRecord>> resources;
   std::uint64_t next_resource = 0;
   native::Runtime runtime;
@@ -249,26 +252,27 @@ class Host {
         throw Refusal("invalid_argument", e.what());
       }
       std::string id;
-      {
-        std::lock_guard lock(state_mutex);
-        if (next_resource >= 4096)
-          throw Refusal("resources_exhausted",
-                        "resource history full; restart session");
-        id = "r" + std::to_string(++next_resource);
-      }
-      auto resource = (co_await checked_business(
-          cordis::contract::operation(descriptor.at("resources"), kind)
-              .at("errors"),
-          [&] { return service.acquire(kind, input.one(), ctx); }));
-      if (!resource)
-        throw std::runtime_error("acquire returned no resource");
       auto entry = std::make_shared<ResourceRecord>();
       entry->owner = owner;
       entry->kind = kind;
-      entry->resource = std::move(resource);
       {
         std::lock_guard lock(state_mutex);
-        resources.emplace(id, std::move(entry));
+        if (resources.size() >= 4096)
+          std::erase_if(resources, [](const auto &item) { return item.second->released(); });
+        if (resources.size() >= 4096) throw Refusal("overloaded", "live resource capacity reached");
+        if (next_resource == UINT64_MAX) throw Refusal("exhausted", "resource identity space exhausted");
+        id = "r" + std::to_string(++next_resource);
+        resources.emplace(id, entry);
+      }
+      try {
+        entry->resource = (co_await checked_business(
+            cordis::contract::operation(descriptor.at("resources"), kind).at("errors"),
+            [&] { return service.acquire(kind, input.one(), ctx); }));
+        if (!entry->resource) throw std::runtime_error("acquire returned no resource");
+      } catch (const RpcError &) {
+        std::lock_guard lock(state_mutex);
+        resources.erase(id);
+        throw;
       }
       co_return Json{{"resource", id}, {"owner", owner}};
     }
@@ -321,7 +325,7 @@ class Host {
     return text.size() < 20 || text <= "18446744073709551615";
   }
   static void shape(const Request &request) {
-    if (!decimal(request.operation) ||
+    if (!OperationId::parse(request.operation) ||
         !decimal(request.activation.incarnation) ||
         !decimal(request.activation.fiber) ||
         !decimal(request.activation.epoch))
@@ -346,15 +350,15 @@ class Host {
   void output(const Response &response) {
     stdio.write(encode(Frame(response)));
   }
-  void remember(const Request &request) {
-    if (seen.size() >= 65536)
-      throw Refusal("session_exhausted", "operation history full");
-    if (!seen.insert(request.operation).second)
-      throw Refusal("duplicate_operation", "operation already admitted");
-  }
   // dispatch owns the request until execution and its Context drain finish.
   Async<Payload> execute(const Request &request) {
     shape(request);
+    {
+      std::lock_guard lock(state_mutex);
+      if (request.command != "hello" && (!greeted || request.session != session || request.activation != activation))
+        throw Refusal("stale_session", "session or activation mismatch");
+    }
+    auto operation_admission = seen.admit(request.operation);
     const auto &command = request.command;
     const std::size_t bodies =
         command == "call" || command == "resource_acquire" ||
@@ -392,6 +396,9 @@ class Host {
       std::lock_guard lock(state_mutex);
       if (greeted)
         throw Refusal("protocol", "hello must be first encoded");
+      max_inflight = payload.at("max_inflight").get<std::size_t>();
+      if (max_inflight < 1 || max_inflight > 128) throw Refusal("invalid_argument", "max_inflight must be in 1..=128");
+      ordinary_lane.capacity(max_inflight);
       dependencies->validation = cordis::validation(payload.at("validation").get<std::string>());
       if (payload.at("contract") != service.contract())
         throw Refusal("contract_mismatch", "exact contract revision required");
@@ -410,7 +417,6 @@ class Host {
                                 .value("composition", false);
       session = request.session;
       activation = request.activation;
-      remember(request);
       greeted = true;
       effects_enabled =
           payload.value("capabilities", Json::object()).value("effects", false);
@@ -489,7 +495,7 @@ class Host {
                        {"streams", false},
                        {"resources", true},
                        {"dependency_resources", true},
-                       {"max_inflight", 16},
+                       {"max_inflight", max_inflight},
                        {"max_message", max_message}}}};
     }
     {
@@ -497,12 +503,11 @@ class Host {
       if (!greeted || request.session != session ||
           request.activation != activation)
         throw Refusal("stale_session", "session or activation mismatch");
-      remember(request);
       if (work(command)) {
         if (!active)
           throw Refusal("closed", "activation is not accepting calls");
         if (command != "resource_release") {
-          if (inflight >= 16)
+          if (inflight >= max_inflight)
             throw Refusal("overloaded", "call capacity reached");
           ++inflight;
         }

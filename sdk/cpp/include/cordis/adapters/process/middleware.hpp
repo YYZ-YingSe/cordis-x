@@ -1,4 +1,5 @@
 #pragma once
+#include <cordis/core/observation.hpp>
 #include "context.hpp"
 
 namespace cordis::process {
@@ -72,6 +73,7 @@ using MiddlewareCallback =
     std::function<Async<Message>(Message, Context, Next)>;
 using TerminalCallback = std::function<Async<Message>(Message, Context)>;
 class MiddlewareRegistration {
+  cordis::detail::Observation<void> completion;
   std::shared_ptr<DependencyChannel> channel;
   std::string handler, grant;
 
@@ -81,7 +83,7 @@ public:
       : channel(std::move(channel)), handler(std::move(handler)),
         grant(std::move(grant)) {}
   Async<void> dispose() const {
-    return cordis::detail::invoke_owned([*this]() -> Async<void> {
+    return completion.observe([*this]() -> Async<void> {
       Json args = {{"handler", handler}, {"grant", grant}};
       co_await channel->request("middleware_dispose", std::move(args));
     });
@@ -99,22 +101,16 @@ class MiddlewareRegistry {
   std::mutex mutex;
   std::map<std::string, std::shared_ptr<Entry>> handlers;
   std::map<std::string, Terminal> runs;
-  std::set<std::string> seen;
+  OperationInbox seen;
   std::uint64_t next_handler = 0, next_run = 0;
   Json declarations;
   void check(std::string alias) const {
     if (!declarations.contains(alias))
       throw Refusal("undeclared_middleware", alias);
   }
-  void admit(std::string call) {
-    if (call.size() < 2 || call.size() > 21 || call[0] != 'w' ||
-        !std::all_of(call.begin() + 1, call.end(),
-                     [](char c) { return c >= '0' && c <= '9'; }) ||
-        seen.count(call))
-      throw Refusal("closed", "middleware callback unavailable");
-    if (seen.size() >= 4096)
-      throw Refusal("session_exhausted", "middleware callback history full");
-    seen.insert(call);
+  OperationInbox::Admission admit(const std::string &call) {
+    if (call.empty() || call[0] != 'w') throw Refusal("closed", "middleware callback unavailable");
+    return seen.admit(call.substr(1));
   }
   template <class F> static Async<Payload> outcome(F callback) {
     co_return Payload(co_await callback());
@@ -130,16 +126,22 @@ public:
     std::string id;
     {
       std::lock_guard lock(mutex);
-      if (next_handler >= 4096)
-        throw Refusal("middleware_exhausted", "handler history full");
+      if (next_handler == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
+      if (handlers.size() >= 4096) std::erase_if(handlers, [](const auto &item) { return !item.second->callback && !item.second->running; });
+      if (handlers.size() >= 4096) throw Refusal("overloaded", "live capacity reached");
       id = "m" + std::to_string(++next_handler);
       handlers.emplace(id,
                        std::make_shared<Entry>(Entry{std::move(callback), 0}));
     }
     Json args = {
         {"context", context}, {"middleware", middleware}, {"handler", id}};
-    auto reply =
-        co_await channel->request("middleware_register", std::move(args));
+    Json reply;
+    try { reply = co_await channel->request("middleware_register", std::move(args)); }
+    catch (const Refusal &) {
+      decltype(handlers)::node_type refused;
+      { std::lock_guard lock(mutex); refused = handlers.extract(id); }
+      throw;
+    }
     const auto grant = reply.at("grant").get<std::string>();
     if (reply.at("handler") != id || grant.size() != 32 ||
         !std::all_of(grant.begin(), grant.end(), [](char c) {
@@ -155,8 +157,8 @@ public:
     std::string id;
     {
       std::lock_guard lock(mutex);
-      if (next_run >= 4096)
-        throw Refusal("middleware_exhausted", "run history full");
+      if (next_run == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
+      if (runs.size() >= 4096) throw Refusal("overloaded", "live capacity reached");
       id = "q" + std::to_string(++next_run);
       runs.emplace(id, Terminal{std::move(callback), false});
     }
@@ -192,6 +194,7 @@ public:
   }
   Async<Payload> invoke(std::string id, std::string call, Message args,
                         Context ctx, Next next) {
+    auto admission = admit(call);
     std::shared_ptr<Entry> entry;
     MiddlewareCallback callback;
     {
@@ -199,7 +202,6 @@ public:
       auto found = handlers.find(id);
       if (found == handlers.end() || !found->second->callback)
         throw Refusal("closed", "middleware handler unavailable");
-      admit(call);
       entry = found->second;
       ++entry->running;
       callback = entry->callback;
@@ -226,13 +228,13 @@ public:
   }
   Async<Payload> terminal(std::string id, std::string call, Message args,
                           Context ctx) {
+    auto admission = admit(call);
     TerminalCallback callback;
     {
       std::lock_guard lock(mutex);
       auto found = runs.find(id);
       if (found == runs.end() || found->second.used)
         throw Refusal("closed", "terminal unavailable");
-      admit(call);
       found->second.used = true;
       callback = found->second.callback;
     }

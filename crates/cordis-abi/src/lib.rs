@@ -346,6 +346,7 @@ struct Instance {
 impl Instance {
     fn new(module: Arc<Module>, capabilities: Arc<Capabilities>) -> Result<Arc<Self>> {
         let host_id = context::Router::allocate_id()?;
+        let max_inflight = capabilities.max_inflight;
         Ok(Arc::new_cyclic(|weak| Self {
             descriptor: module
                 .descriptor
@@ -360,7 +361,7 @@ impl Instance {
                 fault: None,
                 resources: 0,
             }),
-            capacity: Arc::new(Semaphore::new(16)),
+            capacity: Arc::new(Semaphore::new(max_inflight)),
         }))
     }
     fn id(&self) -> Result<u64> {
@@ -872,6 +873,9 @@ pub(crate) struct WeakAbiResource {
     released: Arc<Mutex<Option<Result<()>>>>,
 }
 impl WeakAbiResource {
+    pub(crate) fn is_released(&self) -> bool {
+        self.resource.is_released()
+    }
     pub async fn invoke_envelope(
         &self,
         method: &str,

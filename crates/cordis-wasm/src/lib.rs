@@ -751,6 +751,9 @@ impl WasmResource {
     }
 }
 impl WeakWasmResource {
+    pub(crate) fn is_released(&self) -> bool {
+        self.resource.is_released()
+    }
     async fn invoke_envelope(
         &self,
         method: &str,

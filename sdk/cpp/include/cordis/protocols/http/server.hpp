@@ -169,7 +169,7 @@ public:
         } catch (const std::system_error &) {
           co_return;
         }
-        if (connections.size() >= 64)
+        if (connections.size() >= 2 * (128 + 16))
           continue;
         const auto id = ++next_connection;
         connections.emplace(id, socket);

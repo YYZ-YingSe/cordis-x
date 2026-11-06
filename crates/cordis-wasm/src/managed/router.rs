@@ -23,8 +23,8 @@ enum Handle {
     Reserved,
     Effect(WeakEffectHandle),
     Scope(WeakScopeHandle),
-    Task(TaskHandle),
-    Dispatch(tokio::sync::watch::Receiver<Option<Result<Payload>>>),
+    Task(TaskHandle, bool),
+    Dispatch(tokio::sync::watch::Receiver<Option<Result<Payload>>>, bool),
     Sequence(WeakEffectSequence),
     Plugin(WeakPluginHandle),
     Resource(cordis_host::WeakResource),
@@ -51,8 +51,8 @@ fn callback_id(value: &Value) -> Result<u64> {
         .as_u64()
         .ok_or_else(|| Error::InvalidInput("missing callback".into()))
 }
-// A failed registration must not consume lifetime handle capacity. Successful
-// grants remain as tombstones so disposal can reuse the native cached result.
+// Registration owns a live-capacity reservation. Confirmed terminal entries
+// form an expendable bounded cache; unresolved responsibility is never evicted.
 struct Reservation<'a> {
     router: &'a Router,
     key: String,
@@ -189,6 +189,18 @@ impl Router {
     fn reserve(&self) -> Result<Reservation<'_>> {
         let instance = self.instance.upgrade().ok_or(Error::Closed)?;
         let mut handles = self.handles.lock().unwrap();
+        if handles.len() >= instance.module.capabilities.max_handles {
+            handles.retain(|_, h| !match h {
+                Handle::Effect(h) => h.is_released(),
+                Handle::Scope(h) => h.is_retired(),
+                Handle::Sequence(h) => h.is_released(),
+                Handle::Plugin(h) => h.is_retired(),
+                Handle::Resource(h) => h.is_released(),
+                Handle::Task(h, observed) => *observed && matches!(h.outcome(), Some(Ok(()))),
+                Handle::Dispatch(_, observed) => *observed,
+                _ => false,
+            });
+        }
         if handles.len() >= instance.module.capabilities.max_handles {
             return Err(Error::Overloaded);
         }
@@ -389,7 +401,7 @@ impl Router {
                                 .and_then(flows_payload),
                         ));
                     });
-                    Ok(json!(grant.commit(Handle::Dispatch(receive))).into())
+                    Ok(json!(grant.commit(Handle::Dispatch(receive, false))).into())
                 } else {
                     flows_payload(dispatch.join().await?)
                 }
@@ -397,7 +409,7 @@ impl Router {
             "event-join" | "event-status" => {
                 payload.clone().control_only().map_err(invalid_payload)?;
                 let mut result = match self.handles.lock().unwrap().get(text(args, "grant")?) {
-                    Some(Handle::Dispatch(d)) => d.clone(),
+                    Some(Handle::Dispatch(d, _)) => d.clone(),
                     _ => return Err(Error::Closed),
                 };
                 if command == "event-status" {
@@ -406,7 +418,15 @@ impl Router {
                             .into(),
                     )
                 } else {
-                    wait_result(&mut result).await
+                    let value = wait_result(&mut result).await;
+                    if result.borrow().is_some() {
+                        if let Some(Handle::Dispatch(_, observed)) =
+                            self.handles.lock().unwrap().get_mut(text(args, "grant")?)
+                        {
+                            *observed = true;
+                        }
+                    }
+                    value
                 }
             }
             "next" => {
@@ -594,11 +614,11 @@ impl Router {
                     instance.call(&task, "forget", json!(id)).await?;
                     Ok(())
                 })?;
-                Ok(json!(grant.commit(Handle::Task(task))))
+                Ok(json!(grant.commit(Handle::Task(task, false))))
             }
             "join" | "task-status" => {
                 let task = match self.handles.lock().unwrap().get(text(&args, "grant")?) {
-                    Some(Handle::Task(t)) => t.clone(),
+                    Some(Handle::Task(t, _)) => t.clone(),
                     _ => return Err(Error::Closed),
                 };
                 if command == "task-status" {
@@ -609,6 +629,11 @@ impl Router {
                     });
                 }
                 task.join().await?;
+                if let Some(Handle::Task(_, observed)) =
+                    self.handles.lock().unwrap().get_mut(text(&args, "grant")?)
+                {
+                    *observed = true;
+                }
                 Ok(Value::Null)
             }
             "effect" => {

@@ -1,4 +1,5 @@
 #pragma once
+#include <cordis/core/observation.hpp>
 #include <cordis/adapters/abi/context.hpp>
 #include <optional>
 
@@ -128,6 +129,7 @@ struct Producer {
 };
 } // namespace detail
 class Sequence : private detail::ManagedHandle {
+  cordis::detail::Observation<void> completion;
   friend class Context;
   using ManagedHandle::ManagedHandle;
 
@@ -139,7 +141,7 @@ public:
     });
   }
   Async<void> dispose() const {
-    return cordis::detail::invoke_owned([*this]() -> Async<void> {
+    return completion.observe([*this]() -> Async<void> {
       (co_await call(CORDIS_ABI_SEQUENCE_DISPOSE));
       co_return;
     });
@@ -151,13 +153,14 @@ public:
   }
 };
 class Task : private detail::ManagedHandle {
+  cordis::detail::Observation<void> completion;
   friend class Context;
   using ManagedHandle::ManagedHandle;
 
 public:
   Task() = default;
   Async<void> join() const {
-    return cordis::detail::invoke_owned([*this]() -> Async<void> {
+    return completion.observe([*this]() -> Async<void> {
       (co_await call(CORDIS_ABI_TASK_JOIN));
       co_return;
     });
@@ -169,6 +172,7 @@ public:
   }
 };
 class Scope : private detail::ManagedHandle {
+  cordis::detail::Observation<void> completion;
   friend class Context;
   using ManagedHandle::ManagedHandle;
 
@@ -181,7 +185,7 @@ public:
     });
   }
   Async<void> dispose() const {
-    return cordis::detail::invoke_owned([*this]() -> Async<void> {
+    return completion.observe([*this]() -> Async<void> {
       (co_await call(CORDIS_ABI_SCOPE_DISPOSE));
       co_return;
     });

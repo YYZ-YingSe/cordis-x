@@ -36,10 +36,10 @@ int main() {
         });
   });
   auto registration = peer.next();
-  cordis::process::Next next(peer.channel, std::string(32, 'b'), "w0",
+  cordis::process::Next next(peer.channel, std::string(32, 'b'), "w0:1",
                              std::string(32, 'c'));
   auto invoke = executor.start([&] {
-    return registry->invoke("m1", "w0", test::body(7), context(), next);
+    return registry->invoke("m1", "w0:1", test::body(7), context(), next);
   });
   auto continuation = peer.next();
   check(continuation.command == "middleware_next");
@@ -97,10 +97,10 @@ int main() {
   check(request.command == "middleware_run");
   check(test::json(
             executor
-                .wait(registry->terminal("q1", "w1", test::body(3), context()))
+                .wait(registry->terminal("q1", "w0:2", test::body(3), context()))
                 .one()) == 3);
   try {
-    executor.wait(registry->terminal("q1", "w2", test::body(3), context()));
+    executor.wait(registry->terminal("q1", "w0:3", test::body(3), context()));
     check(false);
   } catch (const cordis::process::RpcError &e) {
     check(e.code == "closed");

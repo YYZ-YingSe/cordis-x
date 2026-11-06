@@ -69,8 +69,9 @@ public:
     if (!valid_grant(args["owner"]))
       throw Refusal("invalid_argument", "invalid resource owner");
     const auto owner = args["owner"].get<std::string>();
+    if (entries.size() >= 4096) std::erase_if(entries, [](const auto &item) { return item.second->finished && !item.second->failure; });
     if (entries.size() >= 4096 || next >= static_cast<uint64_t>(max_integer))
-      throw Refusal("overloaded", "resource history full");
+      throw Refusal("overloaded", "live resource capacity reached");
     const auto id = ++next;
     auto entry = std::make_shared<Entry>();
     entry->owner = owner;

@@ -61,7 +61,7 @@ while True:
         next_operation += 1
         callback = {key: request[key] for key in ("session", "activation")}
         callback.update(
-            operation=str(next_operation),
+            operation=f"{next_operation % 256}:{next_operation // 256 + 1}",
             command="dependency_call",
             payload={
                 "context": saved

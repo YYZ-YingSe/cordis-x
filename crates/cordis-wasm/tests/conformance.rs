@@ -273,7 +273,7 @@ fn validates_contract_artifact_and_imports_before_publication() {
     let imports = wat::parse_str(r#"(component (import "ambient" (func)))"#).unwrap();
     assert!(Component::from_bytes(&imports, Limits::default()).is_err());
     let exhausted = Limits {
-        fuel_per_call: 1,
+        initialization_fuel: 1,
         ..Limits::default()
     };
     assert!(Component::from_bytes(support::bytes(), exhausted).is_err());

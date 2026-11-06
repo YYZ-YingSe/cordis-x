@@ -190,7 +190,7 @@ async fn service_created_resource_and_disposal_token_outlive_the_creating_call()
     token.dispose().await.unwrap();
     assert_eq!(cleaned.load(Ordering::SeqCst), 1);
     assert!(provider.effects().is_empty());
-    assert_eq!(owner.effects().len(), 2);
+    assert_eq!(owner.effects().len(), 1);
     bounded(owner.dispose()).await.unwrap();
     assert_eq!(cleaned.load(Ordering::SeqCst), 2);
     assert!(matches!(resource.with(|v| *v), Err(Error::Closed)));

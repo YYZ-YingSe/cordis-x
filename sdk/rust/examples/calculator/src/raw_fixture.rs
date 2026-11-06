@@ -16,13 +16,16 @@ use std::{cell::Cell, rc::Rc};
 #[path = "fixtures.rs"]
 mod fixtures;
 
-fn interface() -> cordis_contract::Descriptor {
-    #[cfg(feature = "structural-fixture")]
-    return cordis_contract::Descriptor::new(fixtures::interface()).unwrap();
-    #[cfg(all(not(feature = "structural-fixture"), feature = "test-fixture"))]
-    let source = cordis_test_contracts::resources::rust_fixture::SERVICE;
-    #[cfg(not(feature = "structural-fixture"))]
-    cordis_contract::portable::decode(&source.parse::<Value>().unwrap()).unwrap()
+fn interface() -> &'static cordis_contract::Descriptor {
+    static INTERFACE: std::sync::OnceLock<cordis_contract::Descriptor> = std::sync::OnceLock::new();
+    INTERFACE.get_or_init(|| {
+        #[cfg(feature = "structural-fixture")]
+        return cordis_contract::Descriptor::new(fixtures::interface()).unwrap();
+        #[cfg(all(not(feature = "structural-fixture"), feature = "test-fixture"))]
+        let source = cordis_test_contracts::resources::rust_fixture::SERVICE;
+        #[cfg(not(feature = "structural-fixture"))]
+        cordis_contract::portable::decode(&source.parse::<Value>().unwrap()).unwrap()
+    })
 }
 
 struct Calculator;

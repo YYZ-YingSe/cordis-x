@@ -14,6 +14,7 @@ use tokio::sync::watch;
 pub struct Inverse {
     label: String,
     cleanup: Cleanup,
+    capacity: Vec<tokio::sync::OwnedSemaphorePermit>,
 }
 impl Inverse {
     pub fn new<F, Fut>(label: impl Into<String>, cleanup: F) -> Self
@@ -24,7 +25,14 @@ impl Inverse {
         Self {
             label: label.into(),
             cleanup: Box::new(move |ctx| Box::pin(cleanup(ctx))),
+            capacity: Vec::new(),
         }
+    }
+    /// Keep an admission reservation until successful recovery has drained all
+    /// cleanup continuations. Failed recovery retains the reservation too.
+    pub fn retain_capacity(mut self, permit: tokio::sync::OwnedSemaphorePermit) -> Self {
+        self.capacity.push(permit);
+        self
     }
 }
 
@@ -156,6 +164,9 @@ pub struct WeakEffectSequence {
     effect: WeakEffectHandle,
 }
 impl WeakEffectSequence {
+    pub fn is_released(&self) -> bool {
+        self.effect.is_released()
+    }
     pub fn upgrade(&self) -> Option<EffectSequence> {
         Some(EffectSequence {
             sequence: self.sequence.upgrade()?,
@@ -245,6 +256,7 @@ impl Context {
                             inverse.label,
                             self.clone(),
                             inverse.cleanup,
+                            inverse.capacity,
                         )
                     })
                     .collect::<Result<Vec<_>>>()?,
@@ -253,11 +265,14 @@ impl Context {
         });
         let cleanup = sequence.clone();
         let effect = self.defer(label, move |_| async move { cleanup.recover().await })?;
+        // Failed cleanup must retain the group's outstanding inverses even when
+        // the caller drops its handle and the FnOnce cleanup has returned.
+        effect.retain_recovery(sequence.clone());
         // Use the group's reserved lifetime edges throughout production. A late
         // inverse must not need a new recovery-cycle decision after user work
         // has already incurred a cleanup responsibility.
         let mut production = self.clone();
-        production.dynamic = effect.context.dynamic.clone();
+        production.dynamic = effect.context().ok_or(Error::Closed)?.dynamic.clone();
         let (context, authority, pins) = production.operation_context()?;
         let handle = EffectSequence {
             sequence: sequence.clone(),
@@ -298,6 +313,7 @@ impl Context {
                             inverse.label,
                             context.clone(),
                             inverse.cleanup,
+                            inverse.capacity,
                         )?;
                         sequence.state.lock().unwrap().inverses.push(effect);
                     }

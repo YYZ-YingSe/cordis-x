@@ -1,10 +1,12 @@
 #pragma once
+#include <cordis/core/observation.hpp>
 #include <cordis/adapters/abi/context.hpp>
 namespace cordis::abi {
 // Copyable token; destruction does not retire the child. Parent ownership is
 // held by Runtime, while this token may be used after its Context grant
 // expires.
 class Child {
+  cordis::detail::Observation<void> completion;
   uint64_t host_ = 0, id_ = 0;
   const CordisAbiHostApi *base_ = nullptr;
   const CordisAbiCompositionHostApi *api_ = nullptr;
@@ -49,7 +51,7 @@ public:
     });
   }
   Async<void> dispose() const {
-    return cordis::detail::invoke_owned([*this]() -> Async<void> {
+    return completion.observe([*this]() -> Async<void> {
       (co_await call(CORDIS_ABI_CHILD_DISPOSE));
       co_return;
     });

@@ -12,7 +12,7 @@ pub struct Channel {
     pub dependency_resources: Cell<bool>,
     output: mpsc::Sender<Bytes>,
     pending: RefCell<BTreeMap<String, Pending>>,
-    next: Cell<u64>,
+    operations: cordis_wire::operations::Outgoing,
     closed: Cell<bool>,
 }
 impl Channel {
@@ -30,7 +30,9 @@ impl Channel {
             dependency_resources: Cell::new(false),
             output,
             pending: RefCell::default(),
-            next: Cell::new(0),
+            operations: cordis_wire::operations::Outgoing::new(
+                cordis_wire::operations::DEFAULT_SLOTS,
+            ),
             closed: Cell::new(false),
         })
     }
@@ -80,16 +82,28 @@ impl Channel {
         {
             return Err(refused("overloaded", "reverse call capacity reached"));
         }
-        if self.next.get() >= 65536 {
-            return Err(refused("exhausted", "Session operation history full"));
-        }
         let (session, activation) = self
             .identity
             .borrow()
             .clone()
             .ok_or_else(|| refused("closed", "Session not configured"))?;
-        self.next.set(self.next.get() + 1);
-        let operation = self.next.get().to_string();
+        let operation = self
+            .operations
+            .allocate_lane(lane)
+            .ok_or_else(|| refused("overloaded", "request slots full"))?;
+        struct Reservation<'a>(
+            &'a cordis_wire::operations::Outgoing,
+            Option<cordis_wire::operations::Id>,
+        );
+        impl Drop for Reservation<'_> {
+            fn drop(&mut self) {
+                if let Some(id) = self.1 {
+                    self.0.complete(id);
+                }
+            }
+        }
+        let mut reservation = Reservation(&self.operations, Some(operation));
+        let operation = operation.to_string();
         let request = Request {
             session,
             activation,
@@ -116,6 +130,7 @@ impl Channel {
             },
         );
         permit.send(encoded);
+        reservation.1.take();
         receive.await.map_err(unknown)?
     }
     pub fn receive(&self, response: Response) -> Result<()> {
@@ -125,6 +140,8 @@ impl Channel {
             .remove(&response.operation)
             .ok_or_else(|| unknown("unsolicited response"))?;
         pending.request.check(&response).map_err(unknown)?;
+        self.operations
+            .complete(cordis_wire::operations::Id::parse(&response.operation).unwrap());
         let result = match response.outcome {
             Outcome::Success { value } => Ok(value),
             Outcome::Unknown { error: e } => Err(Failure::Unknown(ErrorInfo {

@@ -57,6 +57,9 @@ impl ResourceProvider for AbiResource {
     }
 }
 impl WeakResourceProvider for crate::WeakAbiResource {
+    fn is_released(&self) -> bool {
+        self.is_released()
+    }
     fn invoke(&self, method: String, args: Body) -> BoxFuture<'_, cordis_host::Result<Body>> {
         Box::pin(async move {
             let args = args

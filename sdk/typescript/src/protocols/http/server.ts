@@ -31,7 +31,7 @@ export async function listen(enabled: boolean, state: { active(): boolean; valid
       response.end(body);
     } catch { request.destroy(); response.destroy(); }
   });
-  server.maxConnections = 32;
+  server.maxConnections = 2 * (128 + 16);
   if (enabled) {
     server.listen(0, '127.0.0.1'); await once(server, 'listening');
     const address = server.address();

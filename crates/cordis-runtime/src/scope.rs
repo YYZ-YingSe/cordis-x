@@ -1,4 +1,4 @@
-use crate::runtime::{ActivationData, Inner};
+use crate::runtime::ActivationData;
 use crate::{Context, EffectSnapshot, Error, Plugin, PluginHandle, Result, View};
 use cordis_kernel::{Activation, FiberId, Snapshot};
 use std::{
@@ -23,8 +23,7 @@ pub struct ScopeHandle {
 
 #[derive(Clone)]
 pub struct WeakScopeHandle {
-    inner: Weak<Inner>,
-    id: FiberId,
+    plugin: crate::WeakPluginHandle,
     definition: Arc<Definition>,
 }
 
@@ -73,8 +72,7 @@ impl ScopeHandle {
     }
     pub fn downgrade(&self) -> WeakScopeHandle {
         WeakScopeHandle {
-            inner: Arc::downgrade(&self.plugin.inner),
-            id: self.id(),
+            plugin: self.plugin.downgrade(),
             definition: self.definition.clone(),
         }
     }
@@ -123,13 +121,12 @@ impl ScopeHandle {
     }
 }
 impl WeakScopeHandle {
+    pub fn is_retired(&self) -> bool {
+        self.plugin.is_retired()
+    }
     pub fn upgrade(&self) -> Option<ScopeHandle> {
         Some(ScopeHandle {
-            plugin: PluginHandle {
-                id: self.id,
-                inner: self.inner.upgrade()?,
-                waiter: None,
-            },
+            plugin: self.plugin.upgrade()?,
             definition: self.definition.clone(),
         })
     }

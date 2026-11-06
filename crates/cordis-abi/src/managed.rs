@@ -11,10 +11,7 @@ use cordis_runtime::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::{
-        Arc, Mutex, OnceLock,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::{Arc, Mutex, OnceLock, atomic::Ordering},
     time::Duration,
 };
 use tokio::sync::{Semaphore, watch};
@@ -74,17 +71,17 @@ struct Registry {
 }
 pub(crate) struct Managed {
     entries: Mutex<Registry>,
-    steps: Arc<AtomicUsize>,
+    steps: Arc<tokio::sync::Semaphore>,
     runs: Arc<Semaphore>,
     waits: Semaphore,
     disposals: Semaphore,
     joins: Semaphore,
 }
 impl Managed {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize, steps: usize) -> Self {
         Self {
             entries: Mutex::default(),
-            steps: Arc::default(),
+            steps: Arc::new(Semaphore::new(steps)),
             runs: Arc::new(Semaphore::new(capacity)),
             waits: Semaphore::new(capacity),
             disposals: Semaphore::new(capacity),
@@ -115,15 +112,17 @@ struct Sequence {
     cleanup_error: Mutex<Option<Error>>,
     released: Mutex<Option<Result<()>>>,
     steps: Mutex<Vec<Arc<StepTicket>>>,
+    next_step: std::sync::atomic::AtomicU64,
 }
 struct StepTicket {
-    number: usize,
+    number: u64,
     state: Mutex<&'static str>,
 }
 struct Task {
     callback: u64,
     handle: OnceLock<TaskHandle>,
     outcome: Mutex<Option<Result<Value>>>,
+    observed: std::sync::atomic::AtomicBool,
 }
 
 impl Router {
@@ -236,6 +235,18 @@ impl Router {
         let mut entries = self.managed.entries.lock().unwrap();
         check_callback(&entries, callback)?;
         let limits = &self.capabilities.managed;
+        if entries.sequences.len() >= limits.sequences {
+            let retired: Vec<_> = entries
+                .sequences
+                .iter()
+                .filter(|(_, e)| e.handle.get().is_some_and(WeakEffectSequence::is_released))
+                .map(|(id, e)| (*id, e.callback))
+                .collect();
+            for (id, callback) in retired {
+                entries.sequences.remove(&id);
+                entries.callbacks.remove(&callback);
+            }
+        }
         if entries.sequences.len() >= limits.sequences
             || entries
                 .sequences
@@ -256,6 +267,7 @@ impl Router {
             cleanup_error: Mutex::default(),
             released: Mutex::default(),
             steps: Mutex::default(),
+            next_step: std::sync::atomic::AtomicU64::new(1),
         });
         let runner = entry.clone();
         let producer = entry.clone();
@@ -380,6 +392,9 @@ impl Router {
         let ctx = self.context(grant)?;
         let mut entries = self.managed.entries.lock().unwrap();
         if entries.scopes.len() >= self.capabilities.managed.scopes {
+            entries.scopes.retain(|_, e| !e.is_retired());
+        }
+        if entries.scopes.len() >= self.capabilities.managed.scopes {
             return Err(Error::Overloaded);
         }
         let id = next_id()?;
@@ -425,8 +440,12 @@ impl Router {
                 entries.runs.insert(callback, id);
             }
             let instance = self.instance.upgrade().ok_or(Error::Closed)?;
-            return handle
+            let router = self.clone();
+            let entered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let started = entered.clone();
+            let result = handle
                 .run(move |ctx| async move {
+                    started.store(true, Ordering::Release);
                     let _permit = permit;
                     let result = instance
                         .managed_call(ctx.clone(), 11, callback, Value::Null)
@@ -434,9 +453,20 @@ impl Router {
                     if let Err(error @ Error::Unknown(_)) = &result {
                         unknown(&ctx, error.clone())?;
                     }
+                    if !matches!(result, Err(Error::Unknown(_))) {
+                        let mut entries = router.managed.entries.lock().unwrap();
+                        entries.runs.remove(&callback);
+                        entries.callbacks.remove(&callback);
+                    }
                     Ok(result)
                 })
-                .await?;
+                .await;
+            if !entered.load(Ordering::Acquire) {
+                let mut entries = self.managed.entries.lock().unwrap();
+                entries.runs.remove(&callback);
+                entries.callbacks.remove(&callback);
+            }
+            return result?;
         }
         if let Some((11, running)) = active()
             && self.managed.entries.lock().unwrap().runs.get(&running) == Some(&id)
@@ -465,6 +495,23 @@ impl Router {
         let mut entries = self.managed.entries.lock().unwrap();
         check_callback(&entries, callback)?;
         let limits = &self.capabilities.managed;
+        if entries.tasks.len() >= limits.tasks {
+            let retired: Vec<_> = entries
+                .tasks
+                .iter()
+                .filter(|(_, e)| {
+                    e.observed.load(Ordering::Acquire)
+                        && e.handle
+                            .get()
+                            .is_some_and(|h| matches!(h.outcome(), Some(Ok(()))))
+                })
+                .map(|(id, e)| (*id, e.callback))
+                .collect();
+            for (id, callback) in retired {
+                entries.tasks.remove(&id);
+                entries.callbacks.remove(&callback);
+            }
+        }
         if entries.tasks.len() >= limits.tasks
             || entries
                 .tasks
@@ -480,6 +527,7 @@ impl Router {
             callback,
             handle: OnceLock::new(),
             outcome: Mutex::default(),
+            observed: std::sync::atomic::AtomicBool::new(false),
         });
         let task = entry.clone();
         let handle = ctx.spawn(label, move |ctx| async move {
@@ -528,6 +576,7 @@ impl Router {
             .try_acquire()
             .map_err(|_| Error::Overloaded)?;
         let native = entry.handle.get().ok_or(Error::Closed)?.join().await;
+        entry.observed.store(true, Ordering::Release);
         entry
             .outcome
             .lock()
@@ -541,21 +590,41 @@ impl Sequence {
         self: Arc<Self>,
         ctx: Context,
         instance: Arc<Instance>,
-        total: Arc<AtomicUsize>,
+        total: Arc<tokio::sync::Semaphore>,
         limit: usize,
     ) -> EffectStep {
-        if total
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < limit).then(|| n + 1)
-            })
-            .is_err()
-        {
-            return self.fail(Error::Overloaded, None);
-        }
+        let permit = match total.try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => return self.fail(Error::Overloaded, None),
+        };
+        let number = match self
+            .next_step
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                (n <= cordis_wire::MAX_INTEGER as u64).then(|| n + 1)
+            }) {
+            Ok(number) => number,
+            Err(_) => {
+                return self.fail(
+                    Error::Refused {
+                        code: "exhausted".into(),
+                        message: "sequence identity space exhausted".into(),
+                    },
+                    None,
+                );
+            }
+        };
         let ticket = {
             let mut steps = self.steps.lock().unwrap();
+            if steps.len() >= limit {
+                steps.retain(|t| {
+                    matches!(
+                        *t.state.lock().unwrap(),
+                        "pending" | "owned" | "unknown" | "failed"
+                    )
+                });
+            }
             let ticket = Arc::new(StepTicket {
-                number: steps.len() + 1,
+                number,
                 state: Mutex::new("pending"),
             });
             steps.push(ticket.clone());
@@ -586,6 +655,7 @@ impl Sequence {
                         }
                         result.map_err(Into::into)
                     })
+                    .retain_capacity(permit)
                 });
                 if let Some(error) = error {
                     self.fail(error, inverse)
@@ -611,10 +681,13 @@ impl Sequence {
                 let entry = self.clone();
                 self.fail(
                     error,
-                    Some(Inverse::new("unknown ABI step", move |_| async move {
-                        *entry.cleanup_error.lock().unwrap() = Some(failure.clone());
-                        Err(failure.into())
-                    })),
+                    Some(
+                        Inverse::new("unknown ABI step", move |_| async move {
+                            *entry.cleanup_error.lock().unwrap() = Some(failure.clone());
+                            Err(failure.into())
+                        })
+                        .retain_capacity(permit),
+                    ),
                 )
             }
         }

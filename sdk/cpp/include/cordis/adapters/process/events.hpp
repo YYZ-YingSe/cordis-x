@@ -1,4 +1,5 @@
 #pragma once
+#include <cordis/core/observation.hpp>
 #include "context.hpp"
 
 namespace cordis::process {
@@ -12,6 +13,7 @@ public:
       : RpcError("event_failed", errors.dump()), errors(std::move(errors)) {}
 };
 class Subscription {
+  cordis::detail::Observation<void> completion;
   std::shared_ptr<DependencyChannel> channel;
   std::string id, grant;
 
@@ -21,13 +23,14 @@ public:
       : channel(std::move(channel)), id(std::move(id)),
         grant(std::move(grant)) {}
   Async<void> dispose() const {
-    return cordis::detail::invoke_owned([*this]() -> Async<void> {
+    return completion.observe([*this]() -> Async<void> {
       Json args = {{"listener", id}, {"grant", grant}};
       co_await channel->request("event_dispose", std::move(args));
     });
   }
 };
 class Dispatch {
+  cordis::detail::Observation<std::vector<cordis::Flow>> completion;
   std::shared_ptr<DependencyChannel> channel;
   std::string id, grant;
 
@@ -37,7 +40,7 @@ public:
       : channel(std::move(channel)), id(std::move(id)),
         grant(std::move(grant)) {}
   Async<std::vector<cordis::Flow>> join() const {
-    return cordis::detail::invoke_owned(
+    return completion.observe(
         [*this]() -> Async<std::vector<cordis::Flow>> {
           Payload args(Json{{"dispatch", id}, {"grant", grant}});
           const auto reply =
@@ -87,7 +90,7 @@ class EventRegistry {
   };
   std::mutex mutex;
   std::map<std::string, std::shared_ptr<Entry>> entries;
-  std::set<std::string> seen;
+  OperationInbox seen;
   std::uint64_t next_listener = 0, next_dispatch = 0;
   Json declarations;
   void check(std::string event) const {
@@ -114,14 +117,21 @@ public:
     std::string id;
     {
       std::lock_guard lock(mutex);
-      if (next_listener >= 4096)
-        throw Refusal("events_exhausted", "listener history full");
+      if (next_listener == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
+      if (entries.size() >= 4096) std::erase_if(entries, [](const auto &item) { return !item.second->callback && !item.second->running; });
+      if (entries.size() >= 4096) throw Refusal("overloaded", "live capacity reached");
       id = "l" + std::to_string(++next_listener);
       entries.emplace(id,
                       std::make_shared<Entry>(Entry{std::move(callback), 0}));
     }
     Json args = {{"context", context}, {"event", event}, {"listener", id}};
-    auto reply = co_await channel->request("event_register", std::move(args));
+    Json reply;
+    try { reply = co_await channel->request("event_register", std::move(args)); }
+    catch (const Refusal &) {
+      decltype(entries)::node_type refused;
+      { std::lock_guard lock(mutex); refused = entries.extract(id); }
+      throw;
+    }
     co_return Subscription(channel, id, grant(reply, "listener", id));
   }
   Async<Dispatch> emit(std::shared_ptr<DependencyChannel> channel,
@@ -131,8 +141,7 @@ public:
     std::string id;
     {
       std::lock_guard lock(mutex);
-      if (next_dispatch >= 4096)
-        throw Refusal("events_exhausted", "dispatch history full");
+      if (next_dispatch == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
       id = "d" + std::to_string(++next_dispatch);
     }
     Payload payload(Json{{"context", context},
@@ -147,20 +156,15 @@ public:
   }
   Async<Payload> invoke(std::string id, std::string call, Message args,
                         Context ctx) {
+    auto admission = seen.admit(call.size() ? call.substr(1) : "");
     std::shared_ptr<Entry> entry;
     EventCallback callback;
     {
       std::lock_guard lock(mutex);
       auto found = entries.find(id);
       if (found == entries.end() || !found->second->callback ||
-          call.size() < 2 || call.size() > 21 || call[0] != 'v' ||
-          !std::all_of(call.begin() + 1, call.end(),
-                       [](char c) { return c >= '0' && c <= '9'; }) ||
-          seen.count(call))
+          call.empty() || call[0] != 'v' )
         throw Refusal("closed", "event callback unavailable");
-      if (seen.size() >= 4096)
-        throw Refusal("session_exhausted", "event callback history full");
-      seen.insert(call);
       entry = found->second;
       ++entry->running;
       callback = entry->callback;

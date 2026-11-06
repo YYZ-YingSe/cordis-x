@@ -86,7 +86,7 @@ pub(crate) struct ActivationData {
     pub view: View,
     pub bindings: BTreeMap<ContractId, Arc<Binding>>,
     pub provision_view: View,
-    pub effects: Mutex<Vec<Arc<Effect>>>,
+    pub effects: Mutex<BTreeMap<u64, Arc<Effect>>>,
     pub next_effect: AtomicU64,
     pins: Mutex<Vec<Lease>>,
 }
@@ -113,6 +113,7 @@ impl Authority {
 pub(crate) struct State {
     pub kernel: Kernel,
     installed: BTreeMap<FiberId, Installed>,
+    observations: BTreeMap<FiberId, Arc<Mutex<Option<Snapshot>>>>,
     pub activations: BTreeMap<Activation, Arc<ActivationData>>,
     pub services: BTreeMap<(Activation, ContractId), Arc<Binding>>,
     realms: crate::view::RealmDomain,
@@ -153,6 +154,7 @@ impl Runtime {
                 state: Mutex::new(State {
                     kernel: Kernel::new(NEXT_RUNTIME.fetch_add(1, Ordering::Relaxed)),
                     installed: BTreeMap::new(),
+                    observations: BTreeMap::new(),
                     activations: BTreeMap::new(),
                     services: BTreeMap::new(),
                     realms: crate::view::RealmDomain::default(),
@@ -210,6 +212,9 @@ impl Runtime {
             state.stopping = true;
             let ids: Vec<_> = state.kernel.snapshots().into_iter().map(|s| s.id).collect();
             for id in ids {
+                if state.kernel.snapshot(id).is_err() {
+                    continue;
+                }
                 let actions = state.kernel.step(Event::Retire(id))?;
                 self.inner.execute_locked(&mut state, actions);
             }
@@ -290,6 +295,8 @@ impl Inner {
             provides: plugin.provides.iter().map(|c| view.slot(c)).collect(),
         };
         let (id, actions) = state.kernel.install(spec)?;
+        let observation = Arc::new(Mutex::new(None));
+        state.observations.insert(id, observation.clone());
         let mut values = (*state.realms.snapshot()).clone();
         values.insert(id, view.realm_map());
         state.realms.publish(values);
@@ -309,6 +316,7 @@ impl Inner {
         Ok(PluginHandle {
             id,
             inner: self.clone(),
+            observation,
             waiter,
         })
     }
@@ -348,7 +356,12 @@ impl Inner {
                     let inner = self.clone();
                     self.executor.spawn(async move {
                         let result = loop {
-                            let effect = data.effects.lock().unwrap().last().cloned();
+                            let effect = data
+                                .effects
+                                .lock()
+                                .unwrap()
+                                .last_key_value()
+                                .map(|(_, effect)| effect.clone());
                             let Some(effect) = effect else {
                                 break Ok(());
                             };
@@ -356,7 +369,8 @@ impl Inner {
                                 break Err(error.to_string());
                             }
                             data.gate.drained().await;
-                            let released = data.effects.lock().unwrap().pop();
+                            let released =
+                                data.effects.lock().unwrap().remove(&effect.snapshot().id);
                             drop(released);
                         };
                         inner
@@ -390,16 +404,21 @@ impl Inner {
                 }
             }
         }
-        // Retired tombstones retain diagnostics, not plugin captures. Also covers
-        // retirement while waiting for a missing dependency (no Release action).
-        let retired: Vec<_> = state
-            .kernel
-            .snapshots()
-            .into_iter()
-            .filter(|s| s.retired && s.state == Lifecycle::Inactive)
-            .filter_map(|s| state.installed.remove(&s.id))
-            .collect();
-        if !retired.is_empty() {
+        let terminal = state.kernel.collect_retired();
+        if !terminal.is_empty() {
+            let mut views = (*state.realms.snapshot()).clone();
+            let mut retired = Vec::new();
+            for snapshot in terminal {
+                let id = snapshot.id;
+                if let Some(observation) = state.observations.remove(&id) {
+                    *observation.lock().unwrap() = Some(snapshot);
+                }
+                views.remove(&id);
+                if let Some(installed) = state.installed.remove(&id) {
+                    retired.push(installed);
+                }
+            }
+            state.realms.publish(views);
             self.executor.spawn(async move {
                 drop(retired);
             });
@@ -432,7 +451,7 @@ impl Inner {
             view: installed.view.clone(),
             provision_view: View::new().with_realms(installed.view.realm_map()),
             bindings: resolved,
-            effects: Mutex::new(Vec::new()),
+            effects: Mutex::new(BTreeMap::new()),
             next_effect: AtomicU64::new(1),
             pins: Mutex::new(pins),
         });
@@ -459,6 +478,7 @@ pub struct PluginHandle {
     pub(crate) id: FiberId,
     pub(crate) inner: Arc<Inner>,
     pub(crate) waiter: Option<Activation>,
+    observation: Arc<Mutex<Option<Snapshot>>>,
 }
 
 /// Adapter registries can refer to a child without retaining the Runtime.
@@ -467,13 +487,19 @@ pub struct WeakPluginHandle {
     id: FiberId,
     inner: Weak<Inner>,
     waiter: Option<Activation>,
+    observation: Arc<Mutex<Option<Snapshot>>>,
 }
 impl WeakPluginHandle {
+    /// Successful retirement has no remaining code, children or cleanup work.
+    pub fn is_retired(&self) -> bool {
+        self.observation.lock().unwrap().is_some()
+    }
     pub fn upgrade(&self) -> Option<PluginHandle> {
         Some(PluginHandle {
             id: self.id,
             inner: self.inner.upgrade()?,
             waiter: self.waiter,
+            observation: self.observation.clone(),
         })
     }
 }
@@ -484,24 +510,29 @@ impl PluginHandle {
             id: self.id,
             inner: Arc::downgrade(&self.inner),
             waiter: self.waiter,
+            observation: self.observation.clone(),
         }
     }
     pub fn id(&self) -> FiberId {
         self.id
     }
     pub fn snapshot(&self) -> Snapshot {
-        self.inner
-            .state
+        let state = self.inner.state.lock().unwrap();
+        self.observation
             .lock()
             .unwrap()
-            .kernel
-            .snapshot(self.id)
-            .unwrap()
+            .clone()
+            .unwrap_or_else(|| state.kernel.snapshot(self.id).expect("live handle"))
     }
 
     pub fn effects(&self) -> Vec<EffectSnapshot> {
         let state = self.inner.state.lock().unwrap();
-        let Some(a) = state.kernel.snapshot(self.id).unwrap().activation else {
+        let Some(a) = state
+            .kernel
+            .snapshot(self.id)
+            .ok()
+            .and_then(|s| s.activation)
+        else {
             return Vec::new();
         };
         state
@@ -511,7 +542,7 @@ impl PluginHandle {
                 data.effects
                     .lock()
                     .unwrap()
-                    .iter()
+                    .values()
                     .map(|e| e.snapshot())
                     .collect()
             })
@@ -529,11 +560,21 @@ impl PluginHandle {
     }
 
     pub async fn dispose(&self) -> Result<()> {
-        self.inner.event(Event::Retire(self.id))?;
+        {
+            let mut state = self.inner.state.lock().unwrap();
+            if self.observation.lock().unwrap().is_none() {
+                let actions = state.kernel.step(Event::Retire(self.id))?;
+                self.inner.execute_locked(&mut state, actions);
+            }
+        }
+        self.inner.notify();
         self.wait(false, true).await.map(|_| ())
     }
 
     pub async fn restart(&self) -> Result<Snapshot> {
+        if self.observation.lock().unwrap().is_some() {
+            return Err(Error::Retired(self.id));
+        }
         self.inner.event(Event::Restart(self.id))?;
         self.settled().await
     }
@@ -543,8 +584,10 @@ impl PluginHandle {
         loop {
             let snapshot = {
                 let state = self.inner.state.lock().unwrap();
-                if active && let Some(waiter) = self.waiter {
-                    let waiting = state.kernel.snapshot(waiter.fiber)?;
+                if active
+                    && let Some(waiter) = self.waiter
+                    && let Ok(waiting) = state.kernel.snapshot(waiter.fiber)
+                {
                     if waiting.activation == Some(waiter)
                         && waiting.state == Lifecycle::Loading
                         && state.kernel.depends_on(self.id, waiter.fiber)
@@ -552,7 +595,13 @@ impl PluginHandle {
                         return Err(Error::WouldDeadlock);
                     }
                 }
-                let snapshot = state.kernel.snapshot(self.id)?;
+                let snapshot = self
+                    .observation
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .map(Ok)
+                    .unwrap_or_else(|| state.kernel.snapshot(self.id))?;
                 if let Some(Outcome::CleanupFailed(message)) = &snapshot.outcome {
                     return Err(Error::CleanupFailed(self.id, message.clone()));
                 }

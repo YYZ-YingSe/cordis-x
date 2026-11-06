@@ -165,6 +165,9 @@ impl Resource {
     }
 }
 impl WeakResource {
+    pub(crate) fn is_released(&self) -> bool {
+        self.resource.is_released()
+    }
     pub(crate) fn upgrade(&self) -> Result<Resource> {
         Ok(Resource {
             resource: self

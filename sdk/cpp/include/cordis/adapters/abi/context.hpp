@@ -1,4 +1,5 @@
 #pragma once
+#include <cordis/core/observation.hpp>
 #include <chrono>
 #include <cordis/abi_composition.h>
 #include <cordis/abi_context.h>
@@ -127,6 +128,7 @@ Async<HostReply> receive(const CordisAbiHostApi *api, uint64_t host,
 // Copyable, independent of the originating Context grant. Explicit disposal
 // shares the native Effect's cached outcome; destruction does not dispose it.
 class Effect {
+  cordis::detail::Observation<void> completion;
   uint64_t host_ = 0, id_ = 0;
   const CordisAbiHostApi *api_ = nullptr;
   friend class Context;
@@ -140,7 +142,7 @@ class Effect {
 public:
   Effect() = default;
   Async<void> dispose() const {
-    return cordis::detail::invoke_owned([*this]() -> Async<void> {
+    return completion.observe([*this]() -> Async<void> {
       if (!api_)
         throw Refusal("closed", "empty effect");
       (co_await detail::receive(

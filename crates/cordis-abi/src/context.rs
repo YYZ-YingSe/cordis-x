@@ -11,10 +11,12 @@ use std::{
 use tokio::sync::Semaphore;
 
 /// Host policy, checked against the extension manifest before instance creation.
-/// Effect capacity includes terminal tombstones to preserve cached outcomes.
+/// Limits count live work and unresolved recovery, not cumulative history.
 #[derive(Clone, Debug)]
 pub struct Capabilities {
     pub bindings: cordis_host::HostBindings,
+    /// Ordinary foreign execution, bounded by the SDK's 128-slot executor.
+    pub max_inflight: usize,
     pub max_effects: usize,
     pub max_contexts: usize,
     pub max_callbacks: usize,
@@ -26,6 +28,7 @@ impl Default for Capabilities {
     fn default() -> Self {
         Self {
             bindings: cordis_host::HostBindings::default(),
+            max_inflight: 16,
             max_effects: 1024,
             max_contexts: 256,
             max_callbacks: 16,
@@ -44,7 +47,8 @@ impl Capabilities {
         self.bindings
             .validate()
             .map_err(|e| Error::Contract(e.to_string()))?;
-        if self.max_contexts == 0
+        if !(1..=128).contains(&self.max_inflight)
+            || self.max_contexts == 0
             || self.max_callbacks == 0
             || self.max_callbacks > Semaphore::MAX_PERMITS
         {
@@ -179,8 +183,10 @@ impl Router {
                 .with_validation(bound.bindings.validation);
         }
         let capabilities = Arc::new(bound);
-        let managed =
-            crate::managed::Managed::new(capabilities.max_callbacks.min(capabilities.max_contexts));
+        let managed = crate::managed::Managed::new(
+            capabilities.max_callbacks.min(capabilities.max_contexts),
+            capabilities.managed.steps,
+        );
         let reactive = crate::reactive::Reactive::new(&capabilities);
         let composition = crate::composition::Composition::new(&capabilities);
         let resources = crate::resource_dependencies::Resources::new(capabilities.max_callbacks);
@@ -379,6 +385,9 @@ impl Router {
         let mut entries = self.effects.lock().unwrap();
         if entries.values().any(|entry| entry.callback == callback) {
             return Err(Error::InvalidInput("duplicate effect callback".into()));
+        }
+        if entries.len() >= self.capabilities.max_effects {
+            entries.retain(|_, e| !e.handle.get().is_some_and(WeakEffectHandle::is_released));
         }
         if entries.len() >= self.capabilities.max_effects {
             return Err(Error::Overloaded);

@@ -80,7 +80,7 @@ async fn cpp_portable_component_runs_reentrant_callbacks() {
     let module = ContextComponent::load(
         artifact(),
         Limits {
-            fuel_per_call: 100_000_000,
+            fuel_on_admission: 100_000_000,
             ..Limits::default()
         },
         caps,

@@ -1,3 +1,5 @@
+import { Identities, makeRoom, Completion } from './retention.ts';
+import { OperationInbox, parseOperation } from '../../protocols/session/operations.ts';
 import type { Message } from '../../core/message.ts';
 import { checkBinary } from '../../core/protobuf.ts';
 import { validation } from '../../core/validation.ts';
@@ -95,14 +97,15 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
   const events = new EventRegistry(eventDeclarations);
   const middlewareDeclarations = service.middleware ?? {};
   const middlewares = new MiddlewareRegistry(middlewareDeclarations);
+  let maxInflight = 16;
   const lanes = [0, 0, 0, 0, 0, 0, 0, 0, 0];
   const declarations = service.dependencies ?? {};
-  const seen = new Set<string>();
+  const seen = new OperationInbox();
   const idle = new Set<() => void>();
   const pending = new Set<Promise<void>>();
   let url: string | null = null;
   const resources = new Map<string, ResourceRecord>();
-  let nextResource = 0;
+  const nextResource = new Identities();
   let fatal: unknown;
   const resourceOperation = async (
     command: string,
@@ -119,8 +122,8 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
       if (typeof payload.kind !== 'string')
         throw new Refusal('invalid_argument', 'missing resource kind');
       input(() => check(operation(descriptor.resources, payload.kind as string).args, body!));
-      if (nextResource >= 4096) throw new Refusal('resources_exhausted', 'resource history full');
-      const id = `r${++nextResource}`;
+      makeRoom(resources, 4096, (e) => e.released);
+      const id = nextResource.next('r');
       const entry = new ResourceRecord(owner);
       entry.kind = payload.kind;
       resources.set(id, entry);
@@ -156,13 +159,13 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
     operation: request.operation,
     outcome: { kind, error: { code, message } },
   });
-  const execute = async (request: Request): Promise<Payload> => {
+  const executeRequest = async (request: Request): Promise<Payload> => {
     const bodies=['call','resource_acquire','resource_call','event_call','middleware_call','middleware_terminal'].includes(request.command)?1:0;
     if(request.payload.messages.length!==bodies) throw new Refusal('invalid_argument','unexpected business message count');
     if (
       Object.keys(request).length !== 5 ||
       !/^[0-9a-f]{32}$/.test(request.session) ||
-      !decimal(request.operation) ||
+      !parseOperation(request.operation) ||
       typeof request.command !== 'string' ||
       !request.activation ||
       Object.keys(request.activation).length !== 3 ||
@@ -223,11 +226,12 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
       const bound = checkComposition((payload.composition ?? emptyComposition()) as Composition);
       if (JSON.stringify(bound) !== JSON.stringify(composition))
         throw new Refusal('composition_mismatch', 'composition bindings must match installation');
+      if (typeof payload.max_inflight !== "number" || !Number.isInteger(payload.max_inflight) || payload.max_inflight < 1 || payload.max_inflight > 128) throw new Refusal("invalid_argument", "max_inflight must be in 1..=128");
+      maxInflight = payload.max_inflight;
       channel.validation = input(() => validation(payload.validation));
       activation = request.activation;
       compositionEnabled = object(payload.capabilities ?? {}).composition === true;
       session = request.session;
-      seen.add(request.operation);
       channel.configure(session, activation, write);
       channel.enableMetadata(object(payload.capabilities ?? {}).metadata === true);
       channel.enableResources(object(payload.capabilities ?? {}).dependency_resources === true);
@@ -261,17 +265,13 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
           streams: false,
           resources: !!service.acquire,
           dependency_resources: object(payload.capabilities ?? {}).dependency_resources === true,
-          max_inflight: 16,
+          max_inflight: maxInflight,
           max_message: MAX_MESSAGE,
         },
       });
     }
     if (!activation || request.session !== session || !sameIdentity(request.activation, activation))
       throw new Refusal('stale_session', 'session or activation mismatch');
-    if (seen.size >= 65536) throw new Refusal('session_exhausted', 'operation history full');
-    if (seen.has(request.operation))
-      throw new Refusal('duplicate_operation', 'operation already admitted');
-    seen.add(request.operation);
     const payload = request.payload.control === null ? {} : object(request.payload.control);
     const ctx = new Context(
       channel,
@@ -422,7 +422,7 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
     }
     if (!work(request.command)) throw new Refusal('unknown_command', request.command);
     if (!active) throw new Refusal('closed', 'activation not accepting calls');
-    if (inflight >= 16) throw new Refusal('overloaded', 'call capacity reached');
+    if (inflight >= maxInflight) throw new Refusal('overloaded', 'call capacity reached');
     if (
       request.command === 'call' &&
       (Object.keys(payload).length !== (Object.hasOwn(payload, 'context') ? 2 : 1) || typeof payload.method !== 'string')
@@ -446,6 +446,12 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
         idle.clear();
       }
     }
+  };
+  const execute = async (request: Request): Promise<Payload> => {
+    if (request.command !== 'hello' && (!activation || request.session !== session || !sameIdentity(request.activation, activation)))
+      throw new Refusal('stale_session', 'session or activation mismatch');
+    const complete = seen.admit(request.operation);
+    try { return await executeRequest(request); } finally { complete(); }
   };
   const dispatch = async (request: Request): Promise<Response> => {
     try {
@@ -519,7 +525,7 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
                           ].includes(request.command)
                         ? 1
                         : 0;
-      if (lanes[lane] >= 16) {
+      if (lanes[lane] >= (lane === 0 ? maxInflight : 16)) {
         await respond(failure(request, 'overloaded', 'worker queue full', 'refused'));
         continue;
       }

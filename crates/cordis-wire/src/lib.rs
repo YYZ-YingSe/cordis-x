@@ -1,6 +1,7 @@
 //! Protobuf execution frames shared by IPC, HTTP, ABI and components.
 pub mod binary;
 pub mod local;
+pub mod operations;
 pub use binary::{CONTENT_TYPE, Payload};
 pub use cordis_contract::Validation;
 pub use prost::bytes::Bytes;

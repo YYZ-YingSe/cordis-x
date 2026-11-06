@@ -195,13 +195,15 @@ async fn factory_failure_releases_capacity_but_successful_ids_are_never_reused()
         call(&handle, Endpoint::Http, "release", json!("pending"))
             .await
             .unwrap();
-        assert!(
-            call(&handle, Endpoint::Http, "install", json!({"name":"full"}))
+        for n in 0..100 {
+            let name = format!("turn-{n}");
+            call(&handle, Endpoint::Http, "install", json!({"name":name}))
                 .await
-                .unwrap_err()
-                .to_string()
-                .contains("overloaded")
-        );
+                .unwrap();
+            call(&handle, Endpoint::Http, "release", json!(name))
+                .await
+                .unwrap();
+        }
         bounded(rt.shutdown()).await.unwrap();
     }
 }

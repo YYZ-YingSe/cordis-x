@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <cordis/protocols/session/binary.hpp>
+#include <cordis/protocols/session/operations.hpp>
 #include <cordis/runtime/native.hpp>
 #include <deque>
 #include <optional>
@@ -90,8 +91,8 @@ public:
     for (int shift : {24, 16, 8, 0})
       bytes->push_back(static_cast<uint8_t>(length >> shift));
     bytes->insert(bytes->end(), payload.begin(), payload.end());
-    if (writes_.size() >= 256 ||
-        bytes->size() > 16 * session::max_message - bytes_) {
+    if (writes_.size() >= session::output_frames ||
+        bytes->size() > session::output_frames * (session::max_message + 4) - bytes_) {
       abort();
       failure_();
       throw std::runtime_error("stdio output capacity exhausted");

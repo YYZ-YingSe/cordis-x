@@ -12,6 +12,8 @@ pub trait ResourceProvider: Send + Sync + 'static {
 /// A weak Runtime capability, not a weak pointer to this facade. It must remain
 /// usable while the original Runtime owns the ticket, without pinning its owner.
 pub trait WeakResourceProvider: Send + Sync + 'static {
+    /// Confirmed successful release, including the Runtime cleanup barrier.
+    fn is_released(&self) -> bool;
     fn invoke(&self, method: String, args: Body) -> BoxFuture<'_, Result<Body>>;
     fn dispose(&self) -> BoxFuture<'_, Result<()>>;
 }
@@ -34,6 +36,9 @@ impl Resource {
     }
 }
 impl WeakResource {
+    pub fn is_released(&self) -> bool {
+        self.0.is_released()
+    }
     pub fn new(value: impl WeakResourceProvider) -> Self {
         Self(Arc::new(value))
     }

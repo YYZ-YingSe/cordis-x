@@ -26,6 +26,8 @@ pub struct ProcessSpec {
     pub args: Vec<String>,
     pub endpoint: Endpoint,
     pub timeout: Duration,
+    /// Per-instance ordinary admission (1..=128). Cleanup has separate slots.
+    pub max_inflight: usize,
     /// Grace period after a managed task receives cancellation.
     pub task_stop_timeout: Duration,
     pub composition: crate::CompositionLimits,
@@ -38,6 +40,7 @@ impl ProcessSpec {
             args: Vec::new(),
             endpoint: Endpoint::Ipc,
             timeout: Duration::from_secs(10),
+            max_inflight: 16,
             task_stop_timeout: Duration::from_secs(5),
             composition: crate::CompositionLimits::default(),
         }
@@ -191,6 +194,7 @@ impl ProcessSpec {
             .await?;
         let session = owned.with(Clone::clone)?;
         let ready = session.request("hello", json!({
+            "max_inflight": self.max_inflight,
             "capabilities": {"dependency_resources":true,"metadata":true,"effects":true,"effect_sequences":true,"scopes":true,"tasks":true,"events":true,"middleware":true,"composition":true},
             "validation": self.bindings.validation,
             "dependencies": declarations,
@@ -310,7 +314,7 @@ impl ProcessSpec {
             endpoint: self.endpoint,
             session,
             activation,
-            capacity: Arc::new(Semaphore::new(16)),
+            capacity: Arc::new(Semaphore::new(self.max_inflight)),
             cleanup_capacity: Arc::new(Semaphore::new(16)),
             resources: ready["capabilities"]["resources"]
                 .as_bool()
@@ -466,9 +470,6 @@ impl RemoteService {
                 .try_acquire_owned()
                 .map_err(|_| Error::Overloaded)?
         };
-        let (request, _scope) =
-            self.session
-                .scoped_envelope(context, command, payload.into_wire())?;
         let backend = match endpoint {
             Endpoint::Ipc => &self.ipc,
             Endpoint::Http => self
@@ -476,7 +477,11 @@ impl RemoteService {
                 .as_ref()
                 .ok_or_else(|| Error::InvalidInput("HTTP endpoint unavailable".into()))?,
         };
+        let (request, _scope) =
+            self.session
+                .scoped_envelope(context, command, payload.into_wire())?;
         let _permit = permit;
+        let operation = request.operation.clone();
         let result = backend
             .invoke(request)
             .await
@@ -501,6 +506,7 @@ impl RemoteService {
             let _ = self.session.abort(error.clone()).await;
             let _ = context.fail(error.to_string());
         }
+        self.session.complete_operation(&operation);
         result
     }
 

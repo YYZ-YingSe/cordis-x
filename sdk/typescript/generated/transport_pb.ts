@@ -170,6 +170,10 @@ export type Frame = Message<"cordis.transport.Frame"> & {
   activation?: Identity | undefined;
 
   /**
+   * Canonical "slot:generation"; slot capacity is bounded per Session.
+   * Each direction has its own allocator. Completed slots may advance their
+   * generation; waiting-future cancellation is not completion.
+   *
    * @generated from field: string operation = 3;
    */
   operation: string;

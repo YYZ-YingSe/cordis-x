@@ -1,5 +1,6 @@
 #pragma once
 #include "binary.hpp"
+#include "operations.hpp"
 #include <algorithm>
 #include <cordis/core/error.hpp>
 #include <cordis/runtime/native.hpp>
@@ -22,7 +23,7 @@ class DependencyChannel {
   std::function<void(std::vector<uint8_t>)> write;
   std::string session;
   Identity activation;
-  std::uint64_t next = 0;
+  OperationOutbox operations;
   std::uint64_t next_resource = 0;
   bool closed = false;
   bool cleanup_calls = false;
@@ -34,8 +35,8 @@ public:
     std::lock_guard lock(mutex);
     if (closed)
       throw Refusal("closed", "dependency channel closed");
-    if (next_resource >= 4096)
-      throw Refusal("resources_exhausted", "dependency resource history full");
+    if (next_resource == UINT64_MAX)
+      throw Refusal("resources_exhausted", "resource identity space exhausted");
     return "r" + std::to_string(++next_resource);
   }
   void configure(const std::string &token, const Identity &identity,
@@ -124,30 +125,18 @@ public:
                                 return item.second.lane == lane;
                               }) >= 16)
               throw Refusal("overloaded", "dependency call capacity reached");
-            if (next >= 65536)
-              throw Refusal("session_exhausted",
-                            "dependency operation history full");
-            operation = std::to_string(++next);
+            operation = operations.allocate(lane);
             Request request{Header{session, activation, operation}, command,
                             payload};
-            bytes = encode(Frame(std::move(request)));
+            try { bytes = encode(Frame(std::move(request))); }
+            catch (...) { operations.complete(operation); throw; }
             output = write;
             pending.emplace(operation, Pending{std::move(reply), lane});
           }
           try {
             output(std::move(bytes));
           } catch (...) {
-            std::function<void(native::Outcome<Payload>)> complete;
-            {
-              std::lock_guard lock(mutex);
-              auto found = pending.find(operation);
-              if (found != pending.end()) {
-                complete = std::move(found->second.reply);
-                pending.erase(found);
-              }
-            }
-            if (complete)
-              complete(std::current_exception());
+            close(); // Submission may have partially written: retain unknown outcome.
           }
         });
   }
@@ -175,6 +164,7 @@ public:
             "outcome unknown: " + outcome.code + ": " + outcome.message));
       complete = std::move(found->second.reply);
       pending.erase(found);
+      operations.complete(response.operation);
     }
     complete(std::move(result));
   }

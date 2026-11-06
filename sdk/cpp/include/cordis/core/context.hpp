@@ -150,7 +150,7 @@ inline Async<Message> ResourceHandle::invoke(Context ctx, std::string method,
       std::move(method), std::move(args));
 }
 inline Async<void> ResourceHandle::dispose(Context ctx) const {
-  return detail::invoke_owned(
-      Context::require(ctx.operations_->resource_dispose), state_);
+  auto call = Context::require(ctx.operations_->resource_dispose);
+  return completion_.observe([call = std::move(call), state = state_]() -> Async<void> { co_await call(state); });
 }
 } // namespace cordis

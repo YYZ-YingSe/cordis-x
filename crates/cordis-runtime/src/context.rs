@@ -275,12 +275,14 @@ impl Context {
             label.into(),
             self.clone(),
             Box::new(move |ctx| Box::pin(cleanup(ctx))),
+            Vec::new(),
         )?;
-        self.owner.effects.lock().unwrap().push(effect.clone());
-        Ok(EffectHandle {
-            context: effect.context().owned_context(),
-            effect,
-        })
+        self.owner
+            .effects
+            .lock()
+            .unwrap()
+            .insert(effect.snapshot().id, effect.clone());
+        Ok(EffectHandle::new(effect))
     }
 
     /// Acquisition and registration belong to the executor even when this future is dropped.
@@ -335,7 +337,7 @@ impl Context {
         Ok(Resource {
             value,
             gate,
-            context: effect.context.clone(),
+            context: effect.context().ok_or(Error::Closed)?,
             effect,
         })
     }
@@ -442,14 +444,20 @@ impl Context {
         let (result, rx) = watch::channel(None);
         let handle = TaskHandle { result: rx };
         let cleanup_handle = handle.clone();
-        self.defer(label, move |_| async move { cleanup_handle.join().await })?;
+        let completion = self.defer(label, move |_| async move { cleanup_handle.join().await })?;
         let (mut context, authority, pins) = self.operation_context()?;
         context.execution_barriers.clear();
         self.executor.spawn(async move {
             let outcome = protected(async move { task(context).await }).await;
             authority.expire();
             drop(pins);
+            let succeeded = outcome.is_ok();
             result.send_replace(Some(outcome));
+            if succeeded {
+                // The join inverse has no remaining work after successful
+                // completion. A closing owner performs its ordered recovery.
+                let _ = completion.dispose().await;
+            }
             drop(leases);
         });
         Ok(handle)

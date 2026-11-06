@@ -1,3 +1,4 @@
+import { Identities, makeRoom, Completion, registration } from './retention.ts';
 import type { Message } from '../../core/message.ts';
 import type { EventFlow } from '../../core/events.ts';
 import { payload as data, one, controlOnly } from '../../protocols/session/messages.ts';
@@ -252,8 +253,9 @@ export class Effect {
     this.effect = effect;
     this.grant = grant;
   }
-  async dispose(): Promise<void> {
-    await this.channel.request('effect_dispose', { effect: this.effect, grant: this.grant });
+  private disposeCompletion = new Completion<void>();
+  dispose(): Promise<void> {
+    return this.disposeCompletion.observe(async () => { await this.channel.request('effect_dispose', { effect: this.effect, grant: this.grant }); });
   }
 }
 
@@ -263,7 +265,7 @@ type EffectRecord = { cleanup?: Cleanup; result?: Promise<void>; released: boole
 /** Host-side callback storage, separate from the Runtime's ownership decisions. */
 export class EffectRegistry {
   private entries = new Map<string, EffectRecord>();
-  private next = 0;
+  private next = new Identities();
   async register(
     channel: DependencyChannel,
     context: string,
@@ -272,11 +274,11 @@ export class EffectRegistry {
   ): Promise<Effect> {
     if (Buffer.byteLength(label, 'utf8') > 1024)
       throw new Refusal('invalid_argument', 'effect label too long');
-    if (this.next >= 4096) throw new Refusal('effects_exhausted', 'effect history full');
-    const effect = `e${++this.next}`;
+    makeRoom(this.entries, 4096, (e) => e.released);
+    const effect = this.next.next('e');
     // Store before sending: cleanup can arrive even if the acknowledgement is lost.
     this.entries.set(effect, { cleanup, released: false });
-    const reply = await channel.request('effect_register', { context, effect, label });
+    const reply = await registration(channel.request('effect_register', { context, effect, label }), () => this.entries.delete(effect));
     if (
       !reply ||
       typeof reply !== 'object' ||

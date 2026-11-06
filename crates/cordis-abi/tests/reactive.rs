@@ -415,7 +415,6 @@ async fn subscription_dispatch_run_and_callback_limits_do_not_orphan_captures() 
     capabilities.reactive.subscriptions = 1;
     capabilities.reactive.dispatches = 1;
     capabilities.reactive.runs = 1;
-    capabilities.reactive.calls = 1;
     let rig = rig(&files, cordis_wire::json!({}), capabilities).await;
     invoke_json(&rig.handle, "on", json!({"id":"a"}))
         .await
@@ -430,17 +429,13 @@ async fn subscription_dispatch_run_and_callback_limits_do_not_orphan_captures() 
         .await
         .unwrap();
     invoke_json(&rig.handle, "join", d).await.unwrap();
-    rejected(
-        invoke_json(&rig.handle, "emit", cordis_wire::json!({}))
+    for _ in 0..100 {
+        let dispatch = invoke_json(&rig.handle, "emit", cordis_wire::json!({}))
             .await
-            .unwrap_err(),
-        "overloaded",
-    );
-    assert!(invoke_json(&rig.handle, "run", json!(1)).await.is_err());
-    rejected(
-        invoke_json(&rig.handle, "run", json!(1)).await.unwrap_err(),
-        "overloaded",
-    );
+            .unwrap();
+        invoke_json(&rig.handle, "join", dispatch).await.unwrap();
+        invoke_json(&rig.handle, "run", json!(1)).await.unwrap();
+    }
     rejected(
         invoke_json(&rig.handle, "on", json!({"alias":"missing"}))
             .await

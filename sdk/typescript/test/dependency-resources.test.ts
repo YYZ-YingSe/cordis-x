@@ -48,7 +48,8 @@ test('resource handles outlive acquisition, use each current Context, and reject
   s.ok(2);
   await release;
   await current.finish();
-  await assert.rejects(handle.dispose(current), { code: 'closed' });
+  await handle.dispose(current); // An already observed result needs no new call.
+  assert.equal(s.sent.length, 3);
 });
 
 test('acquisition checks declarations, cleanup authority and host support before sending', async () => {
@@ -141,18 +142,13 @@ test('resource calls, cleanup calls and disposal retain separate bounded capacit
   await cleanup.finish();
 });
 
-test('resource capability history is bounded and never reuses an ID', async () => {
-  const s = setup(), ctx = s.context();
-  const ids = new Set<Value>();
-  for (let i = 0; i < 4096; i++) {
-    const pending = ctx.acquire('counters', 'counter', body(null));
-    const id = (s.sent[i].payload.control as Record<string, Value>).resource;
-    assert.equal(ids.has(id), false);
-    ids.add(id);
-    s.ok(i, { resource: id, grant: 'b'.repeat(32) });
-    await pending;
+test('resource identities outlive the former history limit and are never reused', () => {
+  const s = setup();
+  let previous = 0n;
+  for (let i = 0; i < 100_000; i++) {
+    const id = s.channel.resourceId();
+    const next = BigInt(id.slice(1));
+    assert.equal(next, previous + 1n);
+    previous = next;
   }
-  await assert.rejects(ctx.acquire('counters', 'counter', body(null)), { code: 'resources_exhausted' });
-  assert.equal(s.sent.length, 4096);
-  await ctx.finish();
 });

@@ -13,7 +13,16 @@ use wasmtime::{Store, StoreLimits, StoreLimitsBuilder};
 #[derive(Clone, Debug)]
 pub struct Limits {
     pub memory_bytes: usize,
-    pub fuel_per_call: u64,
+    /// Store fuel refilled when an export is admitted. Concurrent managed exports
+    /// share this budget; this is not an independent per-request allowance.
+    pub fuel_on_admission: u64,
+    /// Instantiation, descriptor construction and activation have a separate
+    /// one-time CPU budget from ordinary exports.
+    pub initialization_fuel: u64,
+    pub table_elements: usize,
+    pub core_instances: usize,
+    pub tables: usize,
+    pub memories: usize,
     pub resources: usize,
     pub pending_calls: usize,
     pub artifact_bytes: usize,
@@ -22,7 +31,12 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             memory_bytes: 16 * 1024 * 1024,
-            fuel_per_call: 50_000_000,
+            fuel_on_admission: 50_000_000,
+            initialization_fuel: 1_000_000_000,
+            table_elements: 4096,
+            core_instances: 8,
+            tables: 8,
+            memories: 1,
             resources: 1024,
             pending_calls: 16,
             artifact_bytes: 16 * 1024 * 1024,
@@ -71,7 +85,8 @@ impl Module {
             || limits.pending_calls == 0
             || limits.pending_calls > 1024
             || limits.memory_bytes == 0
-            || limits.fuel_per_call == 0
+            || limits.fuel_on_admission == 0
+            || limits.initialization_fuel == 0
             || limits.resources == 0
         {
             return Err(Error::InvalidInput(
@@ -107,15 +122,17 @@ impl Module {
     pub fn instantiate(&self) -> Result<Guest> {
         let limits = StoreLimitsBuilder::new()
             .memory_size(self.limits.memory_bytes)
-            .table_elements(4096)
-            .instances(8)
-            .tables(8)
-            .memories(1)
+            .table_elements(self.limits.table_elements)
+            .instances(self.limits.core_instances)
+            .tables(self.limits.tables)
+            .memories(self.limits.memories)
             .trap_on_grow_failure(true)
             .build();
         let mut store = Store::new(&self.code.engine, Data(limits));
         store.limiter(|data| &mut data.0);
-        store.set_fuel(self.limits.fuel_per_call).map_err(unknown)?;
+        store
+            .set_fuel(self.limits.initialization_fuel)
+            .map_err(unknown)?;
         let mut linker = Linker::new(&self.code.engine);
         bindings::Plugin::add_to_linker::<_, HasSelf<Data>>(&mut linker, |data| data)
             .map_err(unknown)?;
@@ -124,7 +141,8 @@ impl Module {
         Ok(Guest {
             store,
             bindings,
-            fuel: self.limits.fuel_per_call,
+            fuel: self.limits.fuel_on_admission,
+            initialization_fuel: self.limits.initialization_fuel,
             validation: self.validation,
         })
     }
@@ -134,6 +152,7 @@ pub(crate) struct Guest {
     store: Store<Data>,
     bindings: bindings::Plugin,
     fuel: u64,
+    initialization_fuel: u64,
     validation: cordis_contract::Validation,
 }
 #[derive(Clone, Copy)]
@@ -153,7 +172,9 @@ impl Guest {
         self.store.set_fuel(self.fuel).map_err(unknown)
     }
     pub fn describe(&mut self) -> Result<(ContractId, Descriptor)> {
-        self.budget()?;
+        self.store
+            .set_fuel(self.initialization_fuel)
+            .map_err(unknown)?;
         let contract = self
             .bindings
             .cordis_plugin_service()
@@ -179,7 +200,9 @@ impl Guest {
     }
     pub fn create(&mut self, config: &Value) -> Result<ResourceAny> {
         let config = input(&config.clone().into())?;
-        self.budget()?;
+        self.store
+            .set_fuel(self.initialization_fuel)
+            .map_err(unknown)?;
         result(
             self.bindings
                 .cordis_plugin_service()
@@ -198,6 +221,9 @@ impl Guest {
         let api = self.bindings.cordis_plugin_service();
         match op {
             Op::Activate => {
+                self.store
+                    .set_fuel(self.initialization_fuel)
+                    .map_err(unknown)?;
                 result(api.instance().call_activate(&mut self.store, id)).map(|()| Reply::Empty)
             }
             Op::Invoke => output(

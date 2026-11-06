@@ -17,6 +17,7 @@ struct Entry {
 struct State {
     phase: &'static str,
     outcome: Option<Result<Value>>,
+    observed: bool,
 }
 impl Tasks {
     pub fn register(&self, ctx: &Context, payload: &Value, session: WeakSession) -> Result<Value> {
@@ -28,6 +29,11 @@ impl Tasks {
         let mut entries = self.entries.lock().unwrap();
         if entries.contains_key(&id) {
             return Err(Error::InvalidInput("duplicate task ID".into()));
+        }
+        if entries.len() >= 4096 {
+            entries.retain(|_, e| {
+                !(e.state.lock().unwrap().observed && matches!(e.handle.outcome(), Some(Ok(()))))
+            });
         }
         if entries.len() >= 4096
             || entries
@@ -44,6 +50,7 @@ impl Tasks {
         let state = Arc::new(Mutex::new(State {
             phase: "running",
             outcome: None,
+            observed: false,
         }));
         let task_state = state.clone();
         let task_id = id.clone();
@@ -77,6 +84,7 @@ impl Tasks {
                 *task_state.lock().unwrap() = State {
                     phase,
                     outcome: Some(result.clone()),
+                    observed: false,
                 };
                 if phase == "not_executed" {
                     Ok(())
@@ -109,7 +117,11 @@ impl Tasks {
         match command {
             "task_join" => {
                 let native = handle.join().await;
-                let result = state.lock().unwrap().outcome.clone();
+                let result = {
+                    let mut state = state.lock().unwrap();
+                    state.observed = true;
+                    state.outcome.clone()
+                };
                 result.unwrap_or_else(|| {
                     native
                         .map(|()| json!({}))

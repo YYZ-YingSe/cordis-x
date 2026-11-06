@@ -204,7 +204,8 @@ impl<T: ?Sized + Send + Sync + 'static> BrokerRegistration<T> {
     ) -> Result<()> {
         let effect = self.effect.upgrade().ok_or(Error::Closed)?;
         let inner = effect
-            .context
+            .context()
+            .ok_or(Error::Closed)?
             .inner
             .upgrade()
             .ok_or(Error::RuntimeStopped)?;

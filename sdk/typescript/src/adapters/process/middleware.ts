@@ -1,3 +1,5 @@
+import { Identities, makeRoom, Completion, registration } from './retention.ts';
+import { OperationInbox } from '../../protocols/session/operations.ts';
 import type { Message } from '../../core/message.ts';
 import { payload, one, type Payload } from '../../protocols/session/messages.ts';
 import { Refusal } from '../../core/error.ts';
@@ -45,8 +47,9 @@ export class MiddlewareRegistration {
     this.handler = handler;
     this.grant = grant;
   }
-  async dispose(): Promise<void> {
-    await this.channel.request('middleware_dispose', { handler: this.handler, grant: this.grant });
+  private disposeCompletion = new Completion<void>();
+  dispose(): Promise<void> {
+    return this.disposeCompletion.observe(async () => { await this.channel.request('middleware_dispose', { handler: this.handler, grant: this.grant }); });
   }
 }
 type Entry = { callback?: MiddlewareCallback; running: number };
@@ -54,9 +57,9 @@ type Terminal = { callback: TerminalCallback; used: boolean };
 export class MiddlewareRegistry {
   private handlers = new Map<string, Entry>();
   private runs = new Map<string, Terminal>();
-  private seen = new Set<string>();
-  private nextHandler = 0;
-  private nextRun = 0;
+  private seen = new OperationInbox();
+  private nextHandler = new Identities();
+  private nextRun = new Identities();
   private declarations: Record<string, { name: string; revision: string }>;
   constructor(declarations: Record<string, { name: string; revision: string }>) {
     this.declarations = declarations;
@@ -72,11 +75,10 @@ export class MiddlewareRegistry {
     callback: MiddlewareCallback,
   ): Promise<MiddlewareRegistration> {
     this.check(middleware);
-    if (this.nextHandler >= 4096)
-      throw new Refusal('middleware_exhausted', 'handler history full');
-    const handler = `m${++this.nextHandler}`;
+    makeRoom(this.handlers, 4096, (e) => !e.callback && !e.running);
+    const handler = this.nextHandler.next('m');
     this.handlers.set(handler, { callback, running: 0 });
-    const reply = await channel.request('middleware_register', { context, middleware, handler });
+    const reply = await registration(channel.request('middleware_register', { context, middleware, handler }), () => this.handlers.delete(handler));
     if (
       !reply ||
       typeof reply !== 'object' ||
@@ -96,8 +98,8 @@ export class MiddlewareRegistry {
     callback: TerminalCallback,
   ): Promise<Message> {
     this.check(middleware);
-    if (this.nextRun >= 4096) throw new Refusal('middleware_exhausted', 'run history full');
-    const run = `q${++this.nextRun}`;
+    makeRoom(this.runs, 4096, () => false);
+    const run = this.nextRun.next('q');
     this.runs.set(run, { callback, used: false });
     try {
       const result=one(await channel.requestPayload('middleware_run', payload({ context, middleware, run }, args)));
@@ -108,13 +110,11 @@ export class MiddlewareRegistry {
       throw error;
     }
   }
-  private admit(call: string) {
-    if (!/^w[0-9]{1,20}$/.test(call) || this.seen.has(call))
-      throw new Refusal('closed', 'middleware callback unavailable');
-    if (this.seen.size >= 4096)
-      throw new Refusal('session_exhausted', 'middleware callback history full');
-    this.seen.add(call);
+  private admit(call: string): () => void {
+    if (!call.startsWith('w')) throw new Refusal('closed', 'middleware callback unavailable');
+    return this.seen.admit(call.slice(1));
   }
+
   private async outcome(callback: () => Message | Promise<Message>): Promise<Payload> {
     return payload(null, await callback());
   }
@@ -127,7 +127,7 @@ export class MiddlewareRegistry {
   ): Promise<Payload> {
     const entry = this.handlers.get(handler);
     if (!entry?.callback) throw new Refusal('closed', 'middleware handler unavailable');
-    this.admit(call);
+    const finish = this.admit(call);
     entry.running++;
     try {
       return await this.outcome(() => entry.callback!(args, ctx, next));
@@ -137,17 +137,19 @@ export class MiddlewareRegistry {
       await ctx.finish();
       await following;
       entry.running--;
+      finish();
     }
   }
   async terminal(run: string, call: string, args: Message, ctx: Context): Promise<Payload> {
     const entry = this.runs.get(run);
     if (!entry || entry.used) throw new Refusal('closed', 'terminal unavailable');
-    this.admit(call);
+    const finish = this.admit(call);
     entry.used = true;
     try {
       return await this.outcome(() => entry.callback(args, ctx));
     } finally {
       await ctx.finish();
+      finish();
     }
   }
   release(handler: string) {

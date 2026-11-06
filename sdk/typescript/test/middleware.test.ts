@@ -26,7 +26,7 @@ function setup() {
       undefined,
       registry,
     );
-  const next = () => new Next(channel, 'b'.repeat(32), 'w0', 'c'.repeat(32));
+  const next = () => new Next(channel, 'b'.repeat(32), 'w0:1', 'c'.repeat(32));
   const reply = (i: number, value: Value) => {
     const { session, activation, operation } = sent[i];
     channel.receive({
@@ -46,7 +46,7 @@ test('next is single-use, expires, and detached next waits drain before callback
     return body(5);
   });
   const continuation = next();
-  const running = registry.invoke('m1', 'w0', body(7), ctx(), continuation);
+  const running = registry.invoke('m1', 'w0:1', body(7), ctx(), continuation);
   await assert.rejects(continuation.run(body(8)), { code: 'duplicate_next' });
   assert.throws(() => registry.release('m1'), { code: 'middleware_running' });
   await new Promise<void>((resolve) => setImmediate(resolve));
@@ -76,15 +76,15 @@ test('business failures reach the response outcome; terminal runs once and short
   });
   reply(0, { handler: 'm1', grant: 'd'.repeat(32) });
   await registration;
-  await assert.rejects(registry.invoke('m1','w0',body(null),ctx(),next()),{code:'closed',message:'business'});
-  await assert.rejects(registry.invoke('m1', 'w0', body(null), ctx(), next()), { code: 'closed' });
+  await assert.rejects(registry.invoke('m1','w0:1',body(null),ctx(),next()),{code:'closed',message:'business'});
+  await assert.rejects(registry.invoke('m1', 'w0:1', body(null), ctx(), next()), { code: 'duplicate_operation' });
   let saved: PublicContext | undefined;
   const running = ctx().waterfall('request', body(2), (args, ctx) => {
     saved = ctx;
     return args;
   });
-  assert.deepEqual(await registry.terminal('q1', 'w1', body(3), ctx()), payload(null,body(3)));
-  await assert.rejects(registry.terminal('q1', 'w2', body(3), ctx()), { code: 'closed' });
+  assert.deepEqual(await registry.terminal('q1', 'w0:2', body(3), ctx()), payload(null,body(3)));
+  await assert.rejects(registry.terminal('q1', 'w0:3', body(3), ctx()), { code: 'closed' });
   await assert.rejects(saved!.invoke('logger', 'write', body(null)), { code: 'closed' });
   reply(1, 3);
   assert.deepEqual(await running,body(3));
