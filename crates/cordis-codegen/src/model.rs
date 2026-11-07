@@ -127,10 +127,23 @@ pub struct Service {
     pub name: String,
     pub revision: String,
     pub descriptor: Descriptor,
+    /// Construction belongs to an implementation, not the public service surface.
+    pub implementation: Option<Implementation>,
+}
+#[derive(Debug, serde::Serialize)]
+pub struct Implementation {
     pub config: MessageContract,
     pub dependencies: BTreeMap<String, String>,
 }
 impl Service {
+    pub fn dependencies(&self) -> &BTreeMap<String, String> {
+        static EMPTY: BTreeMap<String, String> = BTreeMap::new();
+        self.implementation
+            .as_ref()
+            .map(|binding| &binding.dependencies)
+            .unwrap_or(&EMPTY)
+    }
+
     /// The current runtime binding manifest, generated from the same controls
     /// as the typed API. Host-selected grants still determine authorization.
     pub fn bindings(&self) -> serde_json::Value {

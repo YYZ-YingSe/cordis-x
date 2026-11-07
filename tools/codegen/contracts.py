@@ -8,6 +8,8 @@ def generate(compiler, sources, output, manifest):
         command = [str(compiler), "generate", "--input", str(sources / item["source"]),
                    "--proto-path", str(sources), "--out", str(output / name),
                    "--languages", item["languages"]]
+        if "implementation" in item:
+            command += ["--implementation", str(sources / item["implementation"])]
         for package in item.get("rust_packages", []):
             command += ["--rust-package", package]
         subprocess.run(command, check=True)

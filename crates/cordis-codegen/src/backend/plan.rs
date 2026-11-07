@@ -34,7 +34,7 @@ pub struct Resource {
 pub struct Service {
     pub key: String,
     pub prefix: String,
-    pub config: Shape,
+    pub config: Option<Shape>,
     pub methods: Vec<Operation>,
     pub resources: Vec<Resource>,
     pub controls: Vec<Control>,
@@ -151,6 +151,7 @@ impl Plan {
                 "close",
                 "dispose",
                 "interface",
+                "contract",
                 "descriptor",
                 "dependencies",
             ] {
@@ -186,7 +187,7 @@ impl Plan {
                 });
             }
             let mut aliases = Scope::default();
-            for alias in service.dependencies.keys() {
+            for alias in service.dependencies().keys() {
                 aliases.insert(alias, Case::Member, key)?;
             }
             let mut controls = Vec::new();
@@ -221,7 +222,10 @@ impl Plan {
             services.push(Service {
                 key: key.clone(),
                 prefix,
-                config: shape(module, &service.config),
+                config: service
+                    .implementation
+                    .as_ref()
+                    .map(|binding| shape(module, &binding.config)),
                 methods: operations,
                 resources,
                 controls,
@@ -276,7 +280,7 @@ impl Writer {
 }
 pub fn dependencies(module: &Module, service: &Service) -> BTreeMap<String, serde_json::Value> {
     module.services()[&service.key]
-        .dependencies
+        .dependencies()
         .values()
         .map(|key| {
             let dep = &module.services()[key];

@@ -258,13 +258,18 @@ pub fn compile(
                 "missing or duplicate contract identity",
             ));
         }
-        let config = module.pool.get_message_by_name(&config).ok_or_else(|| {
-            Diagnostic::new(service.full_name(), "config must name a protobuf message")
-        })?;
-        module
-            .shape(config.full_name())
-            .resolve()
-            .map_err(|e| Diagnostic::new(service.full_name(), e))?;
+        let config = if config.is_empty() {
+            None
+        } else {
+            let message = module.pool.get_message_by_name(&config).ok_or_else(|| {
+                Diagnostic::new(service.full_name(), "config must name a protobuf message")
+            })?;
+            let shape = module.shape(message.full_name());
+            shape
+                .resolve()
+                .map_err(|e| Diagnostic::new(service.full_name(), e))?;
+            Some(shape)
+        };
         let mut methods = BTreeMap::new();
         let mut resources = BTreeMap::new();
         let mut controls = BTreeMap::new();
@@ -414,8 +419,10 @@ pub fn compile(
                     name,
                     revision,
                     descriptor: interface,
-                    config: module.shape(config.full_name()),
-                    dependencies: BTreeMap::new(),
+                    implementation: config.map(|config| crate::model::Implementation {
+                        config,
+                        dependencies: BTreeMap::new(),
+                    }),
                 },
             )
             .is_some()
@@ -451,7 +458,20 @@ pub fn compile(
             }
             resolved.insert(alias, target.name().to_owned());
         }
-        module.services.get_mut(&key).unwrap().dependencies = resolved;
+        if let Some(binding) = module
+            .services
+            .get_mut(&key)
+            .unwrap()
+            .implementation
+            .as_mut()
+        {
+            binding.dependencies = resolved;
+        } else if !resolved.is_empty() {
+            return Err(Diagnostic::new(
+                &key,
+                "implementation dependencies require an explicit construction binding",
+            ));
+        }
     }
     if module.services.is_empty() {
         return Err(Diagnostic::new(

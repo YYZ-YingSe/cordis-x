@@ -1,5 +1,6 @@
 //! Contract compiler. Frontend semantics are independent of language backends.
 pub mod backend;
+mod implementation;
 pub mod model;
 pub mod output;
 mod paths;

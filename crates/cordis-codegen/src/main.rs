@@ -4,7 +4,7 @@ use cordis_codegen::{
 };
 use std::path::PathBuf;
 fn run() -> Result<()> {
-    let usage = "usage: cordis-codegen generate --input FILE --out DIRECTORY [--proto-path DIR] [--languages cpp,rust,typescript] [--ts-sdk IMPORT] [--rust-package PROTO_PACKAGE=RUST_MODULE] [--protoc FILE] [--protoc-gen-es FILE]";
+    let usage = "usage: cordis-codegen generate --input FILE --out DIRECTORY [--proto-path DIR] [--languages cpp,rust,typescript] [--ts-sdk IMPORT] [--rust-package PROTO_PACKAGE=RUST_MODULE] [--implementation FILE] [--protoc FILE] [--protoc-gen-es FILE]";
     let mut args = std::env::args().skip(1);
     let command = args.next().ok_or_else(|| Diagnostic::new("cli", usage))?;
     if command == "--help" {
@@ -18,6 +18,7 @@ fn run() -> Result<()> {
     let mut includes = Vec::new();
     let mut input = None;
     let mut out = None;
+    let mut implementation = None;
     let mut languages = "cpp,rust,typescript".to_string();
     let mut ts_sdk = "@cordis-x/sdk".to_string();
     let mut rust_packages = Vec::new();
@@ -31,6 +32,7 @@ fn run() -> Result<()> {
             "--input" => input = Some(value),
             "--proto-path" => includes.push(PathBuf::from(value)),
             "--out" => out = Some(PathBuf::from(value)),
+            "--implementation" => implementation = Some(PathBuf::from(value)),
             "--languages" => languages = value,
             "--ts-sdk" => ts_sdk = value,
             "--rust-package" => rust_packages.push(value),
@@ -40,6 +42,11 @@ fn run() -> Result<()> {
     let input = input.ok_or_else(|| Diagnostic::new("cli", "--input is required"))?;
     let out = out.ok_or_else(|| Diagnostic::new("cli", "--out is required"))?;
     let mut module = cordis_codegen::compile(std::path::Path::new(&input), &includes, &tools)?;
+    if let Some(path) = implementation {
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| Diagnostic::new(path.display().to_string(), e))?;
+        module.bind_implementations(&text)?;
+    }
     for mapping in rust_packages {
         let (package, path) = mapping.split_once('=').ok_or_else(|| {
             Diagnostic::new("--rust-package", "expected PROTO_PACKAGE=RUST_MODULE")

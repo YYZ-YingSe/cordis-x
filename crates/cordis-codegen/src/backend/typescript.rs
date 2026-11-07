@@ -177,69 +177,71 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
         ));
     }
     w.close("}");
-    w.open(format!("export function {p}Export(create: (config: {}) => {p}Server | Promise<{p}Server>, config: sdk.Value): sdk.Service {{",ty(&s.config)));
-    w.line(format!(
-        "const decoded = sdk.typed.jsonInput(config, {}, {});",
-        value(&model.config),
-        codec(&s.config)
-    ));
-    w.line(format!("let server: {p}Server | undefined;"));
-    w.line(format!("const current = (): {p}Server => {{ if (!server) throw new sdk.Refusal('inactive', 'service has not been activated'); return server; }};"));
-    w.open("return {");
-    w.line("typedDispatch: true,");
-    w.line(format!("interface: {p}Client.interface(),"));
-    let bindings = model.bindings();
-    w.line(format!("events: {},", value(&bindings["events"])));
-    w.line(format!("middleware: {},", value(&bindings["middleware"])));
-    w.line(format!("composition: {},", value(&serde_json::json!({"factories":bindings["factories"], "provisions":bindings["provisions"]}))));
-    w.line(format!(
-        "contract: {},",
-        value(&serde_json::json!({"name":model.name,"revision":model.revision}))
-    ));
-    let deps: std::collections::BTreeMap<_, _> = model
-        .dependencies
-        .values()
-        .map(|key| {
-            let d = &module.services()[key];
-            (&d.name, &d.revision)
-        })
-        .collect();
-    w.line(format!("dependencies: {},", value(&deps)));
-    w.line(format!(
-        "dependencyInterfaces: {},",
-        value(&dependencies(module, s))
-    ));
-    w.line("async activate(ctx) { if (server) throw new sdk.Refusal('already_active', 'service is already active'); server = await create(decoded); if (!server) throw new Error('null service implementation'); await server.activate?.(ctx); },");
-    w.line("async deactivate(ctx) { await server?.deactivate?.(ctx); },");
-    w.open("async invoke(method, args, ctx) {");
-    w.line("const server = current();");
-    dispatch(w, &s.methods, "server");
-    w.close("},");
-    if !s.resources.is_empty() {
-        w.open("async acquire(kind, args, ctx) {");
+    if let (Some(config), Some(binding)) = (&s.config, &model.implementation) {
+        w.open(format!("export function {p}Export(create: (config: {}) => {p}Server | Promise<{p}Server>, config: sdk.Value): sdk.Service {{",ty(config)));
+        w.line(format!(
+            "const decoded = sdk.typed.jsonInput(config, {}, {});",
+            value(&binding.config),
+            codec(config)
+        ));
+        w.line(format!("let server: {p}Server | undefined;"));
+        w.line(format!("const current = (): {p}Server => {{ if (!server) throw new sdk.Refusal('inactive', 'service has not been activated'); return server; }};"));
+        w.open("return {");
+        w.line("typedDispatch: true,");
+        w.line(format!("interface: {p}Client.interface(),"));
+        let bindings = model.bindings();
+        w.line(format!("events: {},", value(&bindings["events"])));
+        w.line(format!("middleware: {},", value(&bindings["middleware"])));
+        w.line(format!("composition: {},", value(&serde_json::json!({"factories":bindings["factories"], "provisions":bindings["provisions"]}))));
+        w.line(format!(
+            "contract: {},",
+            value(&serde_json::json!({"name":model.name,"revision":model.revision}))
+        ));
+        let deps: std::collections::BTreeMap<_, _> = model
+            .dependencies()
+            .values()
+            .map(|key| {
+                let d = &module.services()[key];
+                (&d.name, &d.revision)
+            })
+            .collect();
+        w.line(format!("dependencies: {},", value(&deps)));
+        w.line(format!(
+            "dependencyInterfaces: {},",
+            value(&dependencies(module, s))
+        ));
+        w.line("async activate(ctx) { if (server) throw new sdk.Refusal('already_active', 'service is already active'); server = await create(decoded); if (!server) throw new Error('null service implementation'); await server.activate?.(ctx); },");
+        w.line("async deactivate(ctx) { await server?.deactivate?.(ctx); },");
+        w.open("async invoke(method, args, ctx) {");
         w.line("const server = current();");
-        for r in &s.resources {
-            let rp = &r.prefix;
-            if let Some(k) = &r.wire {
-                w.open(format!("if (kind === {}) {{", lit(k)));
-            } else {
-                w.open("{");
-            }
-            w.line(format!(
+        dispatch(w, &s.methods, "server");
+        w.close("},");
+        if !s.resources.is_empty() {
+            w.open("async acquire(kind, args, ctx) {");
+            w.line("const server = current();");
+            for r in &s.resources {
+                let rp = &r.prefix;
+                if let Some(k) = &r.wire {
+                    w.open(format!("if (kind === {}) {{", lit(k)));
+                } else {
+                    w.open("{");
+                }
+                w.line(format!(
                 "const decoded = sdk.typed.input(args, {rp}Signature.args, {}, ctx.validation);",
                 codec(&r.args)
             ));
-            w.line(format!("const object = await sdk.typed.checked({rp}Signature.errors, async () => server.{}(ctx, {}decoded));",r.name,if r.wire.is_none(){"kind, "}else{""}));
-            w.line(format!("return new {rp}Export(object);"));
-            w.close("}");
+                w.line(format!("const object = await sdk.typed.checked({rp}Signature.errors, async () => server.{}(ctx, {}decoded));",r.name,if r.wire.is_none(){"kind, "}else{""}));
+                w.line(format!("return new {rp}Export(object);"));
+                w.close("}");
+            }
+            if !s.resources.iter().any(|r| r.wire.is_none()) {
+                w.line("throw new sdk.Refusal('unknown_resource_kind', kind);");
+            }
+            w.close("},");
         }
-        if !s.resources.iter().any(|r| r.wire.is_none()) {
-            w.line("throw new sdk.Refusal('unknown_resource_kind', kind);");
-        }
-        w.close("},");
+        w.close("};");
+        w.close("}");
     }
-    w.close("};");
-    w.close("}");
     w.open(format!("export class {p}Client {{"));
     w.line(format!(
         "private readonly dependency = {};",
@@ -248,6 +250,10 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
     w.line(format!(
         "static interface(): sdk.Interface {{ return {}; }}",
         value(&cordis_contract::portable::encode(&model.descriptor))
+    ));
+    w.line(format!(
+        "static contract() {{ return {}; }}",
+        value(&serde_json::json!({"name":model.name,"revision":model.revision}))
     ));
     for o in &s.methods {
         client_method(w, o, false);
@@ -274,7 +280,7 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
     }
     w.close("}");
     w.open(format!("export class {p}Dependencies {{"));
-    for (alias, target) in &model.dependencies {
+    for (alias, target) in model.dependencies() {
         let tp = ident(target, Case::Type);
         w.line(format!(
             "static {}(): {tp}Client {{ return new {tp}Client(); }}",

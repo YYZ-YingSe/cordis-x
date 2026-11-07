@@ -188,6 +188,10 @@ npm run codegen -- generate \
   --languages rust,cpp,typescript
 ```
 
+公共服务合同与提供方构造配置支持独立生成，详见[实现绑定](crates/cordis-codegen/README.md)。
+
+
+
 输入、输出和模块引用由使用方的构建配置决定。应用不需要采用 Cordis-X 仓库的目录结构。
 
 ## 接入应用

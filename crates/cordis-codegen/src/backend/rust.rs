@@ -186,10 +186,12 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
         error_type(w, &o.prefix, &o.signature.errors);
     }
     w.open(format!("pub trait {p}Server: Sized + 'static {{"));
-    w.line(format!(
-        "fn create(config: {}) -> sdk::Result<Self>;",
-        ty(&s.config)
-    ));
+    if let Some(config) = &s.config {
+        w.line(format!(
+            "fn create(config: {}) -> sdk::Result<Self>;",
+            ty(config)
+        ));
+    }
     w.line("fn activate(self: Rc<Self>, _ctx: sdk::Context) -> sdk::LocalFuture<()> { Box::pin(async { Ok(()) }) }");
     w.line("fn deactivate(self: Rc<Self>, _ctx: sdk::Context) -> sdk::LocalFuture<()> { Box::pin(async { Ok(()) }) }");
     for o in &s.methods {
@@ -200,90 +202,92 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
             if r.wire.is_none(){"kind: String, "}else{""},ty(&r.args),r.prefix));
     }
     w.close("}");
-    w.line(format!("pub struct {p}Export<T: {p}Server>(pub Rc<T>);"));
-    w.open(format!(
-        "impl<T: {p}Server> sdk::Plugin for {p}Export<T> {{"
-    ));
-    w.line("const TYPED_DISPATCH: bool = true;");
-    w.open("fn manifest() -> sdk::PluginManifest {");
-    let contract = |name: &str, rev: &str| {
-        format!(
-            "sdk::Contract {{ name: {}.into(), revision: {}.into() }}",
-            lit(name),
-            lit(rev)
-        )
-    };
-    w.line(format!(
-        "sdk::PluginManifest {{ provides: {}, requires: vec![{}] }}",
-        contract(&model.name, &model.revision),
-        model
-            .dependencies
-            .values()
-            .map(|k| {
-                let d = &module.services()[k];
-                contract(&d.name, &d.revision)
-            })
-            .collect::<Vec<_>>()
-            .join(",")
-    ));
-    w.close("}");
-    w.line(format!(
-        "fn interface() -> sdk::Interface {{ {p}Client::interface() }}"
-    ));
-    w.line(format!(
-        "fn bindings() -> sdk::Bindings {{ sdk::typed::bindings({}) }}",
-        lit(&model.bindings().to_string())
-    ));
-    w.open("fn dependency_interfaces() -> std::collections::BTreeMap<String,sdk::Interface> {");
-    w.line(format!(
-        "std::collections::BTreeMap::from([{}])",
-        dependencies(module, s)
-            .into_iter()
-            .map(|(k, v)| format!(
-                "({}.into(), sdk::typed::interface({}))",
-                lit(&k),
-                lit(&v.to_string())
-            ))
-            .collect::<Vec<_>>()
-            .join(",")
-    ));
-    w.close("}");
-    w.line(format!("fn create(config: sdk::Value) -> sdk::Result<Self> {{ Ok(Self(Rc::new(T::create(sdk::json::input(config, &{})?)?))) }}",shape(&model.config)));
-    w.line("fn activate(self: Rc<Self>, ctx: sdk::Context) -> sdk::LocalFuture<()> { self.0.clone().activate(ctx) }");
-    w.line("fn deactivate(self: Rc<Self>, ctx: sdk::Context) -> sdk::LocalFuture<()> { self.0.clone().deactivate(ctx) }");
-    w.open("fn invoke(self: Rc<Self>, ctx: sdk::Context, method: String, args: sdk::Message) -> sdk::message::FutureResult {");
-    w.open("Box::pin(async move {");
-    dispatch_body(w, &s.methods);
-    w.close("})");
-    w.close("}");
-    if !s.resources.is_empty() {
-        w.open("fn acquire(self: Rc<Self>, ctx: sdk::Context, kind: String, args: sdk::Message) -> sdk::LocalFuture<Rc<dyn sdk::ResourceObject>> {");
+    if let Some(binding) = &model.implementation {
+        w.line(format!("pub struct {p}Export<T: {p}Server>(pub Rc<T>);"));
+        w.open(format!(
+            "impl<T: {p}Server> sdk::Plugin for {p}Export<T> {{"
+        ));
+        w.line("const TYPED_DISPATCH: bool = true;");
+        w.open("fn manifest() -> sdk::PluginManifest {");
+        let contract = |name: &str, rev: &str| {
+            format!(
+                "sdk::Contract {{ name: {}.into(), revision: {}.into() }}",
+                lit(name),
+                lit(rev)
+            )
+        };
+        w.line(format!(
+            "sdk::PluginManifest {{ provides: {}, requires: vec![{}] }}",
+            contract(&model.name, &model.revision),
+            model
+                .dependencies()
+                .values()
+                .map(|k| {
+                    let d = &module.services()[k];
+                    contract(&d.name, &d.revision)
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+        w.close("}");
+        w.line(format!(
+            "fn interface() -> sdk::Interface {{ {p}Client::interface() }}"
+        ));
+        w.line(format!(
+            "fn bindings() -> sdk::Bindings {{ sdk::typed::bindings({}) }}",
+            lit(&model.bindings().to_string())
+        ));
+        w.open("fn dependency_interfaces() -> std::collections::BTreeMap<String,sdk::Interface> {");
+        w.line(format!(
+            "std::collections::BTreeMap::from([{}])",
+            dependencies(module, s)
+                .into_iter()
+                .map(|(k, v)| format!(
+                    "({}.into(), sdk::typed::interface({}))",
+                    lit(&k),
+                    lit(&v.to_string())
+                ))
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+        w.close("}");
+        w.line(format!("fn create(config: sdk::Value) -> sdk::Result<Self> {{ Ok(Self(Rc::new(T::create(sdk::json::input(config, &{})?)?))) }}",shape(&binding.config)));
+        w.line("fn activate(self: Rc<Self>, ctx: sdk::Context) -> sdk::LocalFuture<()> { self.0.clone().activate(ctx) }");
+        w.line("fn deactivate(self: Rc<Self>, ctx: sdk::Context) -> sdk::LocalFuture<()> { self.0.clone().deactivate(ctx) }");
+        w.open("fn invoke(self: Rc<Self>, ctx: sdk::Context, method: String, args: sdk::Message) -> sdk::message::FutureResult {");
         w.open("Box::pin(async move {");
-        for r in &s.resources {
-            let sig = sig(&r.prefix);
-            if let Some(kind) = &r.wire {
-                w.open(format!("if kind == {} {{", lit(kind)));
-            } else {
-                w.open("{");
-            }
-            w.line("let validation = ctx.validation();");
-            w.line(format!("let object = self.0.clone().{}(ctx, {}sdk::message::input::<{}>(args, &{sig}.args.with_validation(validation))?).await.map_err(|e| e.check_declared(&{sig}.errors, \"acquire\"))?;",r.name,
-                if r.wire.is_none(){"kind, "}else{""},ty(&r.args)));
-            w.line(format!(
-                "{}Ok(Rc::new({}Export(object)) as Rc<dyn sdk::ResourceObject>){}",
-                if r.wire.is_none() { "" } else { "return " },
-                r.prefix,
-                if r.wire.is_none() { "" } else { ";" }
-            ));
-            w.close("}");
-        }
-        if !s.resources.iter().any(|r| r.wire.is_none()) {
-            w.line("Err(sdk::refused(\"unknown_resource_kind\", kind))");
-        }
+        dispatch_body(w, &s.methods);
         w.close("})");
         w.close("}");
+        if !s.resources.is_empty() {
+            w.open("fn acquire(self: Rc<Self>, ctx: sdk::Context, kind: String, args: sdk::Message) -> sdk::LocalFuture<Rc<dyn sdk::ResourceObject>> {");
+            w.open("Box::pin(async move {");
+            for r in &s.resources {
+                let sig = sig(&r.prefix);
+                if let Some(kind) = &r.wire {
+                    w.open(format!("if kind == {} {{", lit(kind)));
+                } else {
+                    w.open("{");
+                }
+                w.line("let validation = ctx.validation();");
+                w.line(format!("let object = self.0.clone().{}(ctx, {}sdk::message::input::<{}>(args, &{sig}.args.with_validation(validation))?).await.map_err(|e| e.check_declared(&{sig}.errors, \"acquire\"))?;",r.name,
+                if r.wire.is_none(){"kind, "}else{""},ty(&r.args)));
+                w.line(format!(
+                    "{}Ok(Rc::new({}Export(object)) as Rc<dyn sdk::ResourceObject>){}",
+                    if r.wire.is_none() { "" } else { "return " },
+                    r.prefix,
+                    if r.wire.is_none() { "" } else { ";" }
+                ));
+                w.close("}");
+            }
+            if !s.resources.iter().any(|r| r.wire.is_none()) {
+                w.line("Err(sdk::refused(\"unknown_resource_kind\", kind))");
+            }
+            w.close("})");
+            w.close("}");
+        }
+        w.close("}");
     }
-    w.close("}");
     w.line(format!(
         "#[derive(Clone)] pub struct {p}Client {{ dependency: String }}"
     ));
@@ -293,6 +297,7 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
         "pub fn interface() -> sdk::Interface {{ sdk::typed::interface({}) }}",
         lit(&cordis_contract::portable::encode(&model.descriptor).to_string())
     ));
+    w.line(format!("pub fn contract() -> sdk::Contract {{ sdk::Contract {{ name: {}.into(), revision: {}.into() }} }}",lit(&model.name),lit(&model.revision)));
     for o in &s.methods {
         client_method(w, o, false);
     }
@@ -315,7 +320,7 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
     w.close("}");
     w.line(format!("pub struct {p}Dependencies;"));
     w.open(format!("impl {p}Dependencies {{"));
-    for (alias, target) in &model.dependencies {
+    for (alias, target) in model.dependencies() {
         let tp = ident(target, Case::Type);
         w.line(format!(
             "pub fn {}() -> {tp}Client {{ {tp}Client::default() }}",

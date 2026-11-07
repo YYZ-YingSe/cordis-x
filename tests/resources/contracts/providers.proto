@@ -1,0 +1,5 @@
+syntax="proto3";
+package fixture.provider;
+import "public_service.proto";
+message Local { string directory=1; }
+message Remote { string endpoint=1; string token_name=2; }

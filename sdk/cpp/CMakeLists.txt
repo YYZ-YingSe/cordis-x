@@ -255,3 +255,12 @@ if(CORDIS_BUILD_EXAMPLES OR BUILD_TESTING)
   endforeach()
 endif()
 
+
+if(BUILD_TESTING)
+  add_executable(cordis_implementation_test tests/implementation.cpp
+    ${CORDIS_TEST_GENERATED}/provider_local/cpp/proto/public_service.pb.cc
+    ${CORDIS_TEST_GENERATED}/provider_local/cpp/proto/providers.pb.cc)
+  target_include_directories(cordis_implementation_test PRIVATE ${CORDIS_TEST_GENERATED}/provider_local/cpp/proto)
+  target_link_libraries(cordis_implementation_test PRIVATE cordis::core Threads::Threads)
+  add_test(NAME cordis_implementation COMMAND cordis_implementation_test)
+endif()

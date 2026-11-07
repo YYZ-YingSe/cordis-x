@@ -1,0 +1,5 @@
+{
+  "fixture.public_api.Echo": {
+    "config": "fixture.provider.Remote"
+  }
+}

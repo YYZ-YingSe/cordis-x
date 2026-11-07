@@ -10,5 +10,19 @@
   "remote_fixture": {
     "source": "fixtures/remote_fixture.proto",
     "languages": "cpp,rust,typescript"
+  },
+  "public_service": {
+    "source": "public_service.proto",
+    "languages": "cpp,rust,typescript"
+  },
+  "provider_local": {
+    "source": "providers.proto",
+    "implementation": "local.json",
+    "languages": "cpp,rust,typescript"
+  },
+  "provider_remote": {
+    "source": "providers.proto",
+    "implementation": "remote.json",
+    "languages": "cpp,rust,typescript"
   }
 }

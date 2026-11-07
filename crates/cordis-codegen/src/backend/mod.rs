@@ -34,7 +34,7 @@ pub fn generate(
     }
     files.add("resources/descriptor.json",serde_json::to_string_pretty(&module.services().iter().map(|(name,s)|
         (name,serde_json::json!({"contract":{"name":s.name,"revision":s.revision},
-        "interface":cordis_contract::portable::encode(&s.descriptor),"config":s.config,"dependencies":s.dependencies,"bindings":s.bindings()})))
+        "interface":cordis_contract::portable::encode(&s.descriptor),"implementation":s.implementation,"bindings":s.bindings()})))
         .collect::<std::collections::BTreeMap<_,_>>()).unwrap()+"\n")?;
     for backend in backends {
         files.extend(backend.generate(module, plan.as_ref().unwrap())?)?;

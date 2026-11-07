@@ -1,0 +1,9 @@
+syntax="proto3";
+package fixture.public_api;
+import "cordis/options.proto";
+message Value { string text=1; }
+// This interface is independent of the provider's startup and dependency graph.
+service Echo {
+ option(cordis.schema.contract)={name:"fixture.public.echo" revision:"1"};
+ rpc Get(Value) returns (Value);
+}

@@ -239,6 +239,10 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
         "static cordis::Value interface() {{ return {}; }}",
         value(&cordis_contract::portable::encode(&model.descriptor))
     ));
+    w.line(format!(
+        "static cordis::Value contract() {{ return {}; }}",
+        value(&serde_json::json!({"name":model.name,"revision":model.revision}))
+    ));
     for o in &s.methods {
         client_method(w, o, false);
     }
@@ -258,46 +262,48 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
         w.close("}");
     }
     w.close("};");
-    w.open(format!("template <class T> struct {p}Model {{"));
-    w.line(format!(
-        "static std::string contract_name() {{ return {}; }}",
-        text(&model.name)
-    ));
-    w.line(format!(
-        "static std::string contract_revision() {{ return {}; }}",
-        text(&model.revision)
-    ));
-    w.line(format!(
-        "static cordis::Value interface() {{ return {p}Client::interface(); }}"
-    ));
-    let bindings = model.bindings();
-    w.line(format!(
-        "static cordis::Value events() {{ return {}; }}",
-        value(&bindings["events"])
-    ));
-    w.line(format!(
-        "static cordis::Value middleware() {{ return {}; }}",
-        value(&bindings["middleware"])
-    ));
-    w.line(format!("static cordis::Value composition() {{ return {}; }}", value(&serde_json::json!({"factories":bindings["factories"],"provisions":bindings["provisions"]}))));
-    let deps: std::collections::BTreeMap<_, _> = model
-        .dependencies
-        .values()
-        .map(|key| {
-            let d = &module.services()[key];
-            (d.name.clone(), d.revision.clone())
-        })
-        .collect();
-    w.line(format!(
-        "static cordis::Value dependencies() {{ return {}; }}",
-        value(&deps)
-    ));
-    w.line(format!(
-        "static cordis::Value dependency_interfaces() {{ return {}; }}",
-        value(&dependencies(module, s))
-    ));
-    w.line(format!("static std::shared_ptr<cordis::Service> create(cordis::Value config) {{ return std::make_shared<{p}Export>(T::create(cordis::typed::json_input<{}>(config, {}))); }}",ty(&s.config),value(&model.config)));
-    w.close("};");
+    if let (Some(config), Some(binding)) = (&s.config, &model.implementation) {
+        w.open(format!("template <class T> struct {p}Model {{"));
+        w.line(format!(
+            "static std::string contract_name() {{ return {}; }}",
+            text(&model.name)
+        ));
+        w.line(format!(
+            "static std::string contract_revision() {{ return {}; }}",
+            text(&model.revision)
+        ));
+        w.line(format!(
+            "static cordis::Value interface() {{ return {p}Client::interface(); }}"
+        ));
+        let bindings = model.bindings();
+        w.line(format!(
+            "static cordis::Value events() {{ return {}; }}",
+            value(&bindings["events"])
+        ));
+        w.line(format!(
+            "static cordis::Value middleware() {{ return {}; }}",
+            value(&bindings["middleware"])
+        ));
+        w.line(format!("static cordis::Value composition() {{ return {}; }}", value(&serde_json::json!({"factories":bindings["factories"],"provisions":bindings["provisions"]}))));
+        let deps: std::collections::BTreeMap<_, _> = model
+            .dependencies()
+            .values()
+            .map(|key| {
+                let d = &module.services()[key];
+                (d.name.clone(), d.revision.clone())
+            })
+            .collect();
+        w.line(format!(
+            "static cordis::Value dependencies() {{ return {}; }}",
+            value(&deps)
+        ));
+        w.line(format!(
+            "static cordis::Value dependency_interfaces() {{ return {}; }}",
+            value(&dependencies(module, s))
+        ));
+        w.line(format!("static std::shared_ptr<cordis::Service> create(cordis::Value config) {{ return std::make_shared<{p}Export>(T::create(cordis::typed::json_input<{}>(config, {}))); }}",ty(config),value(&binding.config)));
+        w.close("};");
+    }
 }
 fn controls(w: &mut Writer, service: &Service) {
     use cordis_contract::Control;
@@ -375,7 +381,7 @@ impl Backend for Cpp {
         }
         for s in &plan.services {
             w.open(format!("struct {}Dependencies {{", s.prefix));
-            for (alias, target) in &module.services()[&s.key].dependencies {
+            for (alias, target) in module.services()[&s.key].dependencies() {
                 w.line(format!(
                     "static {}Client {}() {{ return {{}}; }}",
                     ident(target, Case::Type),

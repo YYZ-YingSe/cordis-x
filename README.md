@@ -192,6 +192,10 @@ npm run codegen -- generate \
   --languages rust,cpp,typescript
 ```
 
+Public services and provider constructors can be generated separately; see [implementation bindings](crates/cordis-codegen/README.md).
+
+
+
 Input, output, and module wiring belong to the consuming project's build configuration. Cordis-X does not require applications to adopt this repository's directory layout.
 
 ## Embedding in an application

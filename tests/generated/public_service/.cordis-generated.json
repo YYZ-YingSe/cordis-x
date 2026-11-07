@@ -1,0 +1,16 @@
+[
+  "cpp/module.hpp",
+  "cpp/proto/cordis/options.pb.cc",
+  "cpp/proto/cordis/options.pb.h",
+  "cpp/proto/public_service.pb.cc",
+  "cpp/proto/public_service.pb.h",
+  "resources/descriptor.json",
+  "resources/interfaces/Echo.json",
+  "resources/schema.base64",
+  "rust/mod.rs",
+  "rust/proto/_messages.rs",
+  "rust/proto/fixture.public_api.rs",
+  "typescript/module.ts",
+  "typescript/proto/cordis/options_pb.ts",
+  "typescript/proto/public_service_pb.ts"
+]

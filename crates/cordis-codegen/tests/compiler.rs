@@ -245,3 +245,33 @@ fn rust_packages_reuse_shared_dtos_in_fields_and_bindings() {
             .any(|(path, _)| path == "rust/proto/cordis.data.rs")
     );
 }
+
+#[test]
+fn provider_bindings_leave_public_identity_unchanged_and_reject_conflicts() {
+    let public = proto("message Data {} message Config { string root=1; }")
+        .replace("config:\"cordis.data.Unit\"", "");
+    let mut module = source(&public).unwrap();
+    let original = module.services()["Test"].descriptor.clone();
+    assert!(module.services()["Test"].implementation.is_none());
+    for invalid in [
+        r#"{"test.Test":{"config":"test.Config"},"test.Test":{"config":"test.Config"}}"#,
+        r#"{"test.Test":{"config":"missing.Config"}}"#,
+        r#"{"missing.Test":{"config":"test.Config"}}"#,
+        r#"{"test.Test":{"config":"test.Config","dependencies":{"peer":"missing.Peer"}}}"#,
+        r#"{"test.Test":{"config":"test.Config","unknown":true}}"#,
+    ] {
+        assert!(module.bind_implementations(invalid).is_err());
+        assert!(module.services()["Test"].implementation.is_none());
+    }
+    let binding = r#"{"test.Test":{"config":"test.Config"}}"#;
+    module.bind_implementations(binding).unwrap();
+    assert_eq!(module.services()["Test"].descriptor, original);
+    assert!(module.bind_implementations(binding).is_err());
+    let files = backend::generate(&module, &[&Rust], &GeneratorTools::default()).unwrap();
+    let rust = files
+        .iter()
+        .find(|(name, _)| *name == "rust/mod.rs")
+        .unwrap()
+        .1;
+    syn::parse_file(rust).unwrap();
+}
