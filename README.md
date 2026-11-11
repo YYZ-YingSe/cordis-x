@@ -124,6 +124,14 @@ The portable SDKs expose services, resources, dependency calls, events, middlewa
 
 Native plugins and C ABI libraries execute with the host process's privileges. A process boundary does not by itself sandbox a plugin. Wasm access depends on the imports and WASI capabilities the host grants, together with its configured execution limits.
 
+WASI TCP connections and listeners are configured independently through
+`Wasi::tcp_connect` and `Wasi::tcp_bind`. Each accepts
+`TcpAccess::Addresses(vec![socket_address])` or `TcpAccess::Unrestricted`.
+Both default to empty address lists, which deny the corresponding operation;
+applications can choose unrestricted access as their own product default.
+Unrestricted TCP still follows operating-system restrictions and does not enable
+DNS or UDP. Directory grants are configured separately.
+
 The C++ process adapter requires POSIX. C++ Wasm builds require WASI target libraries, which the optional setup scripts can build. The repository contains Linux, macOS, and Windows CI configurations; that configuration alone is not a claim that every backend and platform combination has been validated.
 
 ## Setting up the tools

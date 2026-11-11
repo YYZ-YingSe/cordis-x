@@ -120,6 +120,12 @@ process.bindings = bindings;
 
 原生插件和 C ABI 动态库拥有宿主进程的权限。独立进程本身不构成插件沙箱。Wasm 能访问什么，取决于宿主授予的导入和 WASI 能力，以及配置的执行限制。
 
+WASI TCP 连接和监听分别通过 `Wasi::tcp_connect`、`Wasi::tcp_bind` 配置，
+都支持 `TcpAccess::Addresses(vec![socket_address])` 地址列表和
+`TcpAccess::Unrestricted` 不限制模式。框架默认是空列表，禁止对应操作；
+应用可将自己的产品默认设为不限制。TCP 不限制仍受操作系统约束，不会开启
+DNS 或 UDP，目录权限也继续单独配置。
+
 C++ 进程适配器要求 POSIX 环境；C++ Wasm 构建需要对应的 WASI 目标库，可由可选的环境搭建脚本编译。仓库包含 Linux、macOS 和 Windows 的 CI 配置，但配置文件本身不代表所有后端与平台组合都已完成验证。
 
 ## 快捷搭建环境

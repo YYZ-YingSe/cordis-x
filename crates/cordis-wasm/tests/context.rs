@@ -5,7 +5,7 @@ use cordis_sdk_core::typed::Codec;
 #[path = "support/context.rs"]
 mod guest;
 use cordis_sdk::*;
-use cordis_wasm::{Capabilities, ContextComponent, ContextService, Limits, Value, json};
+use cordis_wasm::{Capabilities, ContextComponent, ContextService, Limits, TcpAccess, Value, json};
 use guest::bytes;
 use std::{
     sync::{Arc, Mutex},
@@ -531,20 +531,21 @@ async fn wasi_read_only_mount_confines_paths_and_read_write_is_opt_in() {
 async fn wasi_tcp_connect_requires_exact_address_grant() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
+    // Keep a second real destination open so rejection cannot be explained by
+    // an unavailable server at the address outside the granted list.
+    let denied_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let denied_address = denied_listener.local_addr().unwrap();
     let app = app_with(|caps| {
-        caps.wasi.as_mut().unwrap().tcp_connect.push(address);
+        caps.wasi.as_mut().unwrap().tcp_connect = TcpAccess::Addresses(vec![address]);
     })
     .await;
     app.call("wasi-connect", json!({"port":address.port()}))
         .await
         .unwrap();
     assert!(
-        app.call(
-            "wasi-connect",
-            json!({"port":address.port().wrapping_add(1)})
-        )
-        .await
-        .is_err()
+        app.call("wasi-connect", json!({"port":denied_address.port()}))
+            .await
+            .is_err()
     );
     // Outbound connect needs a local ephemeral bind, but that must not grant
     // permission to listen on that local address.
@@ -554,17 +555,45 @@ async fn wasi_tcp_connect_requires_exact_address_grant() {
 #[tokio::test]
 async fn wasi_tcp_listen_requires_an_explicit_bind_grant() {
     let app = app_with(|caps| {
-        caps.wasi
-            .as_mut()
-            .unwrap()
-            .tcp_bind
-            .push("0.0.0.0:0".parse().unwrap());
+        caps.wasi.as_mut().unwrap().tcp_bind =
+            TcpAccess::Addresses(vec!["0.0.0.0:0".parse().unwrap()]);
     })
     .await;
     app.call("wasi-listen", json!({})).await.unwrap();
     assert!(app.call("wasi-connect", json!({"port":80})).await.is_err());
     app.rt.shutdown().await.unwrap();
 }
+#[tokio::test]
+async fn wasi_tcp_unrestricted_grants_keep_connect_and_listen_independent() {
+    let first = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let second = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    for (connect, bind) in [(false, false), (true, false), (false, true), (true, true)] {
+        let app = app_with(|caps| {
+            let wasi = caps.wasi.as_mut().unwrap();
+            if connect {
+                wasi.tcp_connect = TcpAccess::Unrestricted;
+            }
+            if bind {
+                wasi.tcp_bind = TcpAccess::Unrestricted;
+            }
+        })
+        .await;
+        // Neither destination is enumerated in the policy. Keep both servers
+        // alive so denied cases exercise authority rather than connection refusal.
+        for listener in [&first, &second] {
+            let address = listener.local_addr().unwrap();
+            assert_eq!(
+                app.call("wasi-connect", json!({"port":address.port()}))
+                    .await
+                    .is_ok(),
+                connect
+            );
+        }
+        assert_eq!(app.call("wasi-listen", json!({})).await.is_ok(), bind);
+        app.rt.shutdown().await.unwrap();
+    }
+}
+
 #[tokio::test]
 async fn wasi_tcp_transfers_bytes_through_granted_socket() {
     use std::io::{Read, Write};
@@ -583,7 +612,10 @@ async fn wasi_tcp_transfers_bytes_through_granted_socket() {
         assert_eq!(&request, b"hello");
         stream.write_all(b"world").unwrap();
     });
-    let app = app_with(|caps| caps.wasi.as_mut().unwrap().tcp_connect.push(address)).await;
+    let app = app_with(|caps| {
+        caps.wasi.as_mut().unwrap().tcp_connect = TcpAccess::Addresses(vec![address]);
+    })
+    .await;
     assert_eq!(
         app.call("wasi-exchange", json!({"port":address.port()}))
             .await

@@ -6,7 +6,7 @@ mod host;
 mod host_failure;
 pub use compiler::{CacheLimits, Compiler, CompilerStats};
 mod wasi;
-pub use wasi::{Directory, Wasi};
+pub use wasi::{Directory, TcpAccess, Wasi};
 #[cfg(feature = "loader")]
 pub mod loader;
 mod managed;
