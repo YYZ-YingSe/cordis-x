@@ -1,5 +1,5 @@
 import { Identities, makeRoom, Completion, registration } from './retention.ts';
-import { OperationInbox } from '../../protocols/session/operations.ts';
+import { OperationInbox, RESERVED_CAPACITY } from '../../protocols/session/operations.ts';
 import type { Message } from '../../core/message.ts';
 import { payload, one, type Payload } from '../../protocols/session/messages.ts';
 import { Refusal } from '../../core/error.ts';
@@ -57,7 +57,7 @@ type Terminal = { callback: TerminalCallback; used: boolean };
 export class MiddlewareRegistry {
   private handlers = new Map<string, Entry>();
   private runs = new Map<string, Terminal>();
-  private seen = new OperationInbox();
+  private seen = new OperationInbox(2 * RESERVED_CAPACITY);
   private nextHandler = new Identities();
   private nextRun = new Identities();
   private declarations: Record<string, { name: string; revision: string }>;

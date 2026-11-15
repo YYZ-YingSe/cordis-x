@@ -85,9 +85,12 @@ int main() {
   data.clear_binary();
   data.clear_text();
   data.clear_groups();
-  data.mutable_flags()->Resize(static_cast<int>(cordis::protobuf::max_nodes),
-                               false);
-  rejects([&] { cordis::protobuf::validate(data, Validation::Checked); });
+  data.mutable_flags()->Resize(100000, false);
+  for (auto policy : {Validation::Checked, Validation::Audit}) {
+    auto encoded = cordis::protobuf::encode_binary(data, policy);
+    auto decoded = cordis::protobuf::decode_binary<profile::Data>(encoded, policy);
+    assert(decoded.flags_size() == 100000);
+  }
   data.clear_flags();
   data.set_status(static_cast<profile::Status>(99));
   rejects([&] { cordis::protobuf::validate(data, Validation::Checked); });

@@ -4,7 +4,7 @@ mod audit;
 mod plan;
 pub use audit::audit_binary;
 
-use crate::budget::Budget;
+use crate::depth::check_depth;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use prost::Message;
 use prost_reflect::{
@@ -16,7 +16,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
-pub use crate::budget::{MAX_DEPTH, MAX_NODES};
+pub use crate::depth::MAX_DEPTH;
 pub const MAX_DESCRIPTOR_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -562,7 +562,10 @@ mod tests {
         let message = shape.parse_json(&value).unwrap();
         assert_eq!(shape.to_json(&message).unwrap(), value);
         assert_eq!(value, saved);
-        assert!(shape.parse_json(&json!(vec![false; MAX_NODES])).is_err());
+        let wide = json!(vec![false; 100_000]);
+        let message = shape.parse_json(&wide).unwrap();
+        assert_eq!(shape.to_json(&message).unwrap(), wide);
+        assert!(shape.parse_binary(&message.encode_to_vec()).is_ok());
         let mut deep = json!(null);
         for _ in 0..MAX_DEPTH + 1 {
             deep = json!([deep]);

@@ -73,6 +73,8 @@ async fn scenario(endpoint: Endpoint) {
         }));
     spec.endpoint = endpoint;
     spec.frame_capacity = 4 * 1024 * 1024;
+    spec.max_inflight = 257;
+    spec.io_timeout = std::time::Duration::from_millis(500);
     if matches!(endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());
     }

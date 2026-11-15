@@ -21,13 +21,9 @@ pub struct CounterArgs {
     pub initial: ::core::option::Option<i64>,
 }
 impl cordis_sdk_core::typed::Walk for AddArgs {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.left, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.left, depth + 1)?;
         if self.left.is_none() {
             return Err(
                 format!(
@@ -35,7 +31,7 @@ impl cordis_sdk_core::typed::Walk for AddArgs {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.right, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.right, depth + 1)?;
         if self.right.is_none() {
             return Err(
                 format!(
@@ -48,13 +44,9 @@ impl cordis_sdk_core::typed::Walk for AddArgs {
     }
 }
 impl cordis_sdk_core::typed::Walk for StatsResult {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.calls, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.calls, depth + 1)?;
         if self.calls.is_none() {
             return Err(
                 format!(
@@ -63,7 +55,7 @@ impl cordis_sdk_core::typed::Walk for StatsResult {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.leases, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.leases, depth + 1)?;
         if self.leases.is_none() {
             return Err(
                 format!(
@@ -72,7 +64,7 @@ impl cordis_sdk_core::typed::Walk for StatsResult {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.releases, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.releases, depth + 1)?;
         if self.releases.is_none() {
             return Err(
                 format!(
@@ -85,13 +77,9 @@ impl cordis_sdk_core::typed::Walk for StatsResult {
     }
 }
 impl cordis_sdk_core::typed::Walk for CounterArgs {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.initial, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.initial, depth + 1)?;
         Ok(())
     }
 }

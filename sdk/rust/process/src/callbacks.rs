@@ -116,13 +116,27 @@ pub struct Sequence {
     ended: Cell<bool>,
     steps: RefCell<BTreeMap<String, Rc<Entry>>>,
 }
-#[derive(Default)]
 pub struct Registry {
     next: Cell<u64>,
     pub entries: RefCell<BTreeMap<String, Rc<Entry>>>,
     sequences: RefCell<BTreeMap<String, Rc<Sequence>>>,
     event_calls: cordis_wire::operations::Incoming,
     middleware_calls: cordis_wire::operations::Incoming,
+}
+impl Default for Registry {
+    fn default() -> Self {
+        Self {
+            next: Cell::new(0),
+            entries: RefCell::default(),
+            sequences: RefCell::default(),
+            event_calls: cordis_wire::operations::Incoming::new(
+                cordis_wire::operations::RESERVED_CAPACITY,
+            ),
+            middleware_calls: cordis_wire::operations::Incoming::new(
+                2 * cordis_wire::operations::RESERVED_CAPACITY,
+            ),
+        }
+    }
 }
 impl Registry {
     pub fn id(&self, prefix: char) -> Result<String> {

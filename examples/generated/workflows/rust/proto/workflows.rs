@@ -31,16 +31,15 @@ pub mod decision {
     impl cordis_sdk_core::typed::Walk for State {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
             match self {
                 Self::Continued(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
                 Self::Stopped(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
             }
@@ -53,13 +52,9 @@ pub struct Decisions {
     pub values: ::prost::alloc::vec::Vec<Decision>,
 }
 impl cordis_sdk_core::typed::Walk for Tick {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.value, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.value, depth + 1)?;
         if self.value.is_none() {
             return Err(format!("{}: required field missing", "workflows.Tick.value"));
         }
@@ -67,13 +62,9 @@ impl cordis_sdk_core::typed::Walk for Tick {
     }
 }
 impl cordis_sdk_core::typed::Walk for WorkerConfig {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.label, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.label, depth + 1)?;
         if self.label.is_none() {
             return Err(
                 format!("{}: required field missing", "workflows.WorkerConfig.label"),
@@ -83,13 +74,9 @@ impl cordis_sdk_core::typed::Walk for WorkerConfig {
     }
 }
 impl cordis_sdk_core::typed::Walk for Settings {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.answer, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.answer, depth + 1)?;
         if self.answer.is_none() {
             return Err(
                 format!("{}: required field missing", "workflows.Settings.answer"),
@@ -99,13 +86,9 @@ impl cordis_sdk_core::typed::Walk for Settings {
     }
 }
 impl cordis_sdk_core::typed::Walk for Decision {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.state, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.state, depth + 1)?;
         if self.state.is_none() {
             return Err(format!("{}: no branch selected", "workflows.Decision.state"));
         }
@@ -113,13 +96,9 @@ impl cordis_sdk_core::typed::Walk for Decision {
     }
 }
 impl cordis_sdk_core::typed::Walk for Decisions {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.values, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.values, depth + 1)?;
         Ok(())
     }
 }

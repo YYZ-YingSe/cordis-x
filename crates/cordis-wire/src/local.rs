@@ -113,13 +113,9 @@ mod tests {
     }
     static WALKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     impl cordis_sdk_core::typed::Walk for Snapshot {
-        fn walk(
-            &self,
-            depth: usize,
-            budget: &mut cordis_sdk_core::typed::Budget,
-        ) -> Result<(), String> {
+        fn walk(&self, depth: usize) -> Result<(), String> {
             WALKS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            self.value.walk(depth, budget)
+            self.value.walk(depth)
         }
     }
     impl cordis_sdk_core::typed::Codec for Snapshot {

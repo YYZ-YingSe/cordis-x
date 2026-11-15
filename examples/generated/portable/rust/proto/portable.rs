@@ -28,16 +28,15 @@ pub mod decision {
     impl cordis_sdk_core::typed::Walk for State {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
             match self {
                 Self::Continued(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
                 Self::Stopped(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
             }
@@ -55,30 +54,22 @@ pub struct CounterArgs {
     pub initial: ::core::option::Option<i64>,
 }
 impl cordis_sdk_core::typed::Walk for Metadata {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.revision, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.revision, depth + 1)?;
         if self.revision.is_none() {
             return Err(
                 format!("{}: required field missing", "portable.Metadata.revision"),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.layers, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.layers, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for Wrapped {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.wrapped, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.wrapped, depth + 1)?;
         if self.wrapped.is_none() {
             return Err(
                 format!("{}: required field missing", "portable.Wrapped.wrapped"),
@@ -88,13 +79,9 @@ impl cordis_sdk_core::typed::Walk for Wrapped {
     }
 }
 impl cordis_sdk_core::typed::Walk for Decision {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.state, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.state, depth + 1)?;
         if self.state.is_none() {
             return Err(format!("{}: no branch selected", "portable.Decision.state"));
         }
@@ -102,24 +89,16 @@ impl cordis_sdk_core::typed::Walk for Decision {
     }
 }
 impl cordis_sdk_core::typed::Walk for Decisions {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.values, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.values, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for CounterArgs {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.initial, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.initial, depth + 1)?;
         Ok(())
     }
 }

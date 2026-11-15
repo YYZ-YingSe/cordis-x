@@ -1,6 +1,6 @@
 use cordis_sdk_core::{
     Message, MessageContract, Validation,
-    typed::{Budget, Codec, Walk},
+    typed::{Codec, Walk, check_depth},
 };
 use prost::Message as _;
 use std::sync::{
@@ -15,10 +15,10 @@ struct Text {
 }
 static WALKS: AtomicUsize = AtomicUsize::new(0);
 impl Walk for Text {
-    fn walk(&self, depth: usize, budget: &mut Budget) -> Result<(), String> {
+    fn walk(&self, depth: usize) -> Result<(), String> {
         WALKS.fetch_add(1, Ordering::Relaxed);
-        budget.take(depth)?;
-        self.value.walk(depth + 1, budget)
+        check_depth(depth)?;
+        self.value.walk(depth + 1)
     }
 }
 impl Codec for Text {

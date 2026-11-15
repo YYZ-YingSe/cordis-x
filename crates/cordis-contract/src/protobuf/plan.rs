@@ -89,17 +89,16 @@ impl Plan {
         message: &DynamicMessage,
         validation: crate::Validation,
     ) -> Result<(), String> {
-        self.visit(0, message, 0, &mut Budget::default(), validation)
+        self.visit(0, message, 0, validation)
     }
     fn visit(
         &self,
         node: usize,
         message: &DynamicMessage,
         depth: usize,
-        budget: &mut Budget,
         validation: crate::Validation,
     ) -> Result<(), String> {
-        budget.take(depth)?;
+        check_depth(depth)?;
         if validation.audits() && message.unknown_fields().next().is_some() {
             return Err("undeclared protobuf field".into());
         }
@@ -148,17 +147,17 @@ impl Plan {
             match value.as_ref() {
                 Value::List(values) => {
                     for value in values {
-                        self.leaf(field, value, depth + 1, budget, validation)?;
+                        self.leaf(field, value, depth + 1, validation)?;
                     }
                 }
                 Value::Map(values) => {
                     for value in values.values() {
-                        budget.take(depth + 1)?;
-                        budget.take(depth + 2)?;
-                        self.leaf(field, value, depth + 2, budget, validation)?;
+                        check_depth(depth + 1)?;
+                        check_depth(depth + 2)?;
+                        self.leaf(field, value, depth + 2, validation)?;
                     }
                 }
-                value => self.leaf(field, value, depth + 1, budget, validation)?,
+                value => self.leaf(field, value, depth + 1, validation)?,
             }
         }
         Ok(())
@@ -168,7 +167,6 @@ impl Plan {
         field: &Field,
         value: &Value,
         depth: usize,
-        budget: &mut Budget,
         validation: crate::Validation,
     ) -> Result<(), String> {
         if let Value::Message(message) = value {
@@ -176,11 +174,10 @@ impl Plan {
                 field.nested.expect("message plan"),
                 message,
                 depth,
-                budget,
                 validation,
             );
         }
-        budget.take(depth)?;
+        check_depth(depth)?;
         match (value, &field.kind) {
             (Value::F32(v), _) if !v.is_finite() => Err("non-finite float32".into()),
             (Value::F64(v), _) if !v.is_finite() => Err("non-finite float64".into()),

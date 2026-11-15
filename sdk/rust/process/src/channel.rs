@@ -4,10 +4,10 @@ use tokio::sync::{mpsc, oneshot};
 struct Pending {
     request: Request,
     reply: oneshot::Sender<Result<Payload>>,
-    lane: usize,
 }
 pub struct Channel {
     pub frame_capacity: Cell<usize>,
+    pub io_timeout: Cell<std::time::Duration>,
     pub validation: Cell<cordis_sdk_core::Validation>,
     pub identity: RefCell<Option<(String, Identity)>>,
     pub dependency_resources: Cell<bool>,
@@ -27,13 +27,14 @@ impl Channel {
     pub fn new(output: mpsc::Sender<Bytes>) -> Rc<Self> {
         Rc::new(Self {
             frame_capacity: Cell::new(cordis_wire::DEFAULT_FRAME_CAPACITY),
+            io_timeout: Cell::new(std::time::Duration::from_secs(5)),
             validation: Cell::new(cordis_sdk_core::Validation::Checked),
             identity: RefCell::default(),
             dependency_resources: Cell::new(false),
             output,
             pending: RefCell::default(),
-            operations: cordis_wire::operations::Outgoing::new(
-                cordis_wire::operations::DEFAULT_SLOTS,
+            operations: cordis_wire::operations::Outgoing::with_lanes(
+                &cordis_wire::operations::REVERSE_LANES,
             ),
             closed: Cell::new(false),
         })
@@ -79,16 +80,6 @@ impl Channel {
             "dependency_resource_call" | "reference_invoke" => 13,
             _ => 0,
         };
-        if self
-            .pending
-            .borrow()
-            .values()
-            .filter(|p| p.lane == lane)
-            .count()
-            >= 16
-        {
-            return Err(refused("overloaded", "reverse call capacity reached"));
-        }
         let (session, activation) = self
             .identity
             .borrow()
@@ -130,14 +121,9 @@ impl Channel {
             .encode(self.frame_capacity.get())
             .map_err(|e| refused("invalid_value", e))?;
         let (reply, receive) = oneshot::channel();
-        self.pending.borrow_mut().insert(
-            operation.clone(),
-            Pending {
-                request,
-                reply,
-                lane,
-            },
-        );
+        self.pending
+            .borrow_mut()
+            .insert(operation.clone(), Pending { request, reply });
         permit.send(encoded);
         reservation.1.take();
         receive.await.map_err(unknown)?

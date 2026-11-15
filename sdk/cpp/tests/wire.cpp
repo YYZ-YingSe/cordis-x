@@ -16,6 +16,29 @@ template <class F> static void rejected(F run) {
 }
 int main() {
   {
+    OperationLayout layout(257);
+    OperationOutbox outgoing(layout.forward);
+    OperationInbox incoming(1);
+    const auto hello = outgoing.allocate(0);
+    {
+      auto admission = incoming.admit(hello);
+      incoming.grow(layout.incoming);
+      rejected([&] { incoming.admit(hello); });
+    }
+    rejected([&] { incoming.admit(hello); });
+    check(outgoing.complete(hello));
+    std::vector<std::string> ordinary;
+    for (std::size_t index = 0; index < 257; ++index) ordinary.push_back(outgoing.allocate(0));
+    rejected([&] { outgoing.allocate(0); });
+    const auto cleanup = outgoing.allocate(1);
+    check(OperationId::parse(cleanup)->slot == 257);
+    { auto admission = incoming.admit(cleanup); }
+    check(outgoing.complete(cleanup));
+    for (const auto &operation : ordinary) check(outgoing.complete(operation));
+    rejected([] { OperationLayout invalid(0); });
+    rejected([] { OperationLayout invalid(UINT32_MAX); });
+  }
+  {
     OperationOutbox outgoing(2);
     OperationInbox incoming(2);
     const auto slow = outgoing.allocate();

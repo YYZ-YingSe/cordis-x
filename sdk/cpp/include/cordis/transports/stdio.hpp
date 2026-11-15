@@ -18,7 +18,7 @@ class Stdio {
   std::deque<std::shared_ptr<std::vector<uint8_t>>> writes_;
   bool failed_ = false;
   std::function<void()> failure_;
-  std::function<std::size_t()> capacity_;
+  std::function<std::size_t()> capacity_, output_capacity_;
   static int duplicate(int fd) {
     int result = ::dup(fd);
     if (result < 0)
@@ -65,10 +65,10 @@ class Stdio {
   }
 
 public:
-  Stdio(native::Runtime &runtime, std::function<void()> failure, std::function<std::size_t()> capacity)
+  Stdio(native::Runtime &runtime, std::function<void()> failure, std::function<std::size_t()> capacity, std::function<std::size_t()> output_capacity)
       : input_(runtime.io(), duplicate(STDIN_FILENO)),
         output_(runtime.io(), duplicate(STDOUT_FILENO)),
-        failure_(std::move(failure)), capacity_(std::move(capacity)) {}
+        failure_(std::move(failure)), capacity_(std::move(capacity)), output_capacity_(std::move(output_capacity)) {}
   void stop_reading() {
     std::error_code ignored;
     input_.close(ignored);
@@ -83,7 +83,7 @@ public:
   void write(std::vector<uint8_t> payload) {
     if (failed_)
       throw std::runtime_error("stdio closed");
-    if (payload.empty() || payload.size() > capacity_() || writes_.size() >= session::output_frames) {
+    if (payload.empty() || payload.size() > capacity_() || writes_.size() >= output_capacity_()) {
       abort();
       failure_();
       throw std::runtime_error("stdio output capacity exhausted");

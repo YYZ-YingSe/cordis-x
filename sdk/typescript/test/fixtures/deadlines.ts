@@ -8,13 +8,15 @@ import { readFrames, writeFrame } from '../../src/transports/stdio.ts';
 let release: (() => void) | undefined;
 let output = Promise.resolve();
 let capacity = 1024 * 1024;
-const http = await listen(true, { active: () => true, validation: () => 'checked', capacity: () => capacity }, dispatch);
+let ioTimeout = 5000;
+const http = await listen(true, { active: () => true, validation: () => 'checked', capacity: () => capacity, ioTimeout: () => ioTimeout, connections: () => 64 }, dispatch);
 
 async function dispatch(request: Request): Promise<Response> {
   let result = payload();
   const args = request.payload.control as Record<string, Value>;
   if (request.command === 'hello') {
     capacity = Number(args.frame_capacity);
+    ioTimeout = Number(args.io_timeout_ms);
     result = payload({...args, http: http.url, capabilities: { multiplex: true, max_inflight: 16 }});
   }
   else if (request.command === 'call') {

@@ -30,13 +30,9 @@ pub struct SubmitResult {
     pub quote: ::core::option::Option<SubmitResultQuote>,
 }
 impl cordis_sdk_core::typed::Walk for SubmitArgs {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.quantity, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.quantity, depth + 1)?;
         if self.quantity.is_none() {
             return Err(
                 format!(
@@ -44,7 +40,7 @@ impl cordis_sdk_core::typed::Walk for SubmitArgs {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.unit_price, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.unit_price, depth + 1)?;
         if self.unit_price.is_none() {
             return Err(
                 format!(
@@ -56,13 +52,9 @@ impl cordis_sdk_core::typed::Walk for SubmitArgs {
     }
 }
 impl cordis_sdk_core::typed::Walk for SubmitResultQuoteReceipt {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.generation, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.generation, depth + 1)?;
         if self.generation.is_none() {
             return Err(
                 format!(
@@ -71,7 +63,7 @@ impl cordis_sdk_core::typed::Walk for SubmitResultQuoteReceipt {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.owner, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.owner, depth + 1)?;
         if self.owner.is_none() {
             return Err(
                 format!(
@@ -80,7 +72,7 @@ impl cordis_sdk_core::typed::Walk for SubmitResultQuoteReceipt {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.caller, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.caller, depth + 1)?;
         if self.caller.is_none() {
             return Err(
                 format!(
@@ -93,13 +85,9 @@ impl cordis_sdk_core::typed::Walk for SubmitResultQuoteReceipt {
     }
 }
 impl cordis_sdk_core::typed::Walk for SubmitResultQuote {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.total, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.total, depth + 1)?;
         if self.total.is_none() {
             return Err(
                 format!(
@@ -108,7 +96,7 @@ impl cordis_sdk_core::typed::Walk for SubmitResultQuote {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.receipt, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.receipt, depth + 1)?;
         if self.receipt.is_none() {
             return Err(
                 format!(
@@ -121,13 +109,9 @@ impl cordis_sdk_core::typed::Walk for SubmitResultQuote {
     }
 }
 impl cordis_sdk_core::typed::Walk for SubmitResult {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.status, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.status, depth + 1)?;
         if self.status.is_none() {
             return Err(
                 format!(
@@ -135,7 +119,7 @@ impl cordis_sdk_core::typed::Walk for SubmitResult {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.quote, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.quote, depth + 1)?;
         if self.quote.is_none() {
             return Err(
                 format!(

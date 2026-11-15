@@ -174,7 +174,8 @@ class Host {
   bool greeted = false, active = false, activation_attempted = false;
   std::size_t inflight = 0;
   std::size_t max_inflight = 16;
-  OperationInbox seen;
+  OperationInbox seen{1};
+  std::chrono::milliseconds io_timeout{5000};
   std::map<std::string, std::shared_ptr<ResourceRecord>> resources;
   std::uint64_t next_resource = 0;
   native::Runtime runtime;
@@ -182,8 +183,9 @@ class Host {
       runtime, [this](Request request) { return dispatch(std::move(request)); },
       [this] {
         return greeted ? dependencies->validation : Validation::Audit;
-      }, [this] { return dependencies->frame_capacity; }};
-  transports::Stdio stdio{runtime, [this] { stop(1, true); }, [this] { return dependencies->frame_capacity; }};
+      }, [this] { return dependencies->frame_capacity; },
+      [this] { return io_timeout; }, [this] { return OperationLayout(max_inflight).connections; }};
+  transports::Stdio stdio{runtime, [this] { stop(1, true); }, [this] { return dependencies->frame_capacity; }, [this] { return OperationLayout(max_inflight).output; }};
   bool closed = false;
   std::string url;
   bool enable_http;
@@ -416,9 +418,13 @@ class Host {
       if (greeted)
         throw Refusal("protocol", "hello must be first encoded");
       max_inflight = payload.at("max_inflight").get<std::size_t>();
-      if (max_inflight < 1 || max_inflight > 128)
-        throw Refusal("invalid_argument", "max_inflight must be in 1..=128");
+      const OperationLayout layout(max_inflight);
+      seen.grow(layout.incoming);
       ordinary_lane.capacity(max_inflight);
+      const auto duration = payload.at("io_timeout_ms").get<std::uint64_t>();
+      if (duration == 0 || duration > INT32_MAX)
+        throw Refusal("invalid_argument", "invalid io_timeout_ms");
+      io_timeout = std::chrono::milliseconds(duration);
       const auto frame_capacity = payload.at("frame_capacity").get<std::uint64_t>();
       if (frame_capacity == 0 || frame_capacity > static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
         throw Refusal("invalid_argument", "invalid frame_capacity");

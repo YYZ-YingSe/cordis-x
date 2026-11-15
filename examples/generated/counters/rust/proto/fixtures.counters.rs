@@ -5,13 +5,9 @@ pub struct CounterClosed {
     pub counter_closed: ::core::option::Option<i64>,
 }
 impl cordis_sdk_core::typed::Walk for CounterClosed {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.counter_closed, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.counter_closed, depth + 1)?;
         if self.counter_closed.is_none() {
             return Err(
                 format!(

@@ -13,6 +13,8 @@ use tokio::sync::watch;
 async fn dispatch<P: Plugin>(
     request: Request<HttpBody>,
     host: Rc<Host<P>>,
+    lease: Rc<tokio::sync::OwnedSemaphorePermit>,
+    activity: Active,
 ) -> Result<Response<Full<Bytes>>> {
     let (parts, body) = request.into_parts();
     if parts.method != hyper::Method::POST
@@ -42,7 +44,7 @@ async fn dispatch<P: Plugin>(
         return Err(refused("http", "body too large"));
     }
     let bytes = tokio::time::timeout(
-        Duration::from_secs(5),
+        host.channel.io_timeout.get(),
         Limited::new(body, frame_capacity).collect(),
     )
     .await
@@ -63,7 +65,13 @@ async fn dispatch<P: Plugin>(
     ) {
         return Err(refused("http", "command requires session endpoint"));
     }
-    let response = host.dispatch(request).await?;
+    let response = tokio::task::spawn_local(async move {
+        let _lease = lease;
+        let _activity = activity;
+        host.dispatch(request).await
+    })
+    .await
+    .map_err(unknown)??;
     let status = if response.is_success() { 200 } else { 400 };
     let bytes = response.encode(frame_capacity).map_err(unknown)?;
     Response::builder()
@@ -88,7 +96,11 @@ impl Drop for Active {
     }
 }
 pub async fn serve<P: Plugin>(listener: tokio::net::TcpListener, host: Rc<Host<P>>) {
-    let permits = std::sync::Arc::new(tokio::sync::Semaphore::new(2 * (128 + 16)));
+    let capacity = cordis_wire::operations::Layout::new(host.max_inflight.get())
+        .unwrap()
+        .connections;
+    let permits = std::sync::Arc::new(tokio::sync::Semaphore::new(capacity));
+    let io_timeout = host.channel.io_timeout.get();
     let mut jobs = tokio::task::JoinSet::new();
     while let Ok((socket, _)) = listener.accept().await {
         let Ok(permit) = permits.clone().try_acquire_owned() else {
@@ -96,14 +108,14 @@ pub async fn serve<P: Plugin>(listener: tokio::net::TcpListener, host: Rc<Host<P
         };
         let host = host.clone();
         jobs.spawn_local(async move {
-            let _permit = permit;
+            let permit = Rc::new(permit);
             let (activity, changed) = watch::channel(0usize);
             let service = hyper::service::service_fn(move |request| {
                 let host = host.clone();
+                let permit = permit.clone();
                 let activity = Active::new(activity.clone());
                 async move {
-                    let _activity = activity;
-                    Ok::<_, Infallible>(match dispatch(request, host).await {
+                    Ok::<_, Infallible>(match dispatch(request, host, permit, activity).await {
                         Ok(response) => response,
                         Err(_) => Response::builder()
                             .status(400)
@@ -113,7 +125,7 @@ pub async fn serve<P: Plugin>(listener: tokio::net::TcpListener, host: Rc<Host<P
                     })
                 }
             });
-            connection(socket, service, changed).await;
+            connection(socket, service, changed, io_timeout).await;
         });
         while jobs.try_join_next().is_some() {}
     }
@@ -123,6 +135,7 @@ async fn connection<S>(
     socket: tokio::net::TcpStream,
     service: S,
     mut changed: watch::Receiver<usize>,
+    io_timeout: Duration,
 ) where
     S: hyper::service::Service<
             Request<HttpBody>,
@@ -135,7 +148,7 @@ async fn connection<S>(
         .keep_alive(true)
         .max_headers(64)
         .timer(TokioTimer::new())
-        .header_read_timeout(Duration::from_secs(30));
+        .header_read_timeout(io_timeout);
     let connection = builder.serve_connection(TokioIo::new(socket), service);
     tokio::pin!(connection);
     loop {
@@ -144,7 +157,7 @@ async fn connection<S>(
             biased;
             result = changed.changed() => { if result.is_err() { break; } }
             _ = &mut connection => break,
-            _ = tokio::time::sleep(Duration::from_secs(30)), if idle => {
+            _ = tokio::time::sleep(io_timeout), if idle => {
                 // Polling the connection can admit a request in this
                 // same select turn. Recheck before dropping its owner.
                 if *changed.borrow() == 0 { break; }
@@ -210,7 +223,12 @@ mod tests {
                         }
                     }
                 });
-                let serving = tokio::task::spawn_local(connection(socket, service, receiver));
+                let serving = tokio::task::spawn_local(connection(
+                    socket,
+                    service,
+                    receiver,
+                    Duration::from_millis(100),
+                ));
                 let mut client = BufReader::new(client);
                 request(&mut client, "/first").await;
                 let waiting = tokio::task::spawn_local(async move {
@@ -218,7 +236,7 @@ mod tests {
                     client
                 });
                 entered.notified().await;
-                tokio::time::sleep(Duration::from_secs(31)).await;
+                tokio::time::sleep(Duration::from_millis(300)).await;
                 assert!(
                     !waiting.is_finished(),
                     "connection age ended an admitted call"

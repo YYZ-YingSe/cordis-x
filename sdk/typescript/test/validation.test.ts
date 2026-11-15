@@ -24,7 +24,7 @@ test('field plans isolate same-name descriptor identities and mutable values', (
   assert.doesNotThrow(() => validateMessage(ConfigSchema, ordinary, 'contract'));
 });
 
-test('compiled plans allow large values and preserve node and depth protection', () => {
+test('compiled plans allow wide collections and preserve depth protection', () => {
   const links = create(LinkASchema, {next: {next: {}}});
   validateMessage(LinkASchema, links, 'audit');
   const data = create(DataSchema, {int32Value: 0, option: {state: {case:'none', value:0}}, binary: new Uint8Array(2*1024*1024)});
@@ -38,13 +38,14 @@ test('compiled plans allow large values and preserve node and depth protection',
     assert.deepEqual(codec.decode(encoded, policy), data);
   }
   data.binary = new Uint8Array(); data.text = '';
-  data.flags = Array(65536).fill(false);
-  assert.throws(() => validateMessage(DataSchema, data, 'checked'), /node limit/);
+  data.flags = Array(100_000).fill(false);
+  for (const policy of ['checked', 'audit'] as const)
+    assert.deepEqual(codec.decode(codec.encode(data, policy), policy), data);
   data.flags = [];
   data.tree = {$typeName:'profile.Tree', label:'', children:[]};
   let tree = data.tree;
   for (let i=0;i<64;i++) { const child = {$typeName:'profile.Tree' as const, label:'', children:[]}; tree.children.push(child); tree = child; }
-  assert.throws(() => validateMessage(DataSchema, data, 'checked'), /depth\/node limit/);
+  assert.throws(() => validateMessage(DataSchema, data, 'checked'), /depth limit/);
 });
 
 test('large map keys and string values have no implicit byte quota', () => {

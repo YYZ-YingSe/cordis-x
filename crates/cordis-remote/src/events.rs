@@ -43,7 +43,9 @@ impl Events {
             bindings: entries,
             listeners: Mutex::default(),
             dispatches: Mutex::default(),
-            next_call: Arc::default(),
+            next_call: Arc::new(cordis_wire::operations::Outgoing::new(
+                cordis_wire::operations::RESERVED_CAPACITY,
+            )),
         })
     }
     pub fn declarations(&self) -> Value {

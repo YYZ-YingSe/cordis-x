@@ -123,9 +123,11 @@ The host runtime is Rust. Plugins can run through the following SDK paths:
 
 The portable SDKs expose services, resources, dependency calls, events, middleware, child plugins, scopes, tasks, and cleanup effects. Backend capabilities remain explicit: the basic Wasm world exports services and resources; the managed world also imports host context operations.
 
-Business DTOs have no implicit total string/bytes quota. Native, C ABI and component payloads do not inherit a Process limit. Process/HTTP use the host's `ProcessSpec.frame_capacity` (1 MiB deployment default), communicated to Rust/C++/TypeScript peers during initialization. Physical readers check capacity before allocation; bounded operation, connection and output slots retain ownership through settlement. Allocation, protobuf representation, control metadata and Wasm Store limits still apply. Applications pass complete typed values, not transport chunks.
+Business DTOs have no implicit total string/bytes or collection-node quota. Declared field constraints, depth and cycle checks still apply. Native, C ABI and component payloads do not inherit a Process limit. Process/HTTP use the host's `ProcessSpec.frame_capacity` (1 MiB deployment default), communicated to Rust/C++/TypeScript peers during initialization. Physical readers check capacity before allocation; bounded operation, connection and output slots retain ownership through settlement. Allocation, protobuf representation, control metadata and Wasm Store limits still apply. Applications pass complete typed values, not transport chunks.
 
 Ordinary Process and managed Wasm calls have no default execution deadline. Hosts can select an `execution_timeout`; initialization and actual cancellation/cleanup use separate deadlines. Dropping a waiter does not cancel the operation.
+
+Process admission follows the host's `max_inflight`, without a fixed 128-operation ceiling. Cleanup and reverse calls retain separate capacity. HTTP I/O phases use `ProcessSpec.io_timeout` (5 seconds by default) across Rust, C++ and TypeScript; waiting for admitted business work is not an I/O timeout. Wasm call capacities likewise follow host configuration and actual runtime representation limits rather than extra 1,024/4,096-call ceilings.
 
 Native plugins and C ABI libraries execute with the host process's privileges. A process boundary does not by itself sandbox a plugin. Wasm access depends on the imports and WASI capabilities the host grants, together with its configured execution limits.
 

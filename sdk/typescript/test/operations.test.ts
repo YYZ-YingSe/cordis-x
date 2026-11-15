@@ -1,6 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OperationInbox, OperationOutbox, parseOperation } from '../src/protocols/session/operations.ts';
+import { OperationInbox, OperationOutbox, parseOperation, operationLayout } from '../src/protocols/session/operations.ts';
+
+test('host capacity sizes lanes without erasing the admitted hello generation', () => {
+  const layout = operationLayout(257);
+  const sender = new OperationOutbox(layout.forward), receiver = new OperationInbox(1);
+  const hello = sender.allocate(0), finish = receiver.admit(hello);
+  receiver.grow(layout.incoming);
+  assert.throws(() => receiver.admit(hello));
+  finish();
+  assert.throws(() => receiver.admit(hello));
+  sender.complete(hello);
+  const ordinary = Array.from({ length: 257 }, () => sender.allocate(0));
+  assert.throws(() => sender.allocate(0));
+  const cleanup = sender.allocate(1);
+  assert.equal(parseOperation(cleanup)?.slot, 257);
+  receiver.admit(cleanup)();
+  assert(sender.complete(cleanup));
+  for (const operation of ordinary) assert(sender.complete(operation));
+  for (const capacity of [0, -1, NaN, 0xffffffff]) assert.throws(() => operationLayout(capacity));
+});
 
 test('a suspended request does not prevent another slot from turning over indefinitely', () => {
   const sender = new OperationOutbox(2), receiver = new OperationInbox(2);

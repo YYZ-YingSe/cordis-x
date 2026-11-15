@@ -247,6 +247,16 @@ async fn compiled_component_has_independent_stores() {
 #[test]
 fn validates_contract_artifact_and_imports_before_publication() {
     let component = support::component();
+    assert!(
+        Component::from_bytes(
+            support::bytes(),
+            Limits {
+                pending_calls: 2048,
+                ..Limits::default()
+            }
+        )
+        .is_ok()
+    );
     let wrong = Service::<WasmService>::new("example.calculator", "2").with_descriptor(
         cordis_contract::portable::decode(
             &cordis_test_contracts::resources::rust_fixture::SERVICE

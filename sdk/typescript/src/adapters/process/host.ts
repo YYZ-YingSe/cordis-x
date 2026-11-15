@@ -1,6 +1,6 @@
 import { Identities, makeRoom, Completion } from './retention.ts';
 import { ReferenceRegistry } from './references.ts';
-import { OperationInbox, parseOperation } from '../../protocols/session/operations.ts';
+import { OperationInbox, parseOperation, operationLayout } from '../../protocols/session/operations.ts';
 import type { Message } from '../../core/message.ts';
 import { checkBinary } from '../../core/protobuf.ts';
 import { validation } from '../../core/validation.ts';
@@ -102,7 +102,8 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
   let maxInflight = 16;
   const lanes = [0, 0, 0, 0, 0, 0, 0, 0, 0];
   const declarations = service.dependencies ?? {};
-  const seen = new OperationInbox();
+  const seen = new OperationInbox(1);
+  let ioTimeout = 5000;
   const idle = new Set<() => void>();
   const pending = new Set<Promise<void>>();
   let url: string | null = null;
@@ -228,8 +229,13 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
       const bound = checkComposition((payload.composition ?? emptyComposition()) as Composition);
       if (JSON.stringify(bound) !== JSON.stringify(composition))
         throw new Refusal('composition_mismatch', 'composition bindings must match installation');
-      if (typeof payload.max_inflight !== "number" || !Number.isInteger(payload.max_inflight) || payload.max_inflight < 1 || payload.max_inflight > 128) throw new Refusal("invalid_argument", "max_inflight must be in 1..=128");
+      if (typeof payload.max_inflight !== 'number') throw new Refusal('invalid_argument', 'invalid max_inflight');
+      const layout = operationLayout(payload.max_inflight);
+      seen.grow(layout.incoming);
       maxInflight = payload.max_inflight;
+      if (typeof payload.io_timeout_ms !== 'number' || !Number.isSafeInteger(payload.io_timeout_ms) || payload.io_timeout_ms < 1 || payload.io_timeout_ms > 0x7fffffff)
+        throw new Refusal('invalid_argument', 'invalid io_timeout_ms');
+      ioTimeout = payload.io_timeout_ms;
       if (typeof payload.frame_capacity !== 'number' || !Number.isSafeInteger(payload.frame_capacity) || payload.frame_capacity < 1 || payload.frame_capacity > 0x7fffffff)
         throw new Refusal('invalid_argument', 'invalid frame_capacity');
       channel.frameCapacity = payload.frame_capacity;
@@ -503,7 +509,7 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
   };
   const server = await listen(
     options.http !== false,
-    { active: () => !!activation, validation: () => channel.validation, capacity: () => channel.frameCapacity },
+    { active: () => !!activation, validation: () => channel.validation, capacity: () => channel.frameCapacity, ioTimeout: () => ioTimeout, connections: () => operationLayout(maxInflight).connections },
     dispatch,
   );
   url = server.url;

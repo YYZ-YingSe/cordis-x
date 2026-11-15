@@ -14,7 +14,8 @@ class Server {
   native::Runtime &runtime;
   std::function<Async<Response>(Request)> dispatch;
   std::function<Validation()> validation;
-  std::function<std::size_t()> capacity;
+  std::function<std::size_t()> capacity, connection_capacity;
+  std::function<std::chrono::milliseconds()> io_timeout;
   asio::ip::tcp::acceptor listener;
   std::map<std::uint64_t, std::weak_ptr<Socket>> connections;
   std::uint64_t next_connection = 0;
@@ -27,7 +28,7 @@ class Server {
   Async<void> http(std::shared_ptr<Socket> socket) {
     asio::steady_timer deadline(runtime.io());
     auto arm_deadline = [&] {
-      deadline.expires_after(std::chrono::seconds(5));
+      deadline.expires_after(io_timeout());
       deadline.async_wait([socket](std::error_code error) {
         if (!error) {
           std::error_code ignored;
@@ -92,6 +93,7 @@ class Server {
       if (type != content_type)
         throw std::runtime_error("unsupported HTTP content type");
       bytes.erase(0, split + 4);
+      arm_deadline();
       while (bytes.size() < length) {
         const auto n = co_await socket->async_read_some(
             asio::buffer(buffer,
@@ -159,7 +161,7 @@ public:
   void start() {
     listener.open(asio::ip::tcp::v4());
     listener.bind({asio::ip::address_v4::loopback(), 0});
-    listener.listen(16);
+    listener.listen(asio::socket_base::max_listen_connections);
     url =
         "http://127.0.0.1:" + std::to_string(listener.local_endpoint().port()) +
         "/cordis/call";
@@ -171,7 +173,7 @@ public:
         } catch (const std::system_error &) {
           co_return;
         }
-        if (connections.size() >= 2 * (128 + 16))
+        if (connections.size() >= connection_capacity())
           continue;
         const auto id = ++next_connection;
         connections.emplace(id, socket);
@@ -203,9 +205,12 @@ public:
   Server(native::Runtime &runtime,
          std::function<Async<Response>(Request)> dispatch,
          std::function<Validation()> validation,
-         std::function<std::size_t()> capacity)
+         std::function<std::size_t()> capacity,
+         std::function<std::chrono::milliseconds()> io_timeout,
+         std::function<std::size_t()> connection_capacity)
       : runtime(runtime), dispatch(std::move(dispatch)),
-        validation(std::move(validation)), capacity(std::move(capacity)), listener(runtime.io()) {}
+        validation(std::move(validation)), capacity(std::move(capacity)),
+        connection_capacity(std::move(connection_capacity)), io_timeout(std::move(io_timeout)), listener(runtime.io()) {}
   // The owner stops this server and drains Runtime before destroying either.
   const std::string &endpoint() const { return url; }
 };

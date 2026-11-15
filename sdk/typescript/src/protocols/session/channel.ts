@@ -1,4 +1,4 @@
-import { OperationOutbox } from './operations.ts';
+import { OperationOutbox, REVERSE_LANES } from './operations.ts';
 import type { Message } from '../../core/message.ts';
 import { encodeFrame } from './binary.ts';
 import { payload, one, controlOnly, type Payload, type Request, type Response } from './messages.ts';
@@ -7,13 +7,13 @@ import { RpcError } from '../../core/error.ts';
 import { DEFAULT_FRAME_CAPACITY, type Value } from '../../core/value.ts';
 import type { Identity } from './messages.ts';
 export type { Identity, Envelope } from './messages.ts';
-type Pending = { lane: number; command: string; resolve(value: Payload): void; reject(error: Error): void };
+type Pending = { command: string; resolve(value: Payload): void; reject(error: Error): void };
 
 export class DependencyChannel {
   frameCapacity = DEFAULT_FRAME_CAPACITY;
   validation: import('../../core/validation.ts').Validation = 'checked';
   private pending = new Map<string, Pending>();
-  private operations = new OperationOutbox();
+  private operations = new OperationOutbox(REVERSE_LANES);
   private session = '';
   private cleanupCalls = false;
   private metadataEnabled = false;
@@ -95,8 +95,6 @@ export class DependencyChannel {
                               : command === 'task_join'
                                 ? 4
                                 : 0;
-    if ([...this.pending.values()].filter((entry) => entry.lane === lane).length >= 16)
-      return Promise.reject(new Refusal('overloaded', 'dependency call capacity reached'));
     let operation: string;
     try { operation = this.operations.allocate(lane); } catch (error) { return Promise.reject(error); }
     let bytes: Uint8Array;
@@ -108,7 +106,7 @@ export class DependencyChannel {
         payload,
       }, this.frameCapacity); } catch (error) { this.operations.complete(operation); return Promise.reject(new Refusal('invalid_argument', String(error))); }
     return new Promise((resolve, reject) => {
-      this.pending.set(operation, { lane, command, resolve, reject });
+      this.pending.set(operation, { command, resolve, reject });
       this.output!(bytes).catch((error) => {
         this.close();
         reject(error);

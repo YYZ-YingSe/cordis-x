@@ -53,13 +53,9 @@ pub struct CounterMetadataResult {
     pub layers: ::prost::alloc::vec::Vec<super::super::google::protobuf::Value>,
 }
 impl cordis_sdk_core::typed::Walk for AddArgs {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.left, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.left, depth + 1)?;
         if self.left.is_none() {
             return Err(
                 format!(
@@ -67,7 +63,7 @@ impl cordis_sdk_core::typed::Walk for AddArgs {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.right, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.right, depth + 1)?;
         if self.right.is_none() {
             return Err(
                 format!(
@@ -79,13 +75,9 @@ impl cordis_sdk_core::typed::Walk for AddArgs {
     }
 }
 impl cordis_sdk_core::typed::Walk for MetadataResult {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.revision, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.revision, depth + 1)?;
         if self.revision.is_none() {
             return Err(
                 format!(
@@ -94,18 +86,14 @@ impl cordis_sdk_core::typed::Walk for MetadataResult {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.layers, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.layers, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for MetadataForArgs {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.name, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.name, depth + 1)?;
         if self.name.is_none() {
             return Err(
                 format!(
@@ -114,7 +102,7 @@ impl cordis_sdk_core::typed::Walk for MetadataForArgs {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.revision, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.revision, depth + 1)?;
         if self.revision.is_none() {
             return Err(
                 format!(
@@ -127,13 +115,9 @@ impl cordis_sdk_core::typed::Walk for MetadataForArgs {
     }
 }
 impl cordis_sdk_core::typed::Walk for MetadataForResult {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.revision, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.revision, depth + 1)?;
         if self.revision.is_none() {
             return Err(
                 format!(
@@ -142,18 +126,14 @@ impl cordis_sdk_core::typed::Walk for MetadataForResult {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.layers, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.layers, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for StatusResult {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.open, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.open, depth + 1)?;
         if self.open.is_none() {
             return Err(
                 format!(
@@ -162,32 +142,24 @@ impl cordis_sdk_core::typed::Walk for StatusResult {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.waiting, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.waiting, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for CounterArgs {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.initial, d + 1, b)?;
-        cordis_sdk_core::typed::Walk::walk(&self.name, d + 1, b)?;
-        cordis_sdk_core::typed::Walk::walk(&self.wait, d + 1, b)?;
-        cordis_sdk_core::typed::Walk::walk(&self.fail_close, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.initial, depth + 1)?;
+        cordis_sdk_core::typed::Walk::walk(&self.name, depth + 1)?;
+        cordis_sdk_core::typed::Walk::walk(&self.wait, depth + 1)?;
+        cordis_sdk_core::typed::Walk::walk(&self.fail_close, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for CounterMetadataResult {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.revision, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.revision, depth + 1)?;
         if self.revision.is_none() {
             return Err(
                 format!(
@@ -196,7 +168,7 @@ impl cordis_sdk_core::typed::Walk for CounterMetadataResult {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.layers, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.layers, depth + 1)?;
         Ok(())
     }
 }

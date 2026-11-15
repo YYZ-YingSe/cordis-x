@@ -27,7 +27,8 @@ pub struct ProcessSpec {
     pub endpoint: Endpoint,
     pub initialization_timeout: Duration,
     pub execution_timeout: Option<Duration>,
-    /// Per-instance ordinary admission (1..=128). Cleanup has separate slots.
+    pub io_timeout: Duration,
+    /// Per-instance ordinary admission. Cleanup has separate slots.
     pub max_inflight: usize,
     pub frame_capacity: usize,
     /// Deadline for cancellation, cleanup, deactivation and process exit.
@@ -43,6 +44,7 @@ impl ProcessSpec {
             endpoint: Endpoint::Ipc,
             initialization_timeout: Duration::from_secs(10),
             execution_timeout: None,
+            io_timeout: Duration::from_secs(5),
             max_inflight: 16,
             frame_capacity: cordis_wire::DEFAULT_FRAME_CAPACITY,
             stop_timeout: Duration::from_secs(5),
@@ -199,6 +201,7 @@ impl ProcessSpec {
         let session = owned.with(Clone::clone)?;
         let ready = session.request("hello", json!({
             "max_inflight": self.max_inflight,
+            "io_timeout_ms": self.io_timeout.as_millis() as u64,
             "frame_capacity": self.frame_capacity,
             "capabilities": {"dependency_resources":true,"metadata":true,"effects":true,"effect_sequences":true,"scopes":true,"tasks":true,"events":true,"middleware":true,"composition":true},
             "validation": self.bindings.validation,
@@ -295,7 +298,7 @@ impl ProcessSpec {
             .map(|url| {
                 Http::local(
                     url,
-                    self.initialization_timeout,
+                    self.io_timeout,
                     self.execution_timeout,
                     self.stop_timeout,
                     self.bindings.validation,
@@ -327,7 +330,6 @@ impl ProcessSpec {
             session,
             activation,
             capacity: Arc::new(Semaphore::new(self.max_inflight)),
-            cleanup_capacity: Arc::new(Semaphore::new(16)),
             resources: ready["capabilities"]["resources"]
                 .as_bool()
                 .unwrap_or(false),
@@ -353,7 +355,6 @@ pub struct RemoteService {
     activation: Activation,
     capacity: Arc<Semaphore>,
     pub(crate) resources: bool,
-    cleanup_capacity: Arc<Semaphore>,
 }
 impl RemoteService {
     pub async fn invoke_json(&self, context: &Context, method: &str, args: Value) -> Result<Value> {
@@ -471,16 +472,14 @@ impl RemoteService {
             signature.map(|s| &s.errors)
         };
         let permit = if command == "resource_release" {
-            self.cleanup_capacity
-                .clone()
-                .acquire_owned()
-                .await
-                .map_err(|_| Error::Closed)?
+            None
         } else {
-            self.capacity
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| Error::Overloaded)?
+            Some(
+                self.capacity
+                    .clone()
+                    .try_acquire_owned()
+                    .map_err(|_| Error::Overloaded)?,
+            )
         };
         let backend = match endpoint {
             Endpoint::Ipc => &self.ipc,
@@ -489,14 +488,16 @@ impl RemoteService {
                 .as_ref()
                 .ok_or_else(|| Error::InvalidInput("HTTP endpoint unavailable".into()))?,
         };
-        let (request, _scope) =
-            self.session
-                .scoped_envelope(context, command, payload.into_wire())?;
         let _permit = permit;
-        let operation = request.operation.clone();
         let result = self
             .session
-            .supervise(context, backend.invoke(request))
+            .supervise(context, async {
+                let (request, _scope) = self
+                    .session
+                    .scoped_envelope(context, command, payload.into_wire())
+                    .await?;
+                backend.invoke(request).await
+            })
             .await
             .map_err(|e| match errors {
                 Some(errors) => e.check_declared(errors, "operation errors"),
@@ -519,7 +520,6 @@ impl RemoteService {
             let _ = self.session.abort(error.clone()).await;
             let _ = context.fail(error.to_string());
         }
-        self.session.complete_operation(&operation);
         result
     }
 
@@ -533,16 +533,16 @@ impl RemoteService {
 }
 
 trait InvocationBackend: Send + Sync {
-    fn invoke(&self, request: cordis_wire::Request) -> BoxFuture<'_, Result<Payload>>;
+    fn invoke(&self, request: crate::session::Operation) -> BoxFuture<'_, Result<Payload>>;
 }
 struct Ipc(Session);
 impl InvocationBackend for Ipc {
-    fn invoke(&self, request: cordis_wire::Request) -> BoxFuture<'_, Result<Payload>> {
+    fn invoke(&self, request: crate::session::Operation) -> BoxFuture<'_, Result<Payload>> {
         Box::pin(self.0.send(request))
     }
 }
 impl InvocationBackend for Http {
-    fn invoke(&self, request: cordis_wire::Request) -> BoxFuture<'_, Result<Payload>> {
+    fn invoke(&self, request: crate::session::Operation) -> BoxFuture<'_, Result<Payload>> {
         Box::pin(self.call(request))
     }
 }

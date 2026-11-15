@@ -83,7 +83,7 @@ impl Module {
     pub fn compile(compiler: &Compiler, bytes: &[u8], limits: Limits) -> Result<Self> {
         if bytes.len() > limits.artifact_bytes
             || limits.pending_calls == 0
-            || limits.pending_calls > 1024
+            || limits.pending_calls > tokio::sync::Semaphore::MAX_PERMITS
             || limits.memory_bytes == 0
             || limits.fuel_on_admission == 0
             || limits.initialization_fuel == 0

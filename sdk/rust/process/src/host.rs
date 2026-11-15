@@ -26,7 +26,7 @@ pub struct Host<P> {
     closing: Cell<bool>,
     seen: cordis_wire::operations::Incoming,
     inflight: Cell<usize>,
-    max_inflight: Cell<usize>,
+    pub max_inflight: Cell<usize>,
     idle: Notify,
     lanes: [Cell<usize>; 9],
     pub url: Option<String>,
@@ -48,12 +48,19 @@ impl<P: Plugin> Host<P> {
         }
         let manifest = P::manifest();
         let args = &request.payload.control;
-        let max_inflight = args["max_inflight"]
-            .as_u64()
-            .filter(|n| (1..=128).contains(n))
-            .ok_or_else(|| refused("invalid_argument", "max_inflight must be in 1..=128"))?
-            as usize;
+        let layout = session_layout(args)?;
+        let max_inflight = layout.forward[0];
+        self.seen
+            .grow(layout.incoming)
+            .map_err(|error| refused("invalid_argument", error))?;
         self.max_inflight.set(max_inflight);
+        let io_timeout = args["io_timeout_ms"]
+            .as_u64()
+            .filter(|duration| (1..=i32::MAX as u64).contains(duration))
+            .ok_or_else(|| refused("invalid_argument", "invalid io_timeout_ms"))?;
+        self.channel
+            .io_timeout
+            .set(std::time::Duration::from_millis(io_timeout));
         let frame_capacity = args["frame_capacity"]
             .as_u64()
             .filter(|capacity| (1..=i32::MAX as u64).contains(capacity))
@@ -475,10 +482,41 @@ impl<P: Plugin> Host<P> {
         Ok(request.response(outcome(result)))
     }
 }
+fn session_layout(args: &Value) -> Result<cordis_wire::operations::Layout> {
+    args["max_inflight"]
+        .as_u64()
+        .and_then(|capacity| usize::try_from(capacity).ok())
+        .and_then(cordis_wire::operations::Layout::new)
+        .filter(|layout| {
+            layout.output <= tokio::sync::Semaphore::MAX_PERMITS
+                && layout.connections <= tokio::sync::Semaphore::MAX_PERMITS
+        })
+        .ok_or_else(|| {
+            refused(
+                "invalid_argument",
+                "max_inflight must be positive and representable",
+            )
+        })
+}
 pub async fn serve<P: Plugin>(options: Options) -> Result<()> {
-    let (send, mut output) = mpsc::channel(cordis_wire::operations::OUTPUT_FRAMES);
+    let mut input = tokio::io::BufReader::with_capacity(stdio::BUFFER_CAPACITY, tokio::io::stdin());
+    let Incoming::Request(first) = stdio::read(
+        &mut input,
+        cordis_sdk_core::Validation::Audit,
+        cordis_wire::DEFAULT_FRAME_CAPACITY,
+    )
+    .await?
+    else {
+        return Err(refused("protocol", "Hello must be first"));
+    };
+    if first.command != "hello" {
+        return Err(refused("protocol", "Hello must be first"));
+    }
+    let layout = session_layout(&first.payload.control)?;
+    let (send, mut output) = mpsc::channel(layout.output);
+    let mut first = Some(Incoming::Request(first));
     let channel = Channel::new(send);
-    let listener = if options.http {
+    let mut listener = if options.http {
         Some(
             tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
                 .await
@@ -514,7 +552,7 @@ pub async fn serve<P: Plugin>(options: Options) -> Result<()> {
         active: Cell::new(false),
         attempted: Cell::new(false),
         closing: Cell::new(false),
-        seen: cordis_wire::operations::Incoming::new(cordis_wire::operations::DEFAULT_SLOTS),
+        seen: cordis_wire::operations::Incoming::new(1),
         inflight: Cell::new(0),
         max_inflight: Cell::new(16),
         idle: Notify::new(),
@@ -547,14 +585,16 @@ pub async fn serve<P: Plugin>(options: Options) -> Result<()> {
             Ok(())
         }
     });
-    let http = listener
-        .map(|listener| tokio::task::spawn_local(super::http::serve(listener, host.clone())));
+    let mut http = None;
     // Header/tag/body reads share a fill instead of scheduling a blocking stdin
     // job for each field. Retain prefetched bytes across all frame reads.
-    let mut input = tokio::io::BufReader::with_capacity(stdio::BUFFER_CAPACITY, tokio::io::stdin());
     let mut jobs = tokio::task::JoinSet::new();
     let result = loop {
-        let received = tokio::select! { biased; _=stopping.changed()=>{break stopping.borrow().clone().unwrap_or_else(||Err(unknown("host stopped")));}, value=stdio::read(&mut input, host.channel.carrier_validation(), host.channel.frame_capacity.get())=>value };
+        let received = if let Some(first) = first.take() {
+            Ok(first)
+        } else {
+            tokio::select! { biased; _=stopping.changed()=>{break stopping.borrow().clone().unwrap_or_else(||Err(unknown("host stopped")));}, value=stdio::read(&mut input, host.channel.carrier_validation(), host.channel.frame_capacity.get())=>value }
+        };
         let request = match received {
             Ok(Incoming::Request(request)) => request,
             Ok(Incoming::Response(response)) => {
@@ -567,6 +607,14 @@ pub async fn serve<P: Plugin>(options: Options) -> Result<()> {
         };
         if request.command == "hello" {
             let reply = host.dispatch(request).await?;
+            if reply.is_success()
+                && let Some(listener) = listener.take()
+            {
+                http = Some(tokio::task::spawn_local(super::http::serve(
+                    listener,
+                    host.clone(),
+                )));
+            }
             channel.write(reply).await?;
             continue;
         }

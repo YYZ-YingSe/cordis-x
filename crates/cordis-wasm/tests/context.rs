@@ -348,7 +348,7 @@ async fn dynamic_intercepts_are_pinned_through_real_wasm_callbacks_and_cleanup()
 }
 #[tokio::test]
 async fn context_dependencies_effects_and_expiring_authority() {
-    let app = app().await;
+    let app = app_with(|capabilities| capabilities.max_calls = 8192).await;
     assert_eq!(app.call("echo", json!(42)).await.unwrap(), json!(42.0));
     let info = app.call("info", json!({})).await.unwrap();
     assert_ne!(info["owner"], info["definition"]);

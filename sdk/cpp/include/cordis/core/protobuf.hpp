@@ -32,22 +32,16 @@ inline google::protobuf::util::JsonPrintOptions print_options() {
   options.allow_legacy_nonconformant_behavior = false;
   return options;
 }
-inline void json_budget(const Value &value, std::size_t depth,
-                        std::size_t &nodes) {
-  if (depth > 96 || !nodes)
-    throw std::runtime_error("JSON depth/node limit exceeded");
-  --nodes;
+inline void json_budget(const Value &value, std::size_t depth = 0) {
+  if (depth > max_depth)
+    throw std::runtime_error("JSON depth limit exceeded");
   if (value.is_binary() || value.is_discarded())
     throw std::runtime_error("not a JSON value");
   if (value.is_number() && !std::isfinite(value.get<double>()))
     throw std::runtime_error("non-finite JSON number");
   if (value.is_structured())
     for (auto &child : value)
-      json_budget(child, depth + 1, nodes);
-}
-inline void json_budget(const Value &value) {
-  std::size_t nodes = max_nodes;
-  json_budget(value, 0, nodes);
+      json_budget(child, depth + 1);
 }
 inline void json_precision(const google::protobuf::Descriptor *desc,
                            const Value &value, std::size_t depth = 0) {

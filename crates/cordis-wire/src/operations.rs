@@ -3,12 +3,34 @@
 //! Receivers retain one generation per slot, not every operation ever seen.
 use std::sync::{Arc, Mutex};
 
-pub const SLOTS_PER_LANE: usize = 128;
-pub const DEFAULT_SLOTS: usize = 16 * SLOTS_PER_LANE;
-// At most 128 ordinary + eight 16-slot callback lanes in the forward
-// direction, and fourteen 16-slot reverse lanes. Every accepted operation
-// produces at most one queued request or response before its slot can turn.
-pub const OUTPUT_FRAMES: usize = 128 + 8 * 16 + 14 * 16;
+pub const RESERVED_CAPACITY: usize = 16;
+pub const REVERSE_LANES: [usize; 14] = [RESERVED_CAPACITY; 14];
+
+#[derive(Clone, Copy)]
+pub struct Layout {
+    pub forward: [usize; 9],
+    pub incoming: usize,
+    pub output: usize,
+    pub connections: usize,
+}
+impl Layout {
+    pub fn new(ordinary: usize) -> Option<Self> {
+        let incoming = ordinary.checked_add(8 * RESERVED_CAPACITY)?;
+        let output = incoming.checked_add(REVERSE_LANES.iter().sum())?;
+        let connections = ordinary.checked_add(RESERVED_CAPACITY)?.checked_mul(2)?;
+        if ordinary == 0 || output > u32::MAX as usize || connections > u32::MAX as usize {
+            return None;
+        }
+        let mut forward = [RESERVED_CAPACITY; 9];
+        forward[0] = ordinary;
+        Some(Self {
+            forward,
+            incoming,
+            output,
+            connections,
+        })
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Id {
@@ -40,6 +62,7 @@ struct Slot {
 /// Owned by the transport, not by a cancellable waiting future.
 pub struct Outgoing {
     slots: Mutex<Vec<Slot>>,
+    lanes: Vec<std::ops::Range<usize>>,
 }
 /// A reservation for executor-owned work. Do not attach it to a cancellable
 /// public waiter: the work must keep it until its completion is observed.
@@ -52,27 +75,32 @@ impl Drop for Lease {
         self.owner.complete(self.id);
     }
 }
-impl Default for Outgoing {
-    fn default() -> Self {
-        Self::new(DEFAULT_SLOTS)
-    }
-}
-impl Default for Incoming {
-    fn default() -> Self {
-        Self::new(DEFAULT_SLOTS)
-    }
-}
 impl Outgoing {
     pub fn new(capacity: usize) -> Self {
+        Self::with_lanes(&[capacity])
+    }
+    pub fn with_lanes(capacities: &[usize]) -> Self {
+        let mut end = 0usize;
+        let lanes = capacities
+            .iter()
+            .map(|capacity| {
+                let start = end;
+                end = end
+                    .checked_add(*capacity)
+                    .expect("operation capacity overflow");
+                start..end
+            })
+            .collect();
         Self {
-            slots: Mutex::new(vec![Slot::default(); capacity]),
+            slots: Mutex::new(vec![Slot::default(); end]),
+            lanes,
         }
     }
     pub fn allocate(&self) -> Option<Id> {
         self.allocate_range(0..usize::MAX)
     }
     pub fn allocate_lane(&self, lane: usize) -> Option<Id> {
-        self.allocate_range(lane * SLOTS_PER_LANE..(lane + 1) * SLOTS_PER_LANE)
+        self.allocate_range(self.lanes.get(lane)?.clone())
     }
     fn allocate_range(&self, range: std::ops::Range<usize>) -> Option<Id> {
         let mut slots = self.slots.lock().unwrap();
@@ -93,6 +121,12 @@ impl Outgoing {
         Some(Lease {
             owner: self.clone(),
             id: self.allocate()?,
+        })
+    }
+    pub fn acquire_lane(self: &Arc<Self>, lane: usize) -> Option<Lease> {
+        Some(Lease {
+            owner: self.clone(),
+            id: self.allocate_lane(lane)?,
         })
     }
     /// A stale completion cannot release the slot of a later request.
@@ -122,6 +156,17 @@ impl Incoming {
         Self {
             slots: Arc::new(Mutex::new(vec![Slot::default(); capacity])),
         }
+    }
+    pub fn grow(&self, capacity: usize) -> Result<(), String> {
+        let mut slots = self.slots.lock().unwrap();
+        let additional = capacity
+            .checked_sub(slots.len())
+            .ok_or("operation table cannot shrink")?;
+        slots
+            .try_reserve_exact(additional)
+            .map_err(|error| error.to_string())?;
+        slots.resize(capacity, Slot::default());
+        Ok(())
     }
     pub fn admit(&self, id: Id) -> Option<Admission> {
         let mut slots = self.slots.lock().unwrap();
@@ -153,13 +198,21 @@ mod tests {
     use super::*;
     #[test]
     fn full_business_lane_cannot_take_cleanup_identity_capacity() {
-        let sender = Outgoing::default();
-        let ordinary: Vec<_> = (0..SLOTS_PER_LANE)
-            .map(|_| sender.allocate_lane(0).unwrap())
-            .collect();
+        let layout = Layout::new(257).unwrap();
+        let sender = Outgoing::with_lanes(&layout.forward);
+        let receiver = Incoming::new(1);
+        let hello = sender.allocate_lane(0).unwrap();
+        let admission = receiver.admit(hello).unwrap();
+        receiver.grow(layout.incoming).unwrap();
+        assert!(receiver.admit(hello).is_none());
+        drop(admission);
+        assert!(receiver.admit(hello).is_none());
+        assert!(sender.complete(hello));
+        let ordinary: Vec<_> = (0..257).map(|_| sender.allocate_lane(0).unwrap()).collect();
         assert!(sender.allocate_lane(0).is_none());
         let cleanup = sender.allocate_lane(1).unwrap();
-        assert!(cleanup.slot >= SLOTS_PER_LANE);
+        assert_eq!(cleanup.slot, 257);
+        drop(receiver.admit(cleanup).unwrap());
         assert!(sender.complete(cleanup));
         for id in ordinary {
             assert!(sender.complete(id));

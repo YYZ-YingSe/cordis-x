@@ -39,6 +39,7 @@ impl Setup {
 
         spec.endpoint = endpoint;
         spec.execution_timeout = Some(timeout);
+        spec.max_inflight = 257;
         spec.args = vec![
             "--test-hooks".into(),
             "--trace".into(),
@@ -697,6 +698,59 @@ async fn cpp_http_io_timeout_does_not_shorten_an_admitted_business_call() {
     .unwrap();
     bounded(waiting).await.unwrap().unwrap();
     bounded(setup.runtime.shutdown()).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn host_selected_capacity_admits_more_than_128_suspended_operations() {
+    for endpoint in [Endpoint::Ipc, Endpoint::Http] {
+        let setup = Setup::new(endpoint, Duration::from_secs(30), false).await;
+        let mut waiting = tokio::task::JoinSet::new();
+        for index in 0..256 {
+            let handle = setup.handle();
+            waiting.spawn(async move {
+                call(
+                    &handle,
+                    endpoint,
+                    "hold",
+                    json!(format!("capacity-{index}")),
+                )
+                .await
+            });
+        }
+        bounded(async {
+            loop {
+                let trace = std::fs::read_to_string(&setup.trace).unwrap_or_default();
+                if trace
+                    .lines()
+                    .filter(|line| line.starts_with("hold:capacity-"))
+                    .count()
+                    == 256
+                {
+                    break;
+                }
+                assert!(
+                    waiting.try_join_next().is_none(),
+                    "call settled before release"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        for index in 0..256 {
+            call(
+                &setup.handle(),
+                endpoint,
+                "release",
+                json!(format!("capacity-{index}")),
+            )
+            .await
+            .unwrap();
+        }
+        while let Some(result) = bounded(waiting.join_next()).await {
+            result.unwrap().unwrap();
+        }
+        bounded(setup.runtime.shutdown()).await.unwrap();
+    }
 }
 
 #[tokio::test]

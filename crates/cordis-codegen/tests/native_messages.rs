@@ -93,6 +93,25 @@ fn native_checks_cover_presence_bounds_enums_oneofs_and_nested_constraints() {
 }
 
 #[test]
+fn generated_and_reflected_checks_accept_wide_business_collections() {
+    let value = profile::data::profile::Data {
+        int32_value: Some(0),
+        option: Some(OptionOptionBool {
+            state: Some(option_option_bool::State::None(0)),
+        }),
+        flags: vec![false; 100_000],
+        ..Default::default()
+    };
+    agrees(value, true);
+    agrees(
+        Fixed3 {
+            values: vec![0.; 100_000],
+        },
+        false,
+    );
+}
+
+#[test]
 fn native_message_moves_string_storage_and_fanout_is_an_immutable_snapshot() {
     let text = "\0\\\"中文".repeat(32768);
     let pointer = text.as_ptr();

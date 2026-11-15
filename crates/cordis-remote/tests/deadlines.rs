@@ -76,7 +76,8 @@ async fn entered(handle: &ServiceHandle<RemoteService>) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ordinary_calls_have_no_default_deadline_on_either_endpoint() {
     for endpoint in [Endpoint::Ipc, Endpoint::Http] {
-        let spec = spec();
+        let mut spec = spec();
+        spec.io_timeout = Duration::from_millis(100);
         assert_eq!(spec.execution_timeout, None);
         let (runtime, _, handle) = setup(spec).await;
         let waiting = tokio::spawn({
@@ -166,12 +167,13 @@ async fn invalid_frame_capacities_are_rejected_before_process_launch() {
 #[tokio::test]
 async fn invalid_deadlines_are_rejected_before_process_launch() {
     for timeout in [Duration::ZERO, Duration::MAX] {
-        for setting in 0..3 {
+        for setting in 0..4 {
             let mut spec = ProcessSpec::new("nonexistent-deadline-test-executable");
             match setting {
                 0 => spec.initialization_timeout = timeout,
                 1 => spec.execution_timeout = Some(timeout),
-                _ => spec.stop_timeout = timeout,
+                2 => spec.stop_timeout = timeout,
+                _ => spec.io_timeout = timeout,
             }
             let service = Service::new("test.deadlines", "1").with_descriptor(
                 cordis_remote::Descriptor::new(cordis_remote::Interface::value_dispatch(false))

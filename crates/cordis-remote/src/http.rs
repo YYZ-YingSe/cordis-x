@@ -1,5 +1,5 @@
 use crate::{Error, Result, error::outcome};
-use cordis_wire::{Bytes, CONTENT_TYPE, Incoming, Payload, Request};
+use cordis_wire::{Bytes, CONTENT_TYPE, Incoming, Payload};
 use std::time::Duration;
 
 /// The HTTP body is the same bounded protobuf frame used by IPC.
@@ -11,11 +11,12 @@ pub(crate) struct Http {
     url: String,
     execution_timeout: Option<Duration>,
     cleanup_timeout: Duration,
+    io_timeout: Duration,
 }
 impl Http {
     pub fn local(
         url: &str,
-        connection_timeout: Duration,
+        io_timeout: Duration,
         execution_timeout: Option<Duration>,
         cleanup_timeout: Duration,
         validation: cordis_contract::Validation,
@@ -39,7 +40,7 @@ impl Http {
             .pool_max_idle_per_host(16)
             .retry(reqwest::retry::never())
             .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(connection_timeout)
+            .connect_timeout(io_timeout)
             .build()
             .map_err(|e| Error::Io(e.to_string()))?;
         Ok(Self {
@@ -49,9 +50,11 @@ impl Http {
             url: url.into(),
             execution_timeout,
             cleanup_timeout,
+            io_timeout,
         })
     }
-    pub async fn call(&self, request: Request) -> Result<Payload> {
+    pub async fn call(&self, operation: crate::session::Operation) -> Result<Payload> {
+        let request = &operation.request;
         let bytes = request
             .encode(self.frame_capacity)
             .map_err(|e| Error::InvalidInput(e.to_string()))?;
@@ -93,11 +96,12 @@ impl Http {
         // Keep a single transport chunk directly. Coalesce only if the HTTP
         // decoder actually split the body, reserving a bounded advertised size.
         let capacity = response.content_length().unwrap_or(0) as usize;
+        let deadline = tokio::time::Instant::now() + self.io_timeout;
         let mut first = None;
         let mut joined = None::<Vec<u8>>;
-        while let Some(chunk) = response
-            .chunk()
+        while let Some(chunk) = tokio::time::timeout_at(deadline, response.chunk())
             .await
+            .map_err(|e| Error::OutcomeUnknown(e.to_string()))?
             .map_err(|e| Error::OutcomeUnknown(e.to_string()))?
         {
             let length = joined

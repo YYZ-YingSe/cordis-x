@@ -2,7 +2,7 @@
 
 use std::{fmt, sync::Arc};
 
-pub mod budget;
+pub mod depth;
 mod descriptor;
 mod failure;
 pub use failure::{ErrorInfo, Failure, error, refused};

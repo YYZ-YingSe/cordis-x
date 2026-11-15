@@ -151,14 +151,14 @@ impl ContextComponent {
         }
         if bytes.len() > limits.artifact_bytes
             || limits.pending_calls == 0
-            || limits.pending_calls > 1024
+            || limits.pending_calls > Semaphore::MAX_PERMITS
             || limits.memory_bytes == 0
             || limits.fuel_on_admission == 0
             || limits.initialization_fuel == 0
             || limits.resources > Semaphore::MAX_PERMITS
             || capabilities.max_handles == 0
             || capabilities.max_calls == 0
-            || capabilities.max_calls > 4096
+            || capabilities.max_calls > Semaphore::MAX_PERMITS
             || capabilities.max_requests == 0
             || [
                 Some(capabilities.initialization_timeout),

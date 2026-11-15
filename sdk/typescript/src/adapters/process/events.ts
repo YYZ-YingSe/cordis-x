@@ -1,5 +1,5 @@
 import { Identities, makeRoom, Completion, registration } from './retention.ts';
-import { OperationInbox } from '../../protocols/session/operations.ts';
+import { OperationInbox, RESERVED_CAPACITY } from '../../protocols/session/operations.ts';
 import type { Message } from '../../core/message.ts';
 import { payload, controlOnly, type Payload } from '../../protocols/session/messages.ts';
 import type { EventFlow } from '../../core/events.ts';
@@ -66,7 +66,7 @@ export class Dispatch {
 type Entry = { callback?: EventCallback; running: number };
 export class EventRegistry {
   private entries = new Map<string, Entry>();
-  private seen = new OperationInbox();
+  private seen = new OperationInbox(RESERVED_CAPACITY);
   private nextListener = new Identities();
   private nextDispatch = new Identities();
   private declarations: Record<string, { name: string; revision: string }>;

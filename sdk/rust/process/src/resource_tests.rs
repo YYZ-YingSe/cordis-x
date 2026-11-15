@@ -131,7 +131,7 @@ fn fixture() -> (Host<Probe>, mpsc::Receiver<cordis_wire::Bytes>) {
             active: Cell::new(false),
             attempted: Cell::new(false),
             closing: Cell::new(false),
-            seen: cordis_wire::operations::Incoming::new(cordis_wire::operations::DEFAULT_SLOTS),
+            seen: cordis_wire::operations::Incoming::new(1),
             inflight: Cell::new(0),
             max_inflight: Cell::new(16),
             idle: Notify::new(),
@@ -251,7 +251,7 @@ async fn start(host: &Host<Probe>, capabilities: Value) -> Value {
                     "contract":{"name":"test.counter","revision":"1"},
                     "interface":Probe::interface(), "dependency_interfaces":Probe::dependency_interfaces(),
                     "dependencies":{"test.upstream":"1"}, "events":{}, "middleware":{},
-                    "composition":{"factories":[],"provisions":{}}, "max_inflight":16,"frame_capacity":cordis_wire::DEFAULT_FRAME_CAPACITY,"validation":"checked",
+                    "composition":{"factories":[],"provisions":{}}, "max_inflight":16,"io_timeout_ms":5000,"frame_capacity":cordis_wire::DEFAULT_FRAME_CAPACITY,"validation":"checked",
                     "capabilities":capabilities
                 }),
             )

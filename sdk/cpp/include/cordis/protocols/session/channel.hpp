@@ -17,13 +17,12 @@ class DependencyChannel {
   std::mutex mutex;
   struct Pending {
     std::function<void(native::Outcome<Payload>)> reply;
-    int lane;
   };
   std::map<std::string, Pending> pending;
   std::function<void(std::vector<uint8_t>)> write;
   std::string session;
   Identity activation;
-  OperationOutbox operations;
+  OperationOutbox operations{reverse_lanes};
   std::uint64_t next_resource = 0;
   bool closed = false;
   bool cleanup_calls = false;
@@ -124,11 +123,6 @@ public:
                 : command == "task_join" ? 4
                 : command == "scope_run" ? 3
                                          : 0;
-            if (std::count_if(pending.begin(), pending.end(),
-                              [lane](const auto &item) {
-                                return item.second.lane == lane;
-                              }) >= 16)
-              throw Refusal("overloaded", "dependency call capacity reached");
             operation = operations.allocate(lane);
             Request request{Header{session, activation, operation}, command,
                             payload};
@@ -139,7 +133,7 @@ public:
               throw;
             }
             output = write;
-            pending.emplace(operation, Pending{std::move(reply), lane});
+            pending.emplace(operation, Pending{std::move(reply)});
           }
           try {
             output(std::move(bytes));

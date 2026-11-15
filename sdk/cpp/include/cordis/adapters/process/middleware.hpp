@@ -101,7 +101,7 @@ class MiddlewareRegistry {
   std::mutex mutex;
   std::map<std::string, std::shared_ptr<Entry>> handlers;
   std::map<std::string, Terminal> runs;
-  OperationInbox seen;
+  OperationInbox seen{2 * reserved_capacity};
   std::uint64_t next_handler = 0, next_run = 0;
   Json declarations;
   void check(std::string alias) const {

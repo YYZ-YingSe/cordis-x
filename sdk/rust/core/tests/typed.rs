@@ -1,6 +1,6 @@
 use cordis_sdk_core::{
     Failure, Message, MessageContract, Value, json, message,
-    typed::{Budget, Codec, Walk},
+    typed::{Codec, Walk, check_depth},
 };
 use std::sync::LazyLock;
 
@@ -10,9 +10,9 @@ struct Text {
     value: String,
 }
 impl Walk for Text {
-    fn walk(&self, depth: usize, budget: &mut Budget) -> Result<(), String> {
-        budget.take(depth)?;
-        self.value.walk(depth + 1, budget)
+    fn walk(&self, depth: usize) -> Result<(), String> {
+        check_depth(depth)?;
+        self.value.walk(depth + 1)
     }
 }
 impl Codec for Text {

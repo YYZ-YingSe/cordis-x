@@ -13,7 +13,7 @@ pub fn control(text: &str) -> crate::ControlContract {
 pub trait Codec: prost::Message + Default + Clone + Send + Sync + Walk + 'static {
     fn contract() -> &'static MessageContract;
     fn encode(self) -> std::result::Result<Value, String> {
-        self.walk(0, &mut Budget::default())?;
+        self.walk(0)?;
         Self::contract().to_json(&self)
     }
     fn decode(value: Value) -> std::result::Result<Self, String> {
@@ -47,15 +47,15 @@ pub fn violation(message: impl ToString) -> Failure {
     })
 }
 
-pub use cordis_contract::budget::Budget;
+pub use cordis_contract::depth::check_depth;
 pub trait Walk {
-    fn walk(&self, depth: usize, budget: &mut Budget) -> std::result::Result<(), String>;
+    fn walk(&self, depth: usize) -> std::result::Result<(), String>;
 }
-macro_rules! scalar { ($($t:ty),*)=>{$(impl Walk for $t {fn walk(&self,d:usize,b:&mut Budget)->std::result::Result<(),String>{b.take(d)}})*}; }
+macro_rules! scalar { ($($t:ty),*)=>{$(impl Walk for $t {fn walk(&self,d:usize)->std::result::Result<(),String>{check_depth(d)}})*}; }
 scalar!(bool, i32, i64, u32, u64, u8);
 impl Walk for f32 {
-    fn walk(&self, d: usize, b: &mut Budget) -> std::result::Result<(), String> {
-        b.take(d)?;
+    fn walk(&self, d: usize) -> std::result::Result<(), String> {
+        check_depth(d)?;
         if self.is_finite() {
             Ok(())
         } else {
@@ -64,8 +64,8 @@ impl Walk for f32 {
     }
 }
 impl Walk for f64 {
-    fn walk(&self, d: usize, b: &mut Budget) -> std::result::Result<(), String> {
-        b.take(d)?;
+    fn walk(&self, d: usize) -> std::result::Result<(), String> {
+        check_depth(d)?;
         if self.is_finite() {
             Ok(())
         } else {
@@ -74,45 +74,45 @@ impl Walk for f64 {
     }
 }
 impl Walk for String {
-    fn walk(&self, d: usize, b: &mut Budget) -> std::result::Result<(), String> {
-        b.take(d)
+    fn walk(&self, d: usize) -> std::result::Result<(), String> {
+        check_depth(d)
     }
 }
 impl<T: Walk> Walk for Option<T> {
-    fn walk(&self, d: usize, b: &mut Budget) -> std::result::Result<(), String> {
+    fn walk(&self, d: usize) -> std::result::Result<(), String> {
         if let Some(v) = self {
-            v.walk(d, b)
+            v.walk(d)
         } else {
             Ok(())
         }
     }
 }
 impl<T: Walk> Walk for Box<T> {
-    fn walk(&self, d: usize, b: &mut Budget) -> std::result::Result<(), String> {
-        self.as_ref().walk(d, b)
+    fn walk(&self, d: usize) -> std::result::Result<(), String> {
+        self.as_ref().walk(d)
     }
 }
 impl<T: Walk> Walk for Vec<T> {
-    fn walk(&self, d: usize, b: &mut Budget) -> std::result::Result<(), String> {
+    fn walk(&self, d: usize) -> std::result::Result<(), String> {
         for v in self {
-            v.walk(d, b)?;
+            v.walk(d)?;
         }
         Ok(())
     }
 }
 impl<K: Walk, V: Walk> Walk for std::collections::BTreeMap<K, V> {
-    fn walk(&self, d: usize, b: &mut Budget) -> std::result::Result<(), String> {
+    fn walk(&self, d: usize) -> std::result::Result<(), String> {
         for (k, v) in self {
-            b.take(d)?;
-            k.walk(d + 1, b)?;
-            v.walk(d + 1, b)?;
+            check_depth(d)?;
+            k.walk(d + 1)?;
+            v.walk(d + 1)?;
         }
         Ok(())
     }
 }
 
 impl Walk for prost::bytes::Bytes {
-    fn walk(&self, d: usize, b: &mut Budget) -> std::result::Result<(), String> {
-        b.take(d)
+    fn walk(&self, d: usize) -> std::result::Result<(), String> {
+        check_depth(d)
     }
 }

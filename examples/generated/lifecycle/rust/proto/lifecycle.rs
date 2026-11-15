@@ -74,10 +74,9 @@ pub mod child_status {
     impl cordis_sdk_core::typed::Walk for State {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
-            b.take(d)
+            cordis_sdk_core::typed::check_depth(depth)
         }
     }
 }
@@ -135,10 +134,9 @@ pub mod listener_spec {
     impl cordis_sdk_core::typed::Walk for Behavior {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
-            b.take(d)
+            cordis_sdk_core::typed::check_depth(depth)
         }
     }
 }
@@ -166,16 +164,15 @@ pub mod event_result {
     impl cordis_sdk_core::typed::Walk for State {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
             match self {
                 Self::Value(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
                 Self::Nested(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
             }
@@ -199,16 +196,15 @@ pub mod event_decision {
     impl cordis_sdk_core::typed::Walk for State {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
             match self {
                 Self::Continued(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
                 Self::Stopped(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
             }
@@ -251,20 +247,19 @@ pub mod dispatch_status {
     impl cordis_sdk_core::typed::Walk for State {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
             match self {
                 Self::Pending(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
                 Self::Succeeded(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
                 Self::Failed(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
             }
@@ -325,10 +320,9 @@ pub mod handler_spec {
     impl cordis_sdk_core::typed::Walk for Behavior {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
-            b.take(d)
+            cordis_sdk_core::typed::check_depth(depth)
         }
     }
 }
@@ -383,10 +377,9 @@ pub mod composition_config {
     impl cordis_sdk_core::typed::Walk for Publication {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
-            b.take(d)
+            cordis_sdk_core::typed::check_depth(depth)
         }
     }
 }
@@ -450,10 +443,9 @@ pub mod completion {
     impl cordis_sdk_core::typed::Walk for State {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
-            b.take(d)
+            cordis_sdk_core::typed::check_depth(depth)
         }
     }
 }
@@ -478,24 +470,23 @@ pub mod forward_status {
     impl cordis_sdk_core::typed::Walk for Outcome {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
             match self {
                 Self::Pending(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
                 Self::Succeeded(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
                 Self::Failed(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
                 Self::Refused(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
             }
@@ -523,24 +514,23 @@ pub mod work_outcome {
     impl cordis_sdk_core::typed::Walk for Outcome {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
             match self {
                 Self::Pending(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
                 Self::Succeeded(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
                 Self::Failed(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
                 Self::Refused(value) => {
-                    cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                    cordis_sdk_core::typed::Walk::walk(value, depth)?;
                     Ok(())
                 }
             }
@@ -601,10 +591,9 @@ pub mod effect_diagnostic {
     impl cordis_sdk_core::typed::Walk for State {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
-            b.take(d)
+            cordis_sdk_core::typed::check_depth(depth)
         }
     }
 }
@@ -673,10 +662,9 @@ pub mod step_diagnostic {
     impl cordis_sdk_core::typed::Walk for State {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
-            b.take(d)
+            cordis_sdk_core::typed::check_depth(depth)
         }
     }
 }
@@ -743,10 +731,9 @@ pub mod run_diagnostic {
     impl cordis_sdk_core::typed::Walk for State {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
-            b.take(d)
+            cordis_sdk_core::typed::check_depth(depth)
         }
     }
 }
@@ -817,10 +804,9 @@ pub mod task_status {
     impl cordis_sdk_core::typed::Walk for State {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
-            b.take(d)
+            cordis_sdk_core::typed::check_depth(depth)
         }
     }
 }
@@ -882,50 +868,37 @@ pub mod task_config {
     impl cordis_sdk_core::typed::Walk for Mode {
         fn walk(
             &self,
-            d: usize,
-            b: &mut cordis_sdk_core::typed::Budget,
+            depth: usize,
         ) -> ::std::result::Result<(), ::std::string::String> {
-            b.take(d)
+            cordis_sdk_core::typed::check_depth(depth)
         }
     }
 }
 impl cordis_sdk_core::typed::Walk for ListenerConfig {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.listen, d + 1, b)?;
-        cordis_sdk_core::typed::Walk::walk(&self.fail_activate, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.listen, depth + 1)?;
+        cordis_sdk_core::typed::Walk::walk(&self.fail_activate, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for WorkerConfig {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.name, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.name, depth + 1)?;
         if self.name.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.WorkerConfig.name"),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.pending, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.pending, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for Settings {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.answer, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.answer, depth + 1)?;
         if self.answer.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.Settings.answer"),
@@ -935,13 +908,9 @@ impl cordis_sdk_core::typed::Walk for Settings {
     }
 }
 impl cordis_sdk_core::typed::Walk for ChildStatus {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.state, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.state, depth + 1)?;
         if self.state.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.ChildStatus.state"),
@@ -955,25 +924,21 @@ impl cordis_sdk_core::typed::Walk for ChildStatus {
                 );
             }
         }
-        cordis_sdk_core::typed::Walk::walk(&self.retired, d + 1, b)?;
-        cordis_sdk_core::typed::Walk::walk(&self.outcome, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.retired, depth + 1)?;
+        cordis_sdk_core::typed::Walk::walk(&self.outcome, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for ListenerSpec {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.id, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.id, depth + 1)?;
         if self.id.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.ListenerSpec.id"),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.behavior, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.behavior, depth + 1)?;
         if self.behavior.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.ListenerSpec.behavior"),
@@ -993,30 +958,22 @@ impl cordis_sdk_core::typed::Walk for ListenerSpec {
     }
 }
 impl cordis_sdk_core::typed::Walk for TickValue {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.value, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.value, depth + 1)?;
         if self.value.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.TickValue.value"),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.nested, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.nested, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for EventResult {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.state, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.state, depth + 1)?;
         if self.state.is_none() {
             return Err(format!("{}: no branch selected", "lifecycle.EventResult.state"));
         }
@@ -1024,13 +981,9 @@ impl cordis_sdk_core::typed::Walk for EventResult {
     }
 }
 impl cordis_sdk_core::typed::Walk for EventDecision {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.state, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.state, depth + 1)?;
         if self.state.is_none() {
             return Err(
                 format!("{}: no branch selected", "lifecycle.EventDecision.state"),
@@ -1040,30 +993,22 @@ impl cordis_sdk_core::typed::Walk for EventDecision {
     }
 }
 impl cordis_sdk_core::typed::Walk for EventDecisions {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.values, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.values, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for DispatchFailure {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.code, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.code, depth + 1)?;
         if self.code.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.DispatchFailure.code"),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.message, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.message, depth + 1)?;
         if self.message.is_none() {
             return Err(
                 format!(
@@ -1075,24 +1020,16 @@ impl cordis_sdk_core::typed::Walk for DispatchFailure {
     }
 }
 impl cordis_sdk_core::typed::Walk for DispatchFailures {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.errors, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.errors, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for DispatchStatus {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.state, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.state, depth + 1)?;
         if self.state.is_none() {
             return Err(
                 format!("{}: no branch selected", "lifecycle.DispatchStatus.state"),
@@ -1102,19 +1039,15 @@ impl cordis_sdk_core::typed::Walk for DispatchStatus {
     }
 }
 impl cordis_sdk_core::typed::Walk for HandlerSpec {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.id, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.id, depth + 1)?;
         if self.id.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.HandlerSpec.id"),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.behavior, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.behavior, depth + 1)?;
         if self.behavior.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.HandlerSpec.behavior"),
@@ -1134,13 +1067,9 @@ impl cordis_sdk_core::typed::Walk for HandlerSpec {
     }
 }
 impl cordis_sdk_core::typed::Walk for CompositionConfig {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.publication, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.publication, depth + 1)?;
         {
             let value = &self.publication;
             let number = value;
@@ -1153,24 +1082,20 @@ impl cordis_sdk_core::typed::Walk for CompositionConfig {
                 );
             }
         }
-        cordis_sdk_core::typed::Walk::walk(&self.fail_activate, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.fail_activate, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for ApplicationInfo {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.name, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.name, depth + 1)?;
         if self.name.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.ApplicationInfo.name"),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.version, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.version, depth + 1)?;
         if self.version.is_none() {
             return Err(
                 format!(
@@ -1182,19 +1107,15 @@ impl cordis_sdk_core::typed::Walk for ApplicationInfo {
     }
 }
 impl cordis_sdk_core::typed::Walk for ManagedError {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.code, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.code, depth + 1)?;
         if self.code.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.ManagedError.code"),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.message, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.message, depth + 1)?;
         if self.message.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.ManagedError.message"),
@@ -1204,13 +1125,9 @@ impl cordis_sdk_core::typed::Walk for ManagedError {
     }
 }
 impl cordis_sdk_core::typed::Walk for Completion {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.completion, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.completion, depth + 1)?;
         if self.completion.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.Completion.completion"),
@@ -1230,13 +1147,9 @@ impl cordis_sdk_core::typed::Walk for Completion {
     }
 }
 impl cordis_sdk_core::typed::Walk for ForwardStatus {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.outcome, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.outcome, depth + 1)?;
         if self.outcome.is_none() {
             return Err(
                 format!("{}: no branch selected", "lifecycle.ForwardStatus.outcome"),
@@ -1246,13 +1159,9 @@ impl cordis_sdk_core::typed::Walk for ForwardStatus {
     }
 }
 impl cordis_sdk_core::typed::Walk for WorkOutcome {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.outcome, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.outcome, depth + 1)?;
         if self.outcome.is_none() {
             return Err(
                 format!("{}: no branch selected", "lifecycle.WorkOutcome.outcome"),
@@ -1262,19 +1171,15 @@ impl cordis_sdk_core::typed::Walk for WorkOutcome {
     }
 }
 impl cordis_sdk_core::typed::Walk for EffectDiagnostic {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.label, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.label, depth + 1)?;
         if self.label.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.EffectDiagnostic.label"),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.state, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.state, depth + 1)?;
         if self.state.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.EffectDiagnostic.state"),
@@ -1294,19 +1199,15 @@ impl cordis_sdk_core::typed::Walk for EffectDiagnostic {
     }
 }
 impl cordis_sdk_core::typed::Walk for StepDiagnostic {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.step, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.step, depth + 1)?;
         if self.step.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.StepDiagnostic.step"),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.state, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.state, depth + 1)?;
         if self.state.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.StepDiagnostic.state"),
@@ -1322,18 +1223,14 @@ impl cordis_sdk_core::typed::Walk for StepDiagnostic {
                 );
             }
         }
-        cordis_sdk_core::typed::Walk::walk(&self.error, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.error, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for SequenceStatus {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.state, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.state, depth + 1)?;
         if self.state.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.SequenceStatus.state"),
@@ -1349,8 +1246,8 @@ impl cordis_sdk_core::typed::Walk for SequenceStatus {
                 );
             }
         }
-        cordis_sdk_core::typed::Walk::walk(&self.steps, d + 1, b)?;
-        cordis_sdk_core::typed::Walk::walk(&self.forward, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.steps, depth + 1)?;
+        cordis_sdk_core::typed::Walk::walk(&self.forward, depth + 1)?;
         if self.forward.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.SequenceStatus.forward"),
@@ -1360,19 +1257,15 @@ impl cordis_sdk_core::typed::Walk for SequenceStatus {
     }
 }
 impl cordis_sdk_core::typed::Walk for RunDiagnostic {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.run, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.run, depth + 1)?;
         if self.run.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.RunDiagnostic.run"),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.state, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.state, depth + 1)?;
         if self.state.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.RunDiagnostic.state"),
@@ -1390,13 +1283,9 @@ impl cordis_sdk_core::typed::Walk for RunDiagnostic {
     }
 }
 impl cordis_sdk_core::typed::Walk for ScopeStatus {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.state, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.state, depth + 1)?;
         if self.state.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.ScopeStatus.state"),
@@ -1410,21 +1299,17 @@ impl cordis_sdk_core::typed::Walk for ScopeStatus {
                 );
             }
         }
-        cordis_sdk_core::typed::Walk::walk(&self.retired, d + 1, b)?;
-        cordis_sdk_core::typed::Walk::walk(&self.error, d + 1, b)?;
-        cordis_sdk_core::typed::Walk::walk(&self.effects, d + 1, b)?;
-        cordis_sdk_core::typed::Walk::walk(&self.runs, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.retired, depth + 1)?;
+        cordis_sdk_core::typed::Walk::walk(&self.error, depth + 1)?;
+        cordis_sdk_core::typed::Walk::walk(&self.effects, depth + 1)?;
+        cordis_sdk_core::typed::Walk::walk(&self.runs, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for TaskStatus {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.state, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.state, depth + 1)?;
         if self.state.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.TaskStatus.state"),
@@ -1438,7 +1323,7 @@ impl cordis_sdk_core::typed::Walk for TaskStatus {
                 );
             }
         }
-        cordis_sdk_core::typed::Walk::walk(&self.outcome, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.outcome, depth + 1)?;
         if self.outcome.is_none() {
             return Err(
                 format!("{}: required field missing", "lifecycle.TaskStatus.outcome"),
@@ -1448,24 +1333,16 @@ impl cordis_sdk_core::typed::Walk for TaskStatus {
     }
 }
 impl cordis_sdk_core::typed::Walk for ScopeConfig {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.fail_activate, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.fail_activate, depth + 1)?;
         Ok(())
     }
 }
 impl cordis_sdk_core::typed::Walk for TaskConfig {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.mode, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.mode, depth + 1)?;
         {
             let value = &self.mode;
             let number = value;
@@ -1475,8 +1352,8 @@ impl cordis_sdk_core::typed::Walk for TaskConfig {
                 );
             }
         }
-        cordis_sdk_core::typed::Walk::walk(&self.direct, d + 1, b)?;
-        cordis_sdk_core::typed::Walk::walk(&self.fail_activate, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.direct, depth + 1)?;
+        cordis_sdk_core::typed::Walk::walk(&self.fail_activate, depth + 1)?;
         Ok(())
     }
 }

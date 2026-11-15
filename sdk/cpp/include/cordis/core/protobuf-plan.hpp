@@ -18,7 +18,6 @@
 #undef GetMessage
 
 namespace cordis::protobuf {
-inline constexpr std::size_t max_nodes = 65536;
 inline constexpr std::size_t max_depth = 64;
 using Message = google::protobuf::Message;
 using Field = google::protobuf::FieldDescriptor;
@@ -38,10 +37,9 @@ inline int semantics(const google::protobuf::Descriptor *descriptor) {
   const auto *field = annotation(options, "cordis.schema.semantics");
   return field ? options.GetReflection()->GetEnumValue(options, field) : 0;
 }
-inline void take(std::size_t depth, std::size_t &budget) {
-  if (depth > max_depth || !budget)
-    throw std::runtime_error("protobuf depth/node limit exceeded");
-  --budget;
+inline void check_depth(std::size_t depth) {
+  if (depth > max_depth)
+    throw std::runtime_error("protobuf depth limit exceeded");
 }
 
 // Owns a finite descriptor graph's checking metadata, never a checked DTO.
@@ -64,7 +62,7 @@ class Plan {
   std::vector<Node> nodes_;
 
   void leaf(const Message &message, const Step &step, int index,
-            std::size_t depth, std::size_t &budget,
+            std::size_t depth,
             Validation policy, bool decoded) const {
     const auto *r = message.GetReflection();
     const auto *f = step.field;
@@ -73,10 +71,10 @@ class Plan {
       visit(step.child,
             repeated ? r->GetRepeatedMessage(message, f, index)
                      : r->GetMessage(message, f),
-            depth, budget, policy, decoded);
+            depth, policy, decoded);
       return;
     }
-    take(depth, budget);
+    check_depth(depth);
     switch (step.kind) {
     case Field::CPPTYPE_FLOAT:
       if (!std::isfinite(repeated ? r->GetRepeatedFloat(message, f, index)
@@ -110,9 +108,9 @@ class Plan {
     }
   }
   void visit(std::size_t node, const Message &message, std::size_t depth,
-             std::size_t &budget, Validation policy,
+             Validation policy,
              bool decoded) const {
-    take(depth, budget);
+    check_depth(depth);
     const auto *r = message.GetReflection();
     if (policy == Validation::Audit && !r->GetUnknownFields(message).empty())
       throw std::runtime_error("undeclared protobuf field");
@@ -169,9 +167,9 @@ class Plan {
       }
       if (step.repeated) {
         for (int j = 0; j < count; ++j)
-          leaf(message, step, j, depth + 1, budget, policy, decoded);
+          leaf(message, step, j, depth + 1, policy, decoded);
       } else
-        leaf(message, step, -1, depth + 1, budget, policy, decoded);
+        leaf(message, step, -1, depth + 1, policy, decoded);
     }
   }
 
@@ -234,8 +232,7 @@ public:
       return;
     if (message.GetDescriptor() != nodes_[0].descriptor)
       throw std::runtime_error("validation schema mismatch");
-    std::size_t budget = max_nodes;
-    visit(0, message, 0, budget, policy, decoded);
+    visit(0, message, 0, policy, decoded);
   }
 };
 

@@ -1,9 +1,6 @@
 //! Owned business data. A host binding selects validation, independently of
 //! physical representation. Contract-mode construction never walks the DTO.
-use crate::{
-    MessageContract, Validation, Value,
-    typed::{Budget, Codec},
-};
+use crate::{MessageContract, Validation, Value, typed::Codec};
 use prost::Message as _;
 use std::{
     any::Any,
@@ -66,8 +63,7 @@ impl<T: Codec> Native for Owned<T> {
         } else {
             policy
         };
-        self.checks
-            .run(policy, || self.value.walk(0, &mut Budget::default()))
+        self.checks.run(policy, || self.value.walk(0))
     }
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
         self
@@ -245,14 +241,10 @@ impl Message {
                 if self.required.audits() {
                     checks.run(Validation::Audit, || {
                         cordis_contract::protobuf::audit_binary(&bytes, contract.resolve()?)?;
-                        checks.run(Validation::Checked, || {
-                            value.walk(0, &mut Budget::default())
-                        })
+                        checks.run(Validation::Checked, || value.walk(0))
                     })?;
                 } else if self.required.checks_fields() {
-                    checks.run(Validation::Checked, || {
-                        value.walk(0, &mut Budget::default())
-                    })?;
+                    checks.run(Validation::Checked, || value.walk(0))?;
                 }
                 Ok(value)
             }

@@ -17,7 +17,7 @@ use tokio::{
     time::{Instant, timeout},
 };
 
-const CAPACITY: usize = 16;
+use cordis_wire::operations::{Layout, RESERVED_CAPACITY as CAPACITY, REVERSE_LANES};
 fn lane(command: &str) -> u8 {
     match command {
         "effect_release" | "sequence_undo" | "sequence_release" | "event_release"
@@ -34,16 +34,21 @@ fn lane(command: &str) -> u8 {
 }
 type Reply = oneshot::Sender<Result<Payload>>;
 enum CommandMessage {
-    Request(Request, Bytes, Reply, Option<OwnedSemaphorePermit>),
+    Request(Operation, Bytes, Reply),
     Abort(Error),
     StopUnactivated,
 }
-struct Pending {
-    // The actor retains capacity until the response, even if its caller stops waiting.
+pub(crate) struct Operation {
+    pub request: Request,
+    _lease: cordis_wire::operations::Lease,
     _cleanup_permit: Option<OwnedSemaphorePermit>,
+}
+struct Pending {
     session: String,
-    activation: cordis_wire::Identity,
+    activation: Identity,
     command: String,
+    lease: cordis_wire::operations::Lease,
+    cleanup_permit: Option<OwnedSemaphorePermit>,
     reply: Reply,
     deadline: Option<Instant>,
 }
@@ -79,9 +84,20 @@ impl Session {
         router: Arc<crate::dependency::Router>,
         code: crate::process::CodeLease,
     ) -> Result<Self> {
-        if !(1..=128).contains(&spec.max_inflight) {
+        let layout = Layout::new(spec.max_inflight)
+            .filter(|layout| {
+                layout.output <= Semaphore::MAX_PERMITS
+                    && layout.connections <= Semaphore::MAX_PERMITS
+            })
+            .ok_or_else(|| {
+                Error::InvalidInput("max_inflight must be positive and representable".into())
+            })?;
+        if spec.io_timeout.as_millis() == 0
+            || spec.io_timeout.as_millis() > i32::MAX as u128
+            || spec.io_timeout.subsec_nanos() % 1_000_000 != 0
+        {
             return Err(Error::InvalidInput(
-                "max_inflight must be in 1..=128".into(),
+                "I/O timeout must be positive and representable in milliseconds".into(),
             ));
         }
         let ordinary_capacity = spec.max_inflight;
@@ -134,7 +150,7 @@ impl Session {
         let worker_cleanup_capacity = cleanup_capacity.clone();
         let (closed_tx, closed) = watch::channel(None);
         let (peer_stopped_tx, peer_stopped) = watch::channel(false);
-        let (writes, mut outgoing) = mpsc::channel::<Bytes>(cordis_wire::operations::OUTPUT_FRAMES);
+        let (writes, mut outgoing) = mpsc::channel::<Bytes>(layout.output);
         let (reads_tx, mut reads) = mpsc::channel(CAPACITY);
         let read_tx = reads_tx.clone();
         let validation = spec.bindings.validation;
@@ -159,10 +175,9 @@ impl Session {
         let callback_session = session.clone();
         let callback_activation = activation.clone();
         let worker_code = code.clone();
-        let operations = Arc::new(cordis_wire::operations::Outgoing::new(
-            cordis_wire::operations::DEFAULT_SLOTS,
+        let operations = Arc::new(cordis_wire::operations::Outgoing::with_lanes(
+            &layout.forward,
         ));
-        let worker_operations = operations.clone();
         tokio::spawn(async move {
             let _code = worker_code;
             let mut pending: BTreeMap<String, Pending> = BTreeMap::new();
@@ -181,16 +196,16 @@ impl Session {
             let mut child_disposals = JoinSet::new();
             let mut resource_calls = JoinSet::new();
             let callback_history =
-                cordis_wire::operations::Incoming::new(cordis_wire::operations::DEFAULT_SLOTS);
+                cordis_wire::operations::Incoming::new(REVERSE_LANES.iter().sum());
             let mut deactivated = false;
             let mut stopping = None;
             let mut tick = tokio::time::interval(Duration::from_millis(25));
             let termination = loop {
                 tokio::select! {
                     command = commands.recv() => match command {
-                        Some(CommandMessage::Request(request, bytes, reply, cleanup_permit)) => {
-                            if pending.values().filter(|p| lane(&p.command) == lane(&request.command)).count() >= if lane(&request.command) == 0 { ordinary_capacity } else { CAPACITY } { if let Some(id) = cordis_wire::operations::Id::parse(&request.operation) { worker_operations.complete(id); } let _ = reply.send(Err(Error::Overloaded)); continue; }
-                            if stopping.is_some() { if let Some(id) = cordis_wire::operations::Id::parse(&request.operation) { worker_operations.complete(id); } let _ = reply.send(Err(Error::Closed)); continue; }
+                        Some(CommandMessage::Request(operation, bytes, reply)) => {
+                            let request = &operation.request;
+                            if stopping.is_some() { drop(operation); let _ = reply.send(Err(Error::Closed)); continue; }
                             let request_timeout = match request.command.as_str() {
                                 "hello" | "activate" => Some(initialization_timeout),
                                 "deactivate" | "task_cancel" => Some(stop_timeout),
@@ -199,9 +214,10 @@ impl Session {
                                 _ => execution_timeout,
                             };
                             if request.command == "deactivate" { stopping = Some(Instant::now() + stop_timeout); }
-                            if writes.try_send(bytes).is_err() { if let Some(id) = cordis_wire::operations::Id::parse(&request.operation) { worker_operations.complete(id); } let _ = reply.send(Err(Error::Overloaded)); continue; }
+                            if writes.try_send(bytes).is_err() { drop(operation); let _ = reply.send(Err(Error::Overloaded)); continue; }
                             let expires = request_timeout.map(|duration| Instant::now() + duration);
-                            pending.insert(request.operation.clone(), Pending { _cleanup_permit: cleanup_permit, session: request.session, activation: request.activation, command: request.command, reply, deadline: expires });
+                            let Operation { request, _lease, _cleanup_permit } = operation;
+                            pending.insert(request.operation, Pending { session: request.session, activation: request.activation, command: request.command, lease: _lease, cleanup_permit: _cleanup_permit, reply, deadline: expires });
                         }
                         Some(CommandMessage::Abort(error)) => break Err(error),
                         Some(CommandMessage::StopUnactivated) => break Ok(()),
@@ -239,9 +255,10 @@ impl Session {
                             if entry.session != response.session || entry.activation != response.activation {
                                 let error = Error::Protocol("response session/activation mismatch".into()); let _ = entry.reply.send(Err(error.clone())); break Err(error);
                             }
-                            if let Some(id) = cordis_wire::operations::Id::parse(&response.operation) { worker_operations.complete(id); }
                             let result = outcome(response.outcome);
                             if entry.command == "deactivate" && result.is_ok() { deactivated = true; }
+                            drop(entry.lease);
+                            drop(entry.cleanup_permit);
                             let _ = entry.reply.send(result);
                         }
                         Some(Err(error)) => {
@@ -384,7 +401,7 @@ impl Session {
                     .send(Err(failure.clone()));
             }
             while let Some(command) = commands.recv().await {
-                if let CommandMessage::Request(_, _, reply, _) = command {
+                if let CommandMessage::Request(_, _, reply) = command {
                     let _ = reply.send(Err(failure.clone()));
                 }
             }
@@ -425,34 +442,45 @@ impl Session {
         Ok(session)
     }
 
-    pub fn envelope(&self, command: &str, payload: impl Into<Payload>) -> Result<Request> {
-        let operation = self
+    pub async fn envelope(&self, command: &str, payload: impl Into<Payload>) -> Result<Operation> {
+        let cleanup = if lane(command) == 1 {
+            Some(
+                self.0
+                    .cleanup_capacity
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| Error::Closed)?,
+            )
+        } else {
+            None
+        };
+        let lease = self
             .0
             .operations
-            .allocate_lane(lane(command).into())
+            .acquire_lane(lane(command).into())
             .ok_or(Error::Overloaded)?;
-        Ok(Request {
-            session: self.0.session.clone(),
-            activation: self.0.activation.clone(),
-            operation: operation.to_string(),
-            command: command.into(),
-            payload: payload.into(),
+        Ok(Operation {
+            request: Request {
+                session: self.0.session.clone(),
+                activation: self.0.activation.clone(),
+                operation: lease.id.to_string(),
+                command: command.into(),
+                payload: payload.into(),
+            },
+            _lease: lease,
+            _cleanup_permit: cleanup,
         })
     }
-    pub(crate) fn complete_operation(&self, operation: &str) {
-        if let Some(id) = cordis_wire::operations::Id::parse(operation) {
-            self.0.operations.complete(id);
-        }
-    }
-    pub fn scoped_envelope(
+    pub async fn scoped_envelope(
         &self,
         context: &Context,
         command: &str,
         payload: impl Into<Payload>,
-    ) -> Result<(Request, Option<crate::dependency::Scope>)> {
+    ) -> Result<(Operation, Option<crate::dependency::Scope>)> {
         let mut payload = payload.into();
         let scope = self.0.router.scope(context, &mut payload.control)?;
-        Ok((self.envelope(command, payload)?, scope))
+        Ok((self.envelope(command, payload).await?, scope))
     }
     pub async fn scoped_payload(
         &self,
@@ -460,8 +488,11 @@ impl Session {
         command: &str,
         payload: Payload,
     ) -> Result<Payload> {
-        let (request, _scope) = self.scoped_envelope(context, command, payload)?;
-        self.supervise(context, self.send(request)).await
+        self.supervise(context, async {
+            let (request, _scope) = self.scoped_envelope(context, command, payload).await?;
+            self.send(request).await
+        })
+        .await
     }
     pub async fn scoped_request(
         &self,
@@ -469,11 +500,14 @@ impl Session {
         command: &str,
         payload: Value,
     ) -> Result<Value> {
-        let (request, _scope) = self.scoped_envelope(context, command, payload)?;
-        let result = if command == "task_call" {
+        let request = async {
+            let (request, _scope) = self.scoped_envelope(context, command, payload).await?;
             self.send(request).await
+        };
+        let result = if command == "task_call" {
+            request.await
         } else {
-            self.supervise(context, self.send(request)).await
+            self.supervise(context, request).await
         };
         result?.control_only().map_err(Into::into)
     }
@@ -501,41 +535,17 @@ impl Session {
         }
     }
     pub async fn request(&self, command: &str, payload: Value) -> Result<Value> {
-        self.send(self.envelope(command, payload)?)
+        self.send(self.envelope(command, payload).await?)
             .await?
             .control_only()
             .map_err(Into::into)
     }
-    pub async fn send(&self, request: Request) -> Result<Payload> {
-        struct Unsubmitted<'a>(&'a Session, Option<String>);
-        impl Drop for Unsubmitted<'_> {
-            fn drop(&mut self) {
-                if let Some(id) = &self.1 {
-                    self.0.complete_operation(id);
-                }
-            }
-        }
-        let mut reservation = Unsubmitted(self, Some(request.operation.clone()));
+    pub async fn send(&self, operation: Operation) -> Result<Payload> {
+        let request = &operation.request;
         if let Some(result) = self.0.closed.borrow().clone() {
             return Err(result.err().unwrap_or(Error::Closed));
         }
         let cleanup = lane(&request.command) == 1;
-        // These operations discharge already-owned work. A busy local queue is
-        // backpressure, not evidence that cleanup has failed. Reserve before
-        // enqueueing and transfer the permit to the actor so dropped waiters do
-        // not release an in-flight slot early.
-        let cleanup_permit = if cleanup {
-            Some(
-                self.0
-                    .cleanup_capacity
-                    .clone()
-                    .acquire_owned()
-                    .await
-                    .map_err(|_| Error::Closed)?,
-            )
-        } else {
-            None
-        };
         let permit = if cleanup || matches!(request.command.as_str(), "task_cancel" | "deactivate")
         {
             self.0.send.reserve().await.map_err(|_| Error::Closed)?
@@ -549,8 +559,7 @@ impl Session {
             .encode(self.0.frame_capacity)
             .map_err(|e| Error::InvalidInput(e.to_string()))?;
         let (tx, rx) = oneshot::channel();
-        permit.send(CommandMessage::Request(request, bytes, tx, cleanup_permit));
-        reservation.1.take();
+        permit.send(CommandMessage::Request(operation, bytes, tx));
         rx.await.map_err(|_| Error::Closed)?
     }
     pub fn mark_activation_attempted(&self) {

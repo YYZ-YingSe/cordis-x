@@ -18,10 +18,19 @@ struct Continuation {
     grant: String,
     next: Next<Body, Body>,
 }
-#[derive(Default)]
 struct Calls {
     slots: Arc<cordis_wire::operations::Outgoing>,
     active: Mutex<BTreeMap<String, Continuation>>,
+}
+impl Default for Calls {
+    fn default() -> Self {
+        Self {
+            slots: Arc::new(cordis_wire::operations::Outgoing::new(
+                2 * cordis_wire::operations::RESERVED_CAPACITY,
+            )),
+            active: Mutex::default(),
+        }
+    }
 }
 struct Frame {
     calls: Arc<Calls>,
@@ -144,15 +153,18 @@ impl Middlewares {
                         let session = session
                             .upgrade()
                             .ok_or_else(|| Error::HostLost("middleware host lost".into()))?;
-                        let (request, _scope) = session.scoped_envelope(
-                            &ctx,
-                            "middleware_call",
-                            Payload::with_message(
-                                json!({"handler":id,"call":call,"next":grant}),
-                                args.into_bytes().map_err(Error::InvalidInput)?,
-                            ),
-                        )?;
-                        let token = crate::scope::text(&request.payload.control, "context")?;
+                        let (request, _scope) = session
+                            .scoped_envelope(
+                                &ctx,
+                                "middleware_call",
+                                Payload::with_message(
+                                    json!({"handler":id,"call":call,"next":grant}),
+                                    args.into_bytes().map_err(Error::InvalidInput)?,
+                                ),
+                            )
+                            .await?;
+                        let token =
+                            crate::scope::text(&request.request.payload.control, "context")?;
                         calls.active.lock().unwrap().insert(
                             call.clone(),
                             Continuation {

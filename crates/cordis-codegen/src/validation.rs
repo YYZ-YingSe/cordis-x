@@ -208,14 +208,14 @@ fn visit(
                         }
                     }
                     fields.push(quote! {
-                        cordis_sdk_core::typed::Walk::walk(&self.#member, d + 1, b)?;
+                        cordis_sdk_core::typed::Walk::walk(&self.#member, depth + 1)?;
                         #constraints
                     });
                 }
                 quote! {
                     impl cordis_sdk_core::typed::Walk for #name {
-                        fn walk(&self, d: usize, b: &mut cordis_sdk_core::typed::Budget) -> ::std::result::Result<(), ::std::string::String> {
-                            b.take(d)?; #(#fields)* Ok(())
+                        fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+                            cordis_sdk_core::typed::check_depth(depth)?; #(#fields)* Ok(())
                         }
                     }
                 }
@@ -228,7 +228,7 @@ fn visit(
                     .iter()
                     .all(|v| matches!(v.fields, syn::Fields::Unit))
                 {
-                    quote! { b.take(d) }
+                    quote! { cordis_sdk_core::typed::check_depth(depth) }
                 } else {
                     let mut branches = Vec::new();
                     for v in &e.variants {
@@ -243,7 +243,7 @@ fn visit(
                         }
                         branches.push(quote! {
                             Self::#variant(value) => {
-                                cordis_sdk_core::typed::Walk::walk(value, d, b)?;
+                                cordis_sdk_core::typed::Walk::walk(value, depth)?;
                                 #check
                                 Ok(())
                             }
@@ -253,7 +253,7 @@ fn visit(
                 };
                 quote! {
                     impl cordis_sdk_core::typed::Walk for #name {
-                        fn walk(&self, d: usize, b: &mut cordis_sdk_core::typed::Budget) -> ::std::result::Result<(), ::std::string::String> { #body }
+                        fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> { #body }
                     }
                 }
             }

@@ -8,7 +8,7 @@ const standardFiles = new Map(Object.values(wkt).filter((v): v is DescFile => ty
 import { reflect, isReflectMessage, type ReflectMessage, type ReflectList, type ReflectMap } from '@bufbuild/protobuf/reflect';
 import type { MessageContract } from './contract.ts';
 import type { Value } from './value.ts';
-const MAX_DESCRIPTOR_BYTES = 1024 * 1024, MAX_NODES = 65536, MAX_DEPTH = 64;
+const MAX_DESCRIPTOR_BYTES = 1024 * 1024, MAX_DEPTH = 64;
 const resolved = new WeakMap<MessageContract, {
     name: string;
     descriptor: string;
@@ -107,10 +107,9 @@ export function messageType(contract: MessageContract): DescMessage {
 export function validateMessage<Desc extends DescMessage>(schema: Desc, value: MessageShape<Desc>, policy: Validation = 'audit', decoded = false): void {
     if (policy === 'contract') return;
     const plan = messagePlan(schema);
-    let budget = MAX_NODES;
     const active = new Set<Message>();
-    const take = (depth: number) => { if (depth > MAX_DEPTH || --budget < 0)
-        throw new Error('message depth/node limit exceeded'); };
+    const take = (depth: number) => { if (depth > MAX_DEPTH)
+        throw new Error('message depth limit exceeded'); };
     const leaf = (step: FieldPlan, value: unknown, depth: number) => {
         const field = step.field;
         if (isReflectMessage(value)) {
@@ -184,12 +183,16 @@ export function validateMessage<Desc extends DescMessage>(schema: Desc, value: M
     };
     visit(reflect(schema, value), 0, 0);
 }
-function jsonBudget(value: unknown, depth = 0, budget = { nodes: MAX_NODES }) {
-    if (depth > MAX_DEPTH || --budget.nodes < 0)
-        throw new Error('JSON depth/node limit exceeded');
+function jsonBudget(value: unknown, depth = 0, active = new Set<object>()) {
+    if (depth > MAX_DEPTH)
+        throw new Error('JSON depth limit exceeded');
+    if (value && typeof value === 'object' && active.has(value))
+        throw new Error('cyclic object graph');
+    if (value && typeof value === 'object') active.add(value);
     if (value && typeof value === 'object')
         for (const child of Object.values(value))
-            jsonBudget(child, depth + 1, budget);
+            jsonBudget(child, depth + 1, active);
+    if (value && typeof value === 'object') active.delete(value);
 }
 export function parseMessage(contract: MessageContract, value: Value): Message {
     return parse(messageType(contract), value);

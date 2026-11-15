@@ -92,7 +92,7 @@ impl RawProcess {
         };
         let request = result.request(
             "hello",
-            json!({"max_inflight":16,"frame_capacity":cordis_wire::DEFAULT_FRAME_CAPACITY,"validation":"checked", "contract":{"name":"example.calculator","revision":"1"}, "interface": cordis_contract::portable::encode(calculator().descriptor().unwrap()), "dependency_interfaces": {}}),
+            json!({"max_inflight":16,"io_timeout_ms":5000,"frame_capacity":cordis_wire::DEFAULT_FRAME_CAPACITY,"validation":"checked", "contract":{"name":"example.calculator","revision":"1"}, "interface": cordis_contract::portable::encode(calculator().descriptor().unwrap()), "dependency_interfaces": {}}),
         );
         assert_eq!(result.exchange(request).await["outcome"]["kind"], "success");
         let request = result.request("activate", json!(null));
@@ -102,7 +102,7 @@ impl RawProcess {
     fn request(&mut self, command: &str, payload: cordis_remote::Value) -> cordis_remote::Value {
         self.next += 1;
         json!({"session":self.session,"activation":{"incarnation":"1","fiber":"1","epoch":"1"},
-            "operation":format!("{}:{}", self.next % 256, self.next / 256 + 1),"command":command,"payload":payload})
+            "operation":format!("{}:{}", (self.next - 1) % 144, (self.next - 1) / 144 + 1),"command":command,"payload":payload})
     }
     // JSON is the assertion language of this fault-injection fixture. Its wire
     // is exclusively the generated protobuf carrier with independent bodies.

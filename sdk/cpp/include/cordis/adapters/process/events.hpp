@@ -90,7 +90,7 @@ class EventRegistry {
   };
   std::mutex mutex;
   std::map<std::string, std::shared_ptr<Entry>> entries;
-  OperationInbox seen;
+  OperationInbox seen{reserved_capacity};
   std::uint64_t next_listener = 0, next_dispatch = 0;
   Json declarations;
   void check(std::string event) const {

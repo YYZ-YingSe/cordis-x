@@ -9,13 +9,9 @@ pub struct WriteResult {
     pub caller: ::core::option::Option<i64>,
 }
 impl cordis_sdk_core::typed::Walk for WriteResult {
-    fn walk(
-        &self,
-        d: usize,
-        b: &mut cordis_sdk_core::typed::Budget,
-    ) -> ::std::result::Result<(), ::std::string::String> {
-        b.take(d)?;
-        cordis_sdk_core::typed::Walk::walk(&self.generation, d + 1, b)?;
+    fn walk(&self, depth: usize) -> ::std::result::Result<(), ::std::string::String> {
+        cordis_sdk_core::typed::check_depth(depth)?;
+        cordis_sdk_core::typed::Walk::walk(&self.generation, depth + 1)?;
         if self.generation.is_none() {
             return Err(
                 format!(
@@ -24,7 +20,7 @@ impl cordis_sdk_core::typed::Walk for WriteResult {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.owner, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.owner, depth + 1)?;
         if self.owner.is_none() {
             return Err(
                 format!(
@@ -32,7 +28,7 @@ impl cordis_sdk_core::typed::Walk for WriteResult {
                 ),
             );
         }
-        cordis_sdk_core::typed::Walk::walk(&self.caller, d + 1, b)?;
+        cordis_sdk_core::typed::Walk::walk(&self.caller, depth + 1)?;
         if self.caller.is_none() {
             return Err(
                 format!(
