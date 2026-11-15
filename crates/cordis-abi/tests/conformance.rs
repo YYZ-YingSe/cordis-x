@@ -535,13 +535,14 @@ async fn known_rejections_and_invalid_inputs_do_not_fault_provider() {
         acquire(&rig.handle, "reject").await,
         Err(AbiError::Rejected { .. })
     ));
-    for value in [json!("x".repeat(1024 * 1024))] {
-        assert!(matches!(
-            invoke_json(&rig.handle, "echo", value).await,
-            Err(AbiError::InvalidInput(_))
-        ));
-    }
-    assert_eq!(fixture.count("invoke"), 1);
+    let large = json!("x".repeat(3 * 1024 * 1024));
+    assert_eq!(
+        invoke_json(&rig.handle, "echo", large.clone())
+            .await
+            .unwrap(),
+        large
+    );
+    assert_eq!(fixture.count("invoke"), 2);
     assert_eq!(
         invoke_json(&rig.handle, "echo", json!(42)).await.unwrap(),
         json!(42.0)

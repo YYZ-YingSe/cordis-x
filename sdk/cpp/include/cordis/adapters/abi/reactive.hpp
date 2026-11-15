@@ -1,6 +1,6 @@
 #pragma once
-#include <cordis/core/observation.hpp>
 #include <cordis/adapters/abi/managed.hpp>
+#include <cordis/core/observation.hpp>
 
 namespace cordis::abi {
 namespace detail {
@@ -11,8 +11,8 @@ reactive_call(CordisAbiContext ctx, const CordisAbiReactiveHostApi *api,
   if (!api)
     throw Refusal("unsupported", "Reactive extension unavailable");
   Output input;
-  Budget budget;
-  auto raw = input.build(args, budget);
+
+  auto raw = input.build(args);
   co_return co_await receive(
       ctx.api, ctx.host,
       operation == CORDIS_ABI_EVENT_ON ||
@@ -239,5 +239,64 @@ Context::run(std::string alias, Message input,
         }
       },
       std::move(alias), std::move(input), std::move(terminal));
+}
+} // namespace cordis::abi
+
+namespace cordis::abi {
+inline Async<std::string>
+Context::reference_export(Value descriptor, ReferenceCallback callback) const {
+  return cordis::detail::invoke_owned(
+      [*this](Value descriptor,
+              ReferenceCallback callback) -> Async<std::string> {
+        auto id = callbacks_->insert_payload(
+            [callback = std::move(callback)](uint32_t op, Context ctx,
+                                             Payload args) -> Async<Payload> {
+              if (op == CORDIS_ABI_CALLBACK_RELEASE)
+                co_return Payload(nullptr);
+              if (op != CORDIS_ABI_REFERENCE_CALL &&
+                  op != CORDIS_ABI_REFERENCE_CLOSE)
+                throw Refusal("operation", "invalid interface callback");
+              co_return co_await callback(std::move(ctx), std::move(args));
+            });
+        try {
+          Payload args(Value{{"interface", std::move(descriptor)}});
+          co_return (co_await detail::reactive_call(raw_, reactive_,
+                                                    CORDIS_ABI_REFERENCE_EXPORT,
+                                                    0, id, "", std::move(args)))
+              .first.control_only()
+              .get<std::string>();
+        } catch (const RpcError &) {
+          callbacks_->erase_managed(id);
+          throw;
+        }
+      },
+      std::move(descriptor), std::move(callback));
+}
+inline Async<Message> Context::reference_invoke(std::string key,
+                                                std::string digest,
+                                                std::string method,
+                                                Message args) const {
+  return cordis::detail::invoke_owned(
+      [*this](std::string key, std::string digest, std::string method,
+              Message args) -> Async<Message> {
+        Payload payload(
+            Value{{"reference", key}, {"digest", digest}, {"method", method}},
+            args);
+        co_return (co_await detail::reactive_call(raw_, reactive_,
+                                                  CORDIS_ABI_REFERENCE_INVOKE,
+                                                  0, 0, "", std::move(payload)))
+            .first.one();
+      },
+      std::move(key), std::move(digest), std::move(method), std::move(args));
+}
+inline Async<void> Context::reference_dispose(std::string key) const {
+  return cordis::detail::invoke_owned(
+      [*this](std::string key) -> Async<void> {
+        Payload args(Value{{"reference", key}});
+        co_await detail::reactive_call(raw_, reactive_,
+                                       CORDIS_ABI_REFERENCE_DISPOSE, 0, 0, "",
+                                       std::move(args));
+      },
+      std::move(key));
 }
 } // namespace cordis::abi

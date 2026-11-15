@@ -366,7 +366,7 @@ fn peer(mode: &str) -> (ProcessSpec, PathBuf) {
         mode.into(),
         trace.display().to_string(),
     ]);
-    spec.timeout = Duration::from_millis(250);
+    spec.execution_timeout = Some(Duration::from_millis(250));
     (spec.event(EventBinding::new("tick", &probe_tick())), trace)
 }
 

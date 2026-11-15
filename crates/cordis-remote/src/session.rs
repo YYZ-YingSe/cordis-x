@@ -21,7 +21,7 @@ const CAPACITY: usize = 16;
 fn lane(command: &str) -> u8 {
     match command {
         "effect_release" | "sequence_undo" | "sequence_release" | "event_release"
-        | "middleware_release" | "resource_release" => 1,
+        | "middleware_release" | "resource_release" | "reference_close" => 1,
         "sequence_next" => 2,
         "scope_call" => 3,
         "task_call" => 4,
@@ -58,6 +58,7 @@ impl WeakSession {
     }
 }
 struct Client {
+    frame_capacity: usize,
     _code: crate::process::CodeLease,
     send: mpsc::Sender<CommandMessage>,
     cleanup_capacity: Arc<Semaphore>,
@@ -67,8 +68,7 @@ struct Client {
     activation: Identity,
     operations: Arc<cordis_wire::operations::Outgoing>,
     activated: AtomicBool,
-    timeout: Duration,
-    task_stop_timeout: Duration,
+    stop_timeout: Duration,
     router: Arc<crate::dependency::Router>,
 }
 
@@ -85,16 +85,28 @@ impl Session {
             ));
         }
         let ordinary_capacity = spec.max_inflight;
-        let deadline = spec.timeout;
-        let task_stop_timeout = spec.task_stop_timeout;
-        if deadline.is_zero() || Instant::now().checked_add(deadline).is_none() {
-            return Err(Error::Protocol(
-                "call timeout must be positive and representable".into(),
+        let frame_capacity = spec.frame_capacity;
+        if frame_capacity == 0 || frame_capacity > i32::MAX as usize {
+            return Err(Error::InvalidInput(
+                "frame_capacity must be positive and fit protobuf length representation".into(),
             ));
         }
-        if task_stop_timeout.is_zero() || Instant::now().checked_add(task_stop_timeout).is_none() {
+        let initialization_timeout = spec.initialization_timeout;
+        let execution_timeout = spec.execution_timeout;
+        let stop_timeout = spec.stop_timeout;
+        if initialization_timeout.is_zero()
+            || Instant::now().checked_add(initialization_timeout).is_none()
+            || execution_timeout.is_some_and(|timeout| {
+                timeout.is_zero() || Instant::now().checked_add(timeout).is_none()
+            })
+        {
+            return Err(Error::Protocol(
+                "configured timeouts must be positive and representable".into(),
+            ));
+        }
+        if stop_timeout.is_zero() || Instant::now().checked_add(stop_timeout).is_none() {
             return Err(Error::InvalidInput(
-                "task stop timeout must be positive and representable".into(),
+                "stop timeout must be positive and representable".into(),
             ));
         }
         let mut random = [0u8; 16];
@@ -128,7 +140,7 @@ impl Session {
         let validation = spec.bindings.validation;
         let reader = tokio::spawn(async move {
             loop {
-                let result = frame::read(&mut stdout, validation).await;
+                let result = frame::read(&mut stdout, validation, frame_capacity).await;
                 let failed = result.is_err();
                 if read_tx.send(result).await.is_err() || failed {
                     break;
@@ -179,10 +191,16 @@ impl Session {
                         Some(CommandMessage::Request(request, bytes, reply, cleanup_permit)) => {
                             if pending.values().filter(|p| lane(&p.command) == lane(&request.command)).count() >= if lane(&request.command) == 0 { ordinary_capacity } else { CAPACITY } { if let Some(id) = cordis_wire::operations::Id::parse(&request.operation) { worker_operations.complete(id); } let _ = reply.send(Err(Error::Overloaded)); continue; }
                             if stopping.is_some() { if let Some(id) = cordis_wire::operations::Id::parse(&request.operation) { worker_operations.complete(id); } let _ = reply.send(Err(Error::Closed)); continue; }
-                            let request_timeout = if request.command == "task_cancel" { task_stop_timeout } else if matches!(request.command.as_str(), "hello" | "activate" | "deactivate") { deadline.max(Duration::from_secs(5)) } else { deadline };
-                            if request.command == "deactivate" { stopping = Some(Instant::now() + request_timeout); }
+                            let request_timeout = match request.command.as_str() {
+                                "hello" | "activate" => Some(initialization_timeout),
+                                "deactivate" | "task_cancel" => Some(stop_timeout),
+                                "task_call" => None,
+                                command if lane(command) == 1 => Some(stop_timeout),
+                                _ => execution_timeout,
+                            };
+                            if request.command == "deactivate" { stopping = Some(Instant::now() + stop_timeout); }
                             if writes.try_send(bytes).is_err() { if let Some(id) = cordis_wire::operations::Id::parse(&request.operation) { worker_operations.complete(id); } let _ = reply.send(Err(Error::Overloaded)); continue; }
-                            let expires = if request.command == "task_call" { None } else { Some(Instant::now() + request_timeout) };
+                            let expires = request_timeout.map(|duration| Instant::now() + duration);
                             pending.insert(request.operation.clone(), Pending { _cleanup_permit: cleanup_permit, session: request.session, activation: request.activation, command: request.command, reply, deadline: expires });
                         }
                         Some(CommandMessage::Abort(error)) => break Err(error),
@@ -193,15 +211,15 @@ impl Session {
                         Some(Ok(incoming)) => {
                             if let Incoming::Request(request) = incoming {
                                 if request.session != callback_session || request.activation != callback_activation
-                                    || !matches!(request.command.as_str(), "dependency_resource_acquire" | "dependency_resource_call" | "dependency_resource_dispose" | "cleanup_resource_call" | "context_metadata" | "cleanup_metadata" | "dependency_call" | "effect_register" | "effect_dispose" | "sequence_register" | "sequence_ready" | "sequence_dispose" | "sequence_status" | "scope_register" | "scope_ready" | "scope_run" | "scope_dispose" | "scope_status" | "task_register" | "task_join" | "task_status" | "cleanup_call" | "event_register" | "event_emit" | "event_join" | "event_status" | "event_dispose" | "middleware_register" | "middleware_run" | "middleware_next" | "middleware_dispose" | "child_install" | "child_ready" | "child_settled" | "child_status" | "child_dispose" | "value_provide")
+                                    || !matches!(request.command.as_str(), "reference_export" | "reference_invoke" | "reference_dispose" | "dependency_resource_acquire" | "dependency_resource_call" | "dependency_resource_dispose" | "cleanup_resource_call" | "context_metadata" | "cleanup_metadata" | "dependency_call" | "effect_register" | "effect_dispose" | "sequence_register" | "sequence_ready" | "sequence_dispose" | "sequence_status" | "scope_register" | "scope_ready" | "scope_run" | "scope_dispose" | "scope_status" | "task_register" | "task_join" | "task_status" | "cleanup_call" | "event_register" | "event_emit" | "event_join" | "event_status" | "event_dispose" | "middleware_register" | "middleware_run" | "middleware_next" | "middleware_dispose" | "child_install" | "child_ready" | "child_settled" | "child_status" | "child_dispose" | "value_provide")
 
                                 { break Err(Error::Protocol("invalid or duplicate reverse request".into())); }
                                 let admission = cordis_wire::operations::Id::parse(&request.operation).and_then(|id| callback_history.admit(id));
                                 let Some(admission) = admission else { break Err(Error::Protocol("invalid or duplicate reverse request".into())); };
                                 let router = callback_router.clone();
-                                let workers = match request.command.as_str() { "child_install" | "value_provide" => &mut composition_calls, "child_ready" | "child_settled" => &mut child_waits, "child_dispose" => &mut child_disposals, "effect_dispose" | "sequence_dispose" | "scope_dispose" | "event_dispose" | "middleware_dispose" | "dependency_resource_dispose" => &mut disposals, "sequence_ready" | "scope_ready" => &mut sequence_waits, "scope_run" => &mut scope_runs, "task_join" => &mut task_joins, "cleanup_call" | "cleanup_metadata" | "cleanup_resource_call" => &mut cleanup_calls, "dependency_resource_call" => &mut resource_calls, "event_emit" => &mut event_emits, "event_join" => &mut event_joins, "middleware_run" => &mut middleware_runs, "middleware_next" => &mut middleware_nexts, _ => &mut callbacks };
+                                let workers = match request.command.as_str() { "child_install" | "value_provide" => &mut composition_calls, "child_ready" | "child_settled" => &mut child_waits, "child_dispose" => &mut child_disposals, "effect_dispose" | "sequence_dispose" | "scope_dispose" | "event_dispose" | "middleware_dispose" | "dependency_resource_dispose" | "reference_dispose" => &mut disposals, "sequence_ready" | "scope_ready" => &mut sequence_waits, "scope_run" => &mut scope_runs, "task_join" => &mut task_joins, "cleanup_call" | "cleanup_metadata" | "cleanup_resource_call" => &mut cleanup_calls, "dependency_resource_call" | "reference_invoke" => &mut resource_calls, "event_emit" => &mut event_emits, "event_join" => &mut event_joins, "middleware_run" => &mut middleware_runs, "middleware_next" => &mut middleware_nexts, _ => &mut callbacks };
                                 if workers.len() >= CAPACITY {
-                                    let response = match reverse_response(&request, Err(Error::Overloaded)) { Ok(bytes) => bytes, Err(error) => break Err(error) };
+                                    let response = match reverse_response(&request, Err(Error::Overloaded), frame_capacity) { Ok(bytes) => bytes, Err(error) => break Err(error) };
                                     if writes.try_send(response).is_err() { break Err(Error::HostLost("session response queue exhausted".into())); }
                                 } else {
                                     workers.spawn(async move {
@@ -210,7 +228,7 @@ impl Session {
                                         // A checked dependency result violated its declaration
                                         // after business execution. Do not encode it as rejection.
                                         if let Err(error @ Error::Protocol(_)) = result { return Err(error); }
-                                        reverse_response(&request, result)
+                                        reverse_response(&request, result, frame_capacity)
                                     });
                                 }
                                 continue;
@@ -228,7 +246,7 @@ impl Session {
                         }
                         Some(Err(error)) => {
                             if deactivated && pending.is_empty() && error == Error::Closed {
-                                match timeout(deadline, child.wait()).await {
+                                match timeout(stop_timeout, child.wait()).await {
                                     Ok(Ok(status)) if status.success() => break Ok(()),
                                     other => break Err(Error::HostLost(format!("exit after deactivation: {other:?}"))),
                                 }
@@ -390,6 +408,7 @@ impl Session {
             closed_tx.send_replace(Some(termination));
         });
         let session = Self(Arc::new(Client {
+            frame_capacity,
             _code: code,
             send,
             cleanup_capacity,
@@ -399,8 +418,7 @@ impl Session {
             activation,
             operations,
             activated: AtomicBool::new(false),
-            timeout: deadline,
-            task_stop_timeout,
+            stop_timeout,
             router: router.clone(),
         }));
         router.attach(WeakSession(Arc::downgrade(&session.0)));
@@ -443,7 +461,7 @@ impl Session {
         payload: Payload,
     ) -> Result<Payload> {
         let (request, _scope) = self.scoped_envelope(context, command, payload)?;
-        self.send(request).await
+        self.supervise(context, self.send(request)).await
     }
     pub async fn scoped_request(
         &self,
@@ -452,7 +470,35 @@ impl Session {
         payload: Value,
     ) -> Result<Value> {
         let (request, _scope) = self.scoped_envelope(context, command, payload)?;
-        self.send(request).await?.control_only().map_err(Into::into)
+        let result = if command == "task_call" {
+            self.send(request).await
+        } else {
+            self.supervise(context, self.send(request)).await
+        };
+        result?.control_only().map_err(Into::into)
+    }
+    pub async fn supervise<T>(
+        &self,
+        context: &Context,
+        operation: impl std::future::Future<Output = Result<T>>,
+    ) -> Result<T> {
+        let stopping = async {
+            if !context.is_cleanup() {
+                context.cancelled().await;
+            }
+            tokio::time::sleep(self.0.stop_timeout).await;
+        };
+        tokio::pin!(operation);
+        tokio::select! {
+            biased;
+            result = &mut operation => result,
+            _ = stopping => {
+                let failure = Error::OutcomeUnknown("operation did not drain before the stop deadline".into());
+                let _ = self.abort(failure.clone()).await;
+                let _ = operation.await;
+                Err(failure)
+            },
+        }
     }
     pub async fn request(&self, command: &str, payload: Value) -> Result<Value> {
         self.send(self.envelope(command, payload)?)
@@ -500,7 +546,7 @@ impl Session {
             })?
         };
         let bytes = request
-            .encode()
+            .encode(self.0.frame_capacity)
             .map_err(|e| Error::InvalidInput(e.to_string()))?;
         let (tx, rx) = oneshot::channel();
         permit.send(CommandMessage::Request(request, bytes, tx, cleanup_permit));
@@ -522,8 +568,8 @@ impl Session {
     pub fn enable_sequences(&self, enabled: bool) {
         self.0.router.enable_sequences(enabled);
     }
-    pub fn task_stop_timeout(&self) -> Duration {
-        self.0.task_stop_timeout
+    pub fn stop_timeout(&self) -> Duration {
+        self.0.stop_timeout
     }
     pub fn enable_middleware(&self, enabled: bool) {
         self.0.router.enable_middleware(enabled);
@@ -576,14 +622,11 @@ impl Session {
         }
         self.terminated().await
     }
-    pub fn timeout(&self) -> Duration {
-        self.0.timeout
-    }
 }
 
-fn reverse_response(request: &Request, result: Result<Payload>) -> Result<Bytes> {
+fn reverse_response(request: &Request, result: Result<Payload>, capacity: usize) -> Result<Bytes> {
     request
         .response(crate::dependency::payload_outcome(result))
-        .encode()
+        .encode(capacity)
         .map_err(Into::into)
 }

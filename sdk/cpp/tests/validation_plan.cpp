@@ -66,12 +66,25 @@ int main() {
   profile::Data data;
   data.set_int32_value(0);
   data.mutable_option()->set_none(cordis::data::NULL_VALUE);
-  data.set_binary(std::string(cordis::protobuf::max_bytes, '\0'));
+  data.set_binary(std::string(2 * 1024 * 1024, '\0'));
   cordis::protobuf::validate(data, Validation::Checked);
   data.set_text("x");
-  rejects([&] { cordis::protobuf::validate(data, Validation::Checked); });
+  cordis::protobuf::validate(data, Validation::Checked);
+  const std::string key(1024 * 1024, 'k');
+  auto *user = (*data.mutable_groups())[key].add_values();
+  user->set_id(1);
+  user->set_name(std::string(1024 * 1024, 'n'));
+  for (auto policy : {Validation::Contract, Validation::Checked, Validation::Audit}) {
+    auto encoded = cordis::protobuf::encode_binary(data, policy);
+    assert(encoded.bytes().size() > 1024 * 1024);
+    auto decoded = cordis::protobuf::decode_binary<profile::Data>(encoded, policy);
+    assert(decoded.binary() == data.binary());
+    assert(decoded.text() == data.text());
+    assert(decoded.groups().at(key).values(0).name() == user->name());
+  }
   data.clear_binary();
   data.clear_text();
+  data.clear_groups();
   data.mutable_flags()->Resize(static_cast<int>(cordis::protobuf::max_nodes),
                                false);
   rejects([&] { cordis::protobuf::validate(data, Validation::Checked); });

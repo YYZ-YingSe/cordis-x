@@ -1,6 +1,7 @@
 //! Context adapter with native Component Model asynchronous execution.
 mod execution;
 mod host;
+mod references;
 #[cfg(test)]
 #[path = "managed/resource_tests.rs"]
 mod resource_tests;
@@ -87,7 +88,9 @@ pub struct Capabilities {
     pub max_handles: usize,
     pub max_requests: usize,
     pub max_calls: usize,
-    pub call_timeout: Duration,
+    pub initialization_timeout: Duration,
+    pub execution_timeout: Option<Duration>,
+    pub stop_timeout: Duration,
 }
 impl Default for Capabilities {
     fn default() -> Self {
@@ -97,7 +100,9 @@ impl Default for Capabilities {
             max_handles: 1024,
             max_requests: 256,
             max_calls: 128,
-            call_timeout: Duration::from_secs(30),
+            initialization_timeout: Duration::from_secs(30),
+            execution_timeout: None,
+            stop_timeout: Duration::from_secs(5),
         }
     }
 }
@@ -155,7 +160,16 @@ impl ContextComponent {
             || capabilities.max_calls == 0
             || capabilities.max_calls > 4096
             || capabilities.max_requests == 0
-            || capabilities.call_timeout.is_zero()
+            || [
+                Some(capabilities.initialization_timeout),
+                capabilities.execution_timeout,
+                Some(capabilities.stop_timeout),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|timeout| {
+                timeout.is_zero() || std::time::Instant::now().checked_add(timeout).is_none()
+            })
         {
             return Err(Error::InvalidInput("invalid limits".into()));
         }
@@ -180,7 +194,7 @@ impl ContextComponent {
                         let _entered = runtime.enter();
                         let mut probe = module.instantiate(Weak::new(), true)?;
                         bounded(
-                            module.capabilities.call_timeout,
+                            module.capabilities.initialization_timeout,
                             probe
                                 .bindings
                                 .cordis_plugin_managed_service()
@@ -367,7 +381,7 @@ impl ContextComponent {
                                 let mut guest =
                                     worker.module.instantiate(Arc::downgrade(&worker), false)?;
                                 let manifest = bounded(
-                                    worker.module.capabilities.call_timeout,
+                                    worker.module.capabilities.initialization_timeout,
                                     guest
                                         .bindings
                                         .cordis_plugin_managed_service()
@@ -546,7 +560,7 @@ impl Module {
             wasmtime_wasi::p2::add_to_linker_async(&mut linker).map_err(unknown)?;
         }
         let bindings = bounded(
-            self.capabilities.call_timeout,
+            self.capabilities.initialization_timeout,
             bindings::ManagedPlugin::instantiate_async(&mut store, &self.code.component, &linker),
         )?;
         Ok(Guest { store, bindings })

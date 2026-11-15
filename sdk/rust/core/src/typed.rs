@@ -75,8 +75,7 @@ impl Walk for f64 {
 }
 impl Walk for String {
     fn walk(&self, d: usize, b: &mut Budget) -> std::result::Result<(), String> {
-        b.take(d)?;
-        b.bytes(self.len())
+        b.take(d)
     }
 }
 impl<T: Walk> Walk for Option<T> {
@@ -114,7 +113,6 @@ impl<K: Walk, V: Walk> Walk for std::collections::BTreeMap<K, V> {
 
 impl Walk for prost::bytes::Bytes {
     fn walk(&self, d: usize, b: &mut Budget) -> std::result::Result<(), String> {
-        b.take(d)?;
-        b.bytes(self.len())
+        b.take(d)
     }
 }

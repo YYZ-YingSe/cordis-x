@@ -11,9 +11,9 @@ inline Async<Value> Context::metadata(std::string name,
         if (!managed_)
           throw Refusal("unsupported", "Managed extension unavailable");
         detail::Output input;
-        detail::Budget budget;
+
         const Value args = revision;
-        auto value = input.build(args, budget);
+        auto value = input.build(args);
         co_return (co_await detail::receive(
                        raw_.api, raw_.host, false,
                        [&](uint64_t caller, CordisAbiCompletion completion) {
@@ -53,8 +53,8 @@ managed_call(CordisAbiContext ctx, const CordisAbiManagedHostApi *api,
   if (!api)
     throw Refusal("unsupported", "Managed extension unavailable");
   Output input;
-  Budget budget;
-  auto value = input.build(args, budget);
+
+  auto value = input.build(args);
   co_return (co_await detail::receive(
       ctx.api, ctx.host,
       operation == CORDIS_ABI_SEQUENCE_REGISTER ||

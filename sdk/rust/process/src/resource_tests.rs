@@ -209,7 +209,7 @@ fn request(n: u64, command: &str, mut payload: Value) -> Request {
         payload.messages.push(
             test_json::message(body)
                 .unwrap()
-                .encode(cordis_wire::MAX_MESSAGE)
+                .encode(Some(cordis_wire::DEFAULT_FRAME_CAPACITY))
                 .unwrap(),
         );
     }
@@ -236,7 +236,7 @@ fn request_message(
     request.payload.messages.push(
         cordis_sdk_core::Message::from_json(shape, &args)
             .unwrap()
-            .encode(cordis_wire::MAX_MESSAGE)
+            .encode(Some(cordis_wire::DEFAULT_FRAME_CAPACITY))
             .unwrap(),
     );
     request
@@ -251,7 +251,7 @@ async fn start(host: &Host<Probe>, capabilities: Value) -> Value {
                     "contract":{"name":"test.counter","revision":"1"},
                     "interface":Probe::interface(), "dependency_interfaces":Probe::dependency_interfaces(),
                     "dependencies":{"test.upstream":"1"}, "events":{}, "middleware":{},
-                    "composition":{"factories":[],"provisions":{}}, "max_inflight":16,"validation":"checked",
+                    "composition":{"factories":[],"provisions":{}}, "max_inflight":16,"frame_capacity":cordis_wire::DEFAULT_FRAME_CAPACITY,"validation":"checked",
                     "capabilities":capabilities
                 }),
             )

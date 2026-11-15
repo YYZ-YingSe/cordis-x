@@ -142,7 +142,10 @@ impl Router {
             // Ordinary work cannot exhaust cleanup or explicit disposal lanes.
             let lane = if ctx.is_cleanup() {
                 1
-            } else if command == "dependency-resource-dispose" {
+            } else if matches!(
+                command.as_str(),
+                "dependency-resource-dispose" | "reference-dispose"
+            ) {
                 2
             } else {
                 0
@@ -243,6 +246,34 @@ impl Router {
         let instance = self.instance.upgrade().ok_or(Error::Closed)?;
         let args = &payload.control;
         match command.as_str() {
+            "reference-export" => {
+                let descriptor = cordis_contract::portable::decode(&args["interface"])
+                    .map_err(Error::InvalidInput)?;
+                let object = Arc::new(super::references::Object {
+                    instance: self.instance.clone(),
+                    callback: callback_id(args)?,
+                });
+                cordis_host::reference::export(&ctx, descriptor, object)
+                    .await
+                    .map(|key| json!(key).into())
+                    .map_err(Error::from)
+            }
+            "reference-invoke" => {
+                let value = cordis_host::reference::invoke(
+                    &ctx,
+                    text(args, "reference")?,
+                    text(args, "digest")?,
+                    text(args, "method")?,
+                    Body::from_bytes(payload.one().map_err(invalid_payload)?),
+                )
+                .await
+                .map_err(Error::from)?;
+                value.into_bytes().map(Payload::message).map_err(unknown)
+            }
+            "reference-dispose" => cordis_host::reference::dispose(&ctx, text(args, "reference")?)
+                .await
+                .map(|_| Value::Null.into())
+                .map_err(Error::from),
             "invoke" => {
                 let name = text(args, "dependency")?;
                 let dependency = instance

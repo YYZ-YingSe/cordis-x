@@ -111,14 +111,13 @@ unsafe extern "C" fn call(
     completion: Completion,
 ) {
     launch(host, caller, completion, |router| {
-        let mut budget = Budget::new();
         // SAFETY: guest lends a readable input buffer and text until return.
         let (dependency, method, args) = unsafe {
             let args = read_slice(args, 1)?.first().ok_or_else(invalid_value)?;
             (
-                read_text(dependency, &mut budget)?,
-                read_text(method, &mut budget)?,
-                read_payload(args, &mut budget, router.capabilities.bindings.validation)?,
+                read_text(dependency)?,
+                read_text(method)?,
+                read_payload(args, router.capabilities.bindings.validation)?,
             )
         };
         Ok(async move {

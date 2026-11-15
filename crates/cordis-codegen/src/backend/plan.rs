@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Debug)]
 pub struct Shape {
+    pub reference: Option<String>,
     pub rust: String,
     pub cpp: String,
     pub ts: String,
@@ -49,7 +50,14 @@ pub struct Control {
 }
 pub struct Plan {
     pub services: Vec<Service>,
+    pub references: Vec<ObjectInterface>,
     pub messages: Vec<Shape>,
+}
+pub struct ObjectInterface {
+    pub prefix: String,
+    pub descriptor: cordis_contract::Descriptor,
+    pub reference: Shape,
+    pub methods: Vec<Operation>,
 }
 fn message_shape(module: &Module, name: &str) -> Shape {
     let m = module.message(name);
@@ -90,6 +98,14 @@ fn message_shape(module: &Module, name: &str) -> Shape {
     );
     let ts_name = local.replace('.', "_");
     Shape {
+        reference: cordis_contract::protobuf::option(&m.options(), "cordis.schema.reference")
+            .and_then(|value| match value {
+                prost_reflect::Value::String(target) => module
+                    .pool
+                    .get_service_by_name(&target)
+                    .map(|s| ident(s.name(), Case::Type)),
+                _ => None,
+            }),
         rust: rust.join("::"),
         cpp: format!("::{}", name.replace('.', "::")),
         ts: format!("{alias}.{ts_name}"),
@@ -247,7 +263,46 @@ impl Plan {
                 ));
             }
         }
-        Ok(Self { services, messages })
+        let mut references = Vec::new();
+        for (name, descriptor) in &module.references {
+            let prefix = globals.insert(name, Case::Type, name)?;
+            for suffix in ["Client", "Server", "Object"] {
+                globals.insert(&format!("{prefix}{suffix}"), Case::Type, name)?;
+            }
+            let types: Vec<_> = messages
+                .iter()
+                .filter(|m| m.reference.as_deref() == Some(prefix.as_str()))
+                .cloned()
+                .collect();
+            if types.len() != 1 {
+                return Err(Diagnostic::new(
+                    name,
+                    "an interface needs exactly one declared reference message",
+                ));
+            }
+            let mut scope = Scope::default();
+            for method in [
+                "close",
+                "dispose",
+                "export",
+                "from_reference",
+                "reference",
+                "descriptor",
+            ] {
+                scope.reserve(method);
+            }
+            references.push(ObjectInterface {
+                prefix: prefix.clone(),
+                descriptor: descriptor.clone(),
+                reference: types[0].clone(),
+                methods: methods(module, &descriptor.interface().methods, &prefix, &mut scope)?,
+            });
+        }
+        Ok(Self {
+            services,
+            references,
+            messages,
+        })
     }
 }
 

@@ -1,6 +1,6 @@
 //! The common protobuf carrier. Business bodies remain opaque owned bytes;
 //! the receiving operation supplies their contract before entering business.
-use crate::{Error, MAX_MESSAGE, Result, Value, invalid};
+use crate::{Error, Result, Value, invalid};
 use cordis_contract::Validation;
 use prost::{Message, bytes::Bytes};
 use prost_reflect::DescriptorPool;
@@ -56,7 +56,7 @@ impl Payload {
     }
     /// Encode directly into the owned allocation required by a WIT byte list.
     pub fn encode_to_vec(&self) -> Result<Vec<u8>> {
-        bounded_vec(&self.to_proto()?)
+        encode_vec(&self.to_proto()?, None)
     }
     pub fn decode(bytes: Bytes) -> Result<Self> {
         Self::decode_with(bytes, Validation::Checked)
@@ -69,12 +69,6 @@ impl Payload {
         validate_control(&self.control)?;
         if self.messages.len() > MAX_PAYLOAD_MESSAGES {
             return Err(invalid("too many business messages"));
-        }
-        let mut remaining = MAX_MESSAGE;
-        for bytes in &self.messages {
-            remaining = remaining
-                .checked_sub(bytes.len())
-                .ok_or_else(|| invalid("message too large"))?;
         }
         Ok(proto::Payload {
             control: Some(to_proto(&self.control)),
@@ -118,7 +112,7 @@ pub enum Outcome {
     Unknown(crate::RemoteError),
 }
 impl Frame {
-    pub fn encode(&self) -> Result<Bytes> {
+    pub fn encode(&self, capacity: usize) -> Result<Bytes> {
         use proto::{frame::Direction as D, response::Outcome as O};
         let direction = match &self.direction {
             Direction::Request { command, payload } => D::Request(proto::Request {
@@ -134,16 +128,20 @@ impl Frame {
                 }),
             }),
         };
-        bounded(&proto::Frame {
-            session: self.session.clone(),
-            activation: Some(proto::Identity {
-                incarnation: self.activation.incarnation.clone(),
-                fiber: self.activation.fiber.clone(),
-                epoch: self.activation.epoch.clone(),
-            }),
-            operation: self.operation.clone(),
-            direction: Some(direction),
-        })
+        encode_vec(
+            &proto::Frame {
+                session: self.session.clone(),
+                activation: Some(proto::Identity {
+                    incarnation: self.activation.incarnation.clone(),
+                    fiber: self.activation.fiber.clone(),
+                    epoch: self.activation.epoch.clone(),
+                }),
+                operation: self.operation.clone(),
+                direction: Some(direction),
+            },
+            Some(capacity),
+        )
+        .map(Bytes::from)
     }
     pub fn decode(bytes: Bytes) -> Result<Self> {
         Self::decode_with(bytes, Validation::Checked)
@@ -201,22 +199,17 @@ fn error_from_proto(e: proto::Error) -> crate::RemoteError {
 fn wire_error(e: impl std::fmt::Display) -> Error {
     invalid(e.to_string())
 }
-fn bounded(value: &impl Message) -> Result<Bytes> {
-    bounded_vec(value).map(Bytes::from)
-}
-fn bounded_vec(value: &impl Message) -> Result<Vec<u8>> {
+fn encode_vec(value: &impl Message, capacity: Option<usize>) -> Result<Vec<u8>> {
     let length = value.encoded_len();
-    if length > MAX_MESSAGE {
-        return Err(invalid("message too large"));
+    if capacity.is_some_and(|capacity| length > capacity) {
+        return Err(invalid("frame exceeds transport capacity"));
     }
-    let mut bytes = Vec::with_capacity(length);
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(length).map_err(wire_error)?;
     value.encode_raw(&mut bytes);
     Ok(bytes)
 }
 fn check(bytes: &Bytes, name: &str, validation: Validation) -> Result<()> {
-    if bytes.len() > MAX_MESSAGE {
-        return Err(invalid("message too large"));
-    }
     if !validation.audits() {
         return Ok(());
     }
@@ -237,6 +230,7 @@ fn check(bytes: &Bytes, name: &str, validation: Validation) -> Result<()> {
 /// protobuf decoders. They do not constrain opaque typed business bodies.
 pub const MAX_CONTROL_DEPTH: usize = 16;
 pub const MAX_CONTROL_NODES: usize = 8_192;
+pub const MAX_CONTROL_BYTES: usize = 1024 * 1024;
 pub fn validate_control(value: &Value) -> Result<()> {
     fn walk(value: &Value, depth: usize, nodes: &mut usize, bytes: &mut usize) -> Result<()> {
         if depth > MAX_CONTROL_DEPTH {
@@ -282,7 +276,7 @@ pub fn validate_control(value: &Value) -> Result<()> {
         Ok(())
     }
     let mut nodes = MAX_CONTROL_NODES;
-    let mut bytes = MAX_MESSAGE;
+    let mut bytes = MAX_CONTROL_BYTES;
     walk(value, 0, &mut nodes, &mut bytes)
 }
 

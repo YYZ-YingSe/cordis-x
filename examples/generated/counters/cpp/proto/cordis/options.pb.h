@@ -862,6 +862,10 @@ inline constexpr int kResourceFieldNumber = 51001;
 extern ::google::protobuf::internal::ExtensionIdentifier<
     ::google::protobuf::ServiceOptions, ::google::protobuf::internal::PrimitiveTypeTraits< bool >, 8, false>
     resource;
+inline constexpr int kInterfaceFieldNumber = 51015;
+extern ::google::protobuf::internal::ExtensionIdentifier<
+    ::google::protobuf::ServiceOptions, ::google::protobuf::internal::PrimitiveTypeTraits< bool >, 8, false>
+    interface;
 inline constexpr int kErrorsFieldNumber = 51002;
 extern ::google::protobuf::internal::ExtensionIdentifier<
     ::google::protobuf::MethodOptions, ::google::protobuf::internal::RepeatedStringTypeTraits, 9, false>
@@ -894,6 +898,10 @@ inline constexpr int kSemanticsFieldNumber = 51004;
 extern ::google::protobuf::internal::ExtensionIdentifier<
     ::google::protobuf::MessageOptions, ::google::protobuf::internal::EnumTypeTraits< ::cordis::schema::Semantics>, 14, false>
     semantics;
+inline constexpr int kReferenceFieldNumber = 51016;
+extern ::google::protobuf::internal::ExtensionIdentifier<
+    ::google::protobuf::MessageOptions, ::google::protobuf::internal::StringTypeTraits, 9, false>
+    reference;
 inline constexpr int kRequiredFieldNumber = 51005;
 extern ::google::protobuf::internal::ExtensionIdentifier<
     ::google::protobuf::FieldOptions, ::google::protobuf::internal::PrimitiveTypeTraits< bool >, 8, false>

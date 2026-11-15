@@ -74,3 +74,26 @@ test('fragmented large frames own their bodies across yields and source mutation
   assert.deepEqual(Buffer.from(frame.payload.messages[0]), Buffer.from(original.payload.messages[0]));
   await iterator.return(undefined);
 });
+
+test('host capacity applies before allocation and to coalesced frames after hello', async () => {
+  const capacity = 4 * 1024 * 1024;
+  const large = {...request('2'), payload: payload(null, new Uint8Array(3 * 1024 * 1024).fill(173))};
+  assert.throws(() => encodeFrame(large), /large|size|capacity|limit/);
+  const parts: Buffer[] = [];
+  const output = new Writable({write(chunk, _encoding, done) { parts.push(chunk); done(); }});
+  await writeFrame(output, encodeFrame(request('1')));
+  await writeFrame(output, encodeFrame(large, capacity));
+  for (const policy of ['contract', 'checked', 'audit'] as const) {
+    let selected = 1024 * 1024;
+    const reader = readFrames(Readable.from([Buffer.concat(parts)]), () => policy, () => selected);
+    assert.equal((await reader.next()).value?.operation, '1');
+    selected = capacity;
+    const frame = (await reader.next()).value as Request;
+    assert.deepEqual(Buffer.from(frame.payload.messages[0]), Buffer.from(large.payload.messages[0]));
+    assert.equal((await reader.next()).done, true);
+  }
+  const header = Buffer.alloc(4);
+  header.writeUInt32BE(capacity + 1);
+  const reader = readFrames(Readable.from([header]), undefined, () => capacity);
+  await assert.rejects(reader.next(), /length/);
+});

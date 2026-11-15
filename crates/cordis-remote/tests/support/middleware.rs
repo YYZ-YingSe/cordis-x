@@ -312,7 +312,7 @@ fn peer(mode: &str) -> (ProcessSpec, PathBuf) {
         mode.into(),
         trace.display().to_string(),
     ]);
-    s.timeout = Duration::from_millis(500);
+    s.execution_timeout = Some(Duration::from_millis(500));
     (
         s.middleware(MiddlewareBinding::new("request", &probe_pipeline())),
         trace,
@@ -446,7 +446,7 @@ async fn lost_middleware_registration_ack_retains_recovery_responsibility() {
 async fn early_remote_reply_cannot_release_an_admitted_native_next() {
     let rt = Runtime::new();
     let (mut s, trace) = peer("early");
-    s.timeout = Duration::from_secs(5);
+    s.execution_timeout = Some(Duration::from_secs(5));
     let provider = rt.install(s.plugin("peer", &probe_service())).unwrap();
     bounded(provider.ready()).await.unwrap();
     let (owner, h, ctx) = probe_consumer(&rt).await;

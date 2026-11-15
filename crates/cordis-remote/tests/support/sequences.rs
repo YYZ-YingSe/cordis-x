@@ -359,7 +359,7 @@ fn peer(mode: &str) -> (ProcessSpec, PathBuf) {
         trace.display().to_string(),
     ]);
     if mode == "hang" {
-        spec.timeout = Duration::from_millis(200);
+        spec.execution_timeout = Some(Duration::from_millis(200));
     }
     (spec, trace)
 }

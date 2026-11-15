@@ -3,7 +3,6 @@
 //! frame and independently checks every business body against its contract.
 pub use cordis_wire::{Bytes, Error, Initialization, Payload, Result, Validation, Value, json};
 pub const WIT: &str = include_str!(env!("CORDIS_PLUGIN_WIT"));
-pub const MAX_BYTES: usize = cordis_wire::MAX_MESSAGE;
 pub fn encode(payload: &Payload) -> Result<Vec<u8>> {
     payload.encode_to_vec()
 }

@@ -101,7 +101,7 @@ impl Entry {
                 .await
                 .map_err(|e| e.check_declared(&signature.errors, "resource result"))?;
             output.check(&signature.result).map_err(unknown)?;
-            output.encode(cordis_wire::MAX_MESSAGE).map_err(unknown)
+            output.encode(None).map_err(unknown)
         })
         .catch_unwind()
         .await

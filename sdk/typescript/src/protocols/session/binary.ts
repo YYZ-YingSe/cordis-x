@@ -4,9 +4,10 @@ import { create, fromBinary, fromJson, toBinary, toJson } from '@bufbuild/protob
 import { ValueSchema } from '@bufbuild/protobuf/wkt';
 import { reflect, isReflectMessage, isReflectList, isReflectMap, type ReflectMessage } from '@bufbuild/protobuf/reflect';
 import { FrameSchema, PayloadSchema, type Payload as ProtoPayload } from '#cordis-generated/transport';
-import { MAX_MESSAGE, type Value } from '../../core/value.ts';
+import { DEFAULT_FRAME_CAPACITY, type Value } from '../../core/value.ts';
 import type { Payload, Request, Response, Outcome } from './messages.ts';
 export const CONTENT_TYPE = 'application/protobuf';
+export const MAX_CONTROL_BYTES = 1024 * 1024;
 function checked(value: ReflectMessage, budget = { nodes: 65536 }): void {
   if (--budget.nodes < 0) throw new Error('control node limit exceeded');
   if(value.desc.typeName==='google.protobuf.Value') {
@@ -23,7 +24,7 @@ function checked(value: ReflectMessage, budget = { nodes: 65536 }): void {
   for (const field of value.fields) if (value.isSet(field)) child(value.get(field));
 }
 export function validateControl(value: Value): void {
-  let nodes=8192, bytes=MAX_MESSAGE;
+  let nodes=8192, bytes=MAX_CONTROL_BYTES;
   const walk=(value: Value,depth: number): void => {
     if(depth>16) throw new Error('control nesting too deep');
     if(--nodes<0) throw new Error('control node limit exceeded');
@@ -45,10 +46,10 @@ export function validateControl(value: Value): void {
   };
   walk(value,0);
 }
-function encodePayload(value: Payload): ProtoPayload {
+function encodePayload(value: Payload, capacity: number): ProtoPayload {
   validateControl(value.control);
-  if (value.messages.length > 4096 || value.messages.reduce((n, b) => n + b.byteLength, 0) > MAX_MESSAGE)
-    throw new Error('message too large');
+  if (value.messages.length > 4096 || value.messages.reduce((n, b) => n + b.byteLength, 0) > capacity)
+    throw new Error('frame exceeds transport capacity');
   return create(PayloadSchema, { control: fromJson(ValueSchema, value.control), messages: value.messages });
 }
 function decodePayload(value: ProtoPayload | undefined): Payload {
@@ -58,24 +59,23 @@ function decodePayload(value: ProtoPayload | undefined): Payload {
   validateControl(control);
   return { control, messages: value.messages };
 }
-export function encodeFrame(value: Request | Response): Uint8Array {
+export function encodeFrame(value: Request | Response, capacity = DEFAULT_FRAME_CAPACITY): Uint8Array {
   const frame = create(FrameSchema, { session: value.session, activation: value.activation, operation: value.operation });
-  if ('command' in value) frame.direction = { case: 'request', value: { $typeName: 'cordis.transport.Request', command: value.command, payload: encodePayload(value.payload) } };
+  if ('command' in value) frame.direction = { case: 'request', value: { $typeName: 'cordis.transport.Request', command: value.command, payload: encodePayload(value.payload, capacity) } };
   else {
     const outcome = value.outcome;
     frame.direction = { case: 'response', value: { $typeName: 'cordis.transport.Response', outcome:
-      outcome.kind === 'success' ? { case: 'success', value: encodePayload(outcome.value) } : {
+      outcome.kind === 'success' ? { case: 'success', value: encodePayload(outcome.value, capacity) } : {
         case: outcome.kind === 'failure' ? 'rejected' : outcome.kind,
         value: { $typeName: 'cordis.transport.Error', ...outcome.error },
       },
     } };
   }
   const bytes = toBinary(FrameSchema, frame);
-  if (bytes.byteLength > MAX_MESSAGE) throw new Error('message too large');
+  if (bytes.byteLength > capacity) throw new Error('frame exceeds transport capacity');
   return bytes;
 }
 export function decodeFrame(bytes: Uint8Array, policy: Validation = 'checked'): Request | Response {
-  if (bytes.byteLength > MAX_MESSAGE) throw new Error('message too large');
   if (policy === 'audit') auditBinary(FrameSchema, bytes);
   const frame = fromBinary(FrameSchema, bytes, { recursionLimit: 100 });
   checked(reflect(FrameSchema, frame), { nodes: 65536 });

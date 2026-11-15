@@ -1,6 +1,7 @@
 #pragma once
 #include "contract.hpp"
 #include "protobuf.hpp"
+#include "reference.hpp"
 #include "service.hpp"
 #include <algorithm>
 #include <string_view>
@@ -8,10 +9,12 @@
 
 namespace cordis::typed {
 template <class T> struct Codec {
-  static Message encode(const T &value, Validation policy = Validation::Contract) {
+  static Message encode(const T &value,
+                        Validation policy = Validation::Contract) {
     return protobuf::encode_binary(value, policy);
   }
-  static T decode(const Message &value, Validation policy = Validation::Contract) {
+  static T decode(const Message &value,
+                  Validation policy = Validation::Contract) {
     return protobuf::decode_binary<T>(value, policy);
   }
 };
@@ -22,7 +25,9 @@ template <class T> void identity(const Value &shape) {
           T::descriptor()->full_name())
     throw std::runtime_error("protobuf codec/contract mismatch");
 }
-template <class T> T input(const Message &value, const Value &shape, Validation policy = Validation::Contract) {
+template <class T>
+T input(const Message &value, const Value &shape,
+        Validation policy = Validation::Contract) {
   try {
     identity<T>(shape);
     return Codec<T>::decode(value, policy);
@@ -30,11 +35,15 @@ template <class T> T input(const Message &value, const Value &shape, Validation 
     throw Refusal("invalid_argument", error.what());
   }
 }
-template <class T> T result(const Message &value, const Value &shape, Validation policy = Validation::Contract) {
+template <class T>
+T result(const Message &value, const Value &shape,
+         Validation policy = Validation::Contract) {
   identity<T>(shape);
   return Codec<T>::decode(value, policy);
 }
-template <class T> Message argument(T value, const Value &shape, Validation policy = Validation::Contract) {
+template <class T>
+Message argument(T value, const Value &shape,
+                 Validation policy = Validation::Contract) {
   try {
     identity<T>(shape);
     auto encoded = Codec<T>::encode(std::move(value), policy);
@@ -43,7 +52,9 @@ template <class T> Message argument(T value, const Value &shape, Validation poli
     throw Refusal("invalid_argument", error.what());
   }
 }
-template <class T> Message output(T value, const Value &shape, Validation policy = Validation::Contract) {
+template <class T>
+Message output(T value, const Value &shape,
+               Validation policy = Validation::Contract) {
   identity<T>(shape);
   auto encoded = Codec<T>::encode(std::move(value), policy);
   return encoded;

@@ -1,5 +1,5 @@
 export type Value = null | boolean | number | string | Value[] | { [key: string]: Value };
-export const MAX_MESSAGE = 1024 * 1024;
+export const DEFAULT_FRAME_CAPACITY = 1024 * 1024;
 export function validate(value: Value, depth = 0): void {
   if (depth > 96) throw new Error('value nesting too deep');
   if (!['object', 'string', 'boolean', 'number'].includes(typeof value))

@@ -12,6 +12,7 @@ cordis-contract.workspace = true
 cordis-kernel.workspace = true
 tokio.workspace = true
 futures-util.workspace = true
+getrandom = "0.4"
 
 [dev-dependencies]
 loom = "=0.7.2"

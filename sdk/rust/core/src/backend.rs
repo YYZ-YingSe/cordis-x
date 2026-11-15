@@ -63,6 +63,20 @@ impl Reply {
 /// Operations contain semantic arguments and real callbacks, never command
 /// strings, callback IDs, Session envelopes or serialized payloads.
 pub enum Operation {
+    ReferenceExport {
+        descriptor: crate::Descriptor,
+        object: Rc<dyn crate::ResourceObject>,
+    },
+    ReferenceInvoke {
+        key: String,
+        digest: String,
+        descriptor: crate::Descriptor,
+        method: String,
+        args: Message,
+    },
+    ReferenceDispose {
+        key: String,
+    },
     Info,
     Metadata {
         name: String,
@@ -191,6 +205,15 @@ impl Operation {
             })
         }
         match &mut self {
+            Self::ReferenceExport { descriptor, .. } => {
+                *descriptor = descriptor.clone().with_validation(policy)
+            }
+            Self::ReferenceInvoke {
+                descriptor, args, ..
+            } => {
+                *descriptor = descriptor.clone().with_validation(policy);
+                *args = args.clone().with_validation(policy);
+            }
             Self::Invoke { args, result, .. }
             | Self::ResourceInvoke { args, result, .. }
             | Self::Next { args, result, .. } => {

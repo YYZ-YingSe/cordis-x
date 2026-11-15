@@ -184,7 +184,7 @@ impl GuestInstance for CalculatorInstance {
                     .check(&signature.result)
                     .map_err(cordis_sdk_core::typed::violation)?;
                 output
-                    .encode(cordis_component::MAX_BYTES)
+                    .encode(None)
                     .map(Payload::message)
                     .map_err(cordis_sdk_core::typed::violation)
             }))
@@ -275,7 +275,7 @@ impl GuestLease for Counter {
                     .check(&signature.result)
                     .map_err(cordis_sdk_core::typed::violation)?;
                 value
-                    .encode(cordis_component::MAX_BYTES)
+                    .encode(None)
                     .map(Payload::message)
                     .map_err(cordis_sdk_core::typed::violation)
             })

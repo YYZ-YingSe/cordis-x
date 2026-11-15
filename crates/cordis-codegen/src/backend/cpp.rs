@@ -40,6 +40,25 @@ fn ty(s: &Shape) -> String {
     s.cpp.clone()
 }
 
+fn call_type(s: &Shape) -> String {
+    s.reference
+        .as_ref()
+        .map(|p| format!("{p}Client"))
+        .unwrap_or_else(|| ty(s))
+}
+fn from_wire(s: &Shape, v: &str) -> String {
+    s.reference
+        .as_ref()
+        .map(|p| format!("{p}Client::from_reference({v})"))
+        .unwrap_or_else(|| v.into())
+}
+fn to_wire(s: &Shape, v: &str) -> String {
+    if s.reference.is_some() {
+        format!("({v}).reference()")
+    } else {
+        v.into()
+    }
+}
 fn error_type(w: &mut Writer, prefix: &str, errors: &std::collections::BTreeSet<String>) {
     if errors.is_empty() {
         return;
@@ -75,41 +94,55 @@ fn error_type(w: &mut Writer, prefix: &str, errors: &std::collections::BTreeSet<
 fn signature(w: &mut Writer, o: &Operation) {
     w.line(format!(
         "virtual cordis::Async<{}> {}(cordis::Context ctx, {}{} args) = 0;",
-        ty(&o.result),
+        call_type(&o.result),
         o.name,
         if o.wire.is_none() {
             "std::string method, "
         } else {
             ""
         },
-        ty(&o.args)
+        call_type(&o.args)
     ));
 }
 fn operation_descriptor(w: &mut Writer, o: &Operation) {
     w.line(format!("inline const cordis::Value& {}Signature() {{ static const auto value = {}; return value; }}",o.prefix,value(&o.signature)));
     error_type(w, &o.prefix, &o.signature.errors);
 }
-fn client_method(w: &mut Writer, o: &Operation, resource: bool) {
+fn client_method(w: &mut Writer, o: &Operation, resource: bool, owner: Option<&str>) {
+    let name = owner
+        .map(|p| format!("{p}Client::{}", o.name))
+        .unwrap_or_else(|| o.name.clone());
     w.open(format!(
-        "cordis::Async<{}> {}(cordis::Context ctx, {}{} args) const {{",
-        ty(&o.result),
-        o.name,
+        "{}cordis::Async<{}> {name}(cordis::Context ctx, {}{} args) const {{",
+        if owner.is_some() { "inline " } else { "" },
+        call_type(&o.result),
         if o.wire.is_none() {
             "std::string method, "
         } else {
             ""
         },
-        ty(&o.args)
+        call_type(&o.args)
     ));
-    let method = o
-        .wire
-        .as_deref()
-        .map(text)
-        .unwrap_or("std::move(method)".into());
+    let method = o.wire.as_deref().map(text).unwrap_or("method".into());
     let p = &o.prefix;
-    w.line(format!("return cordis::typed::{}<{}, {}>({}, {}, std::move(args), {p}Signature().at(\"args\"), {p}Signature().at(\"result\"), {p}Signature().at(\"errors\"));",
-        if resource{"resource_call"}else{"invoke"},ty(&o.args),ty(&o.result),
-        if resource{"handle_, std::move(ctx)"}else{"std::move(ctx), dependency_"},method));
+    let capture = if resource {
+        "handle = handle_"
+    } else {
+        "dependency = dependency_"
+    };
+    w.line(format!("return cordis::detail::invoke_owned([{capture}](cordis::Context ctx, std::string method, {} args) -> cordis::Async<{}> {{",call_type(&o.args),call_type(&o.result)));
+    w.line(format!("auto encoded = cordis::typed::argument({}, {p}Signature().at(\"args\"), ctx.validation());",to_wire(&o.args,"std::move(args)")));
+    let call = if resource {
+        "handle.invoke(ctx, method, std::move(encoded))"
+    } else {
+        "ctx.invoke(dependency, method, std::move(encoded))"
+    };
+    w.line(format!("auto value = co_await cordis::typed::checked({p}Signature().at(\"errors\"), [&] {{ return {call}; }});"));
+    w.line(format!("auto decoded = cordis::typed::result<{}>(value, {p}Signature().at(\"result\"), ctx.validation());",ty(&o.result)));
+    w.line(format!(
+        "co_return {}; }}, std::move(ctx), {method}, std::move(args));",
+        from_wire(&o.result, "std::move(decoded)")
+    ));
     w.close("}");
 }
 fn dispatch(w: &mut Writer, methods: &[Operation], prefix: &str) {
@@ -129,9 +162,10 @@ fn dispatch(w: &mut Writer, methods: &[Operation], prefix: &str) {
             "auto decoded = cordis::typed::input<{}>(args, {p}Signature().at(\"args\"), validation);",
             ty(&o.args)
         ));
-        w.line(format!("auto result = co_await cordis::typed::checked({p}Signature().at(\"errors\"), [&] {{ return server->{}(std::move(ctx), {}std::move(decoded)); }});",o.name,if o.wire.is_none(){"std::move(method), "}else{""}));
+        w.line(format!("auto result = co_await cordis::typed::checked({p}Signature().at(\"errors\"), [&] {{ return server->{}(std::move(ctx), {}{}); }});",o.name,if o.wire.is_none(){"std::move(method), "}else{""},from_wire(&o.args,"std::move(decoded)")));
         w.line(format!(
-            "co_return cordis::typed::output(std::move(result), {p}Signature().at(\"result\"), validation);"
+            "co_return cordis::typed::output({}, {p}Signature().at(\"result\"), validation);",
+            to_wire(&o.result, "std::move(result)")
         ));
         w.close("}");
     }
@@ -144,6 +178,63 @@ fn dispatch(w: &mut Writer, methods: &[Operation], prefix: &str) {
     }
     w.close("}");
     w.line("cordis::Async<cordis::Message> invoke(cordis::Context ctx, std::string method, cordis::Message args) override { return invoke_impl(server_, std::move(ctx), std::move(method), std::move(args)); }");
+}
+// Declare all reference clients before emitting bodies: interfaces may return
+// one another, including recursive object graphs, without declaration-order rules.
+fn object_client(w: &mut Writer, object: &super::plan::ObjectInterface) {
+    let p = &object.prefix;
+    w.open(format!("class {p}Client {{"));
+    w.line("cordis::InterfaceRef handle_;");
+    w.line("public:");
+    w.line(format!(
+        "explicit {p}Client(cordis::InterfaceRef handle) : handle_(std::move(handle)) {{}}"
+    ));
+    w.line(format!("static {p}Client from_reference({} value) {{ return {p}Client(cordis::InterfaceRef(value.key(), {})); }}",ty(&object.reference),text(&object.descriptor.digest())));
+    w.line(format!(
+        "{} reference() const {{ {} value; value.set_key(handle_.key()); return value; }}",
+        ty(&object.reference),
+        ty(&object.reference)
+    ));
+    w.line(format!("static cordis::Async<{p}Client> export_object(cordis::Context ctx, std::shared_ptr<{p}Server> object);"));
+    for o in &object.methods {
+        w.line(format!(
+            "cordis::Async<{}> {}(cordis::Context ctx, {} args) const;",
+            call_type(&o.result),
+            o.name,
+            call_type(&o.args)
+        ));
+    }
+    w.line("cordis::Async<void> dispose(cordis::Context ctx) const { return handle_.dispose(std::move(ctx)); }");
+    w.close("};");
+}
+fn object_interface(w: &mut Writer, object: &super::plan::ObjectInterface) {
+    let p = &object.prefix;
+    for o in &object.methods {
+        operation_descriptor(w, o);
+    }
+    w.open(format!("struct {p}Server {{"));
+    w.line(format!("virtual ~{p}Server() = default;"));
+    for o in &object.methods {
+        signature(w, o);
+    }
+    w.line("virtual cordis::Async<void> close(cordis::Context ctx) = 0;");
+    w.close("};");
+    w.open(format!(
+        "class {p}Object final : public cordis::Resource {{"
+    ));
+    w.line(format!("std::shared_ptr<{p}Server> server_;"));
+    w.line("public:");
+    w.line("bool typed_dispatch() const override { return true; }");
+    w.line(format!(
+        "explicit {p}Object(std::shared_ptr<{p}Server> object) : server_(std::move(object)) {{}}"
+    ));
+    dispatch(w, &object.methods, p);
+    w.line("cordis::Async<void> close(cordis::Context ctx) override { return cordis::typed::close(server_, std::move(ctx)); }");
+    w.close("};");
+    w.line(format!("inline cordis::Async<{p}Client> {p}Client::export_object(cordis::Context ctx, std::shared_ptr<{p}Server> object) {{ co_return {p}Client(co_await cordis::InterfaceRef::export_object(std::move(ctx), {}, {}, std::make_shared<{p}Object>(std::move(object)))); }}",value(&cordis_contract::portable::encode(&object.descriptor)),text(&object.descriptor.digest())));
+    for o in &object.methods {
+        client_method(w, o, true, Some(p));
+    }
 }
 fn service(w: &mut Writer, module: &Module, s: &Service) {
     let p = &s.prefix;
@@ -179,7 +270,7 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
             "explicit {rp}Client(cordis::ResourceHandle handle) : handle_(std::move(handle)) {{}}"
         ));
         for o in &r.methods {
-            client_method(w, o, true);
+            client_method(w, o, true, None);
         }
         w.line("cordis::Async<void> dispose(cordis::Context ctx) const { return handle_.dispose(std::move(ctx)); }");
         w.close("};");
@@ -240,7 +331,7 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
         value(&cordis_contract::portable::encode(&model.descriptor))
     ));
     for o in &s.methods {
-        client_method(w, o, false);
+        client_method(w, o, false, None);
     }
     for r in &s.resources {
         let rp = &r.prefix;
@@ -370,6 +461,18 @@ impl Backend for Cpp {
             ));
         }
         w.open(format!("namespace {ns} {{"));
+        for object in &plan.references {
+            w.line(format!(
+                "class {}Client; struct {}Server;",
+                object.prefix, object.prefix
+            ));
+        }
+        for object in &plan.references {
+            object_client(&mut w, object);
+        }
+        for object in &plan.references {
+            object_interface(&mut w, object);
+        }
         for s in &plan.services {
             service(&mut w, module, s);
         }

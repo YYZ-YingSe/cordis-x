@@ -171,14 +171,9 @@ impl Module {
         {
             return Err(invalid());
         }
-        let mut budget = Budget::new();
+
         // SAFETY: module contract strings are readable for their advertised length.
-        let (name, revision) = unsafe {
-            (
-                read_text(api.name, &mut budget)?,
-                read_text(api.revision, &mut budget)?,
-            )
-        };
+        let (name, revision) = unsafe { (read_text(api.name)?, read_text(api.revision)?) };
         if name.is_empty() || revision.is_empty() {
             return Err(invalid());
         }
@@ -244,9 +239,6 @@ impl Module {
         args: &Payload,
         validation: Validation,
     ) -> Result<Reply> {
-        if method.len() > cordis_wire::MAX_MESSAGE {
-            return Err(Error::InvalidInput("method too long".into()));
-        }
         let receive = {
             let mut buffer = Input::default();
             let value = buffer.build(args)?;
@@ -365,23 +357,18 @@ fn finish(
 ) -> Result<Reply> {
     let guard = Output { raw, release };
     let raw = &guard.raw;
-    let mut budget = Budget::new();
+
     if raw.reserved != 0 {
         return Err(invalid_value());
     }
     // SAFETY: borrowed output buffers remain readable until the release hook.
-    let (code, message) = unsafe {
-        (
-            read_text(raw.code, &mut budget)?,
-            read_text(raw.message, &mut budget)?,
-        )
-    };
+    let (code, message) = unsafe { (read_text(raw.code)?, read_text(raw.message)?) };
     match raw.status {
         0 if code.is_empty() && message.is_empty() => {
             if acquisition != (raw.handle != 0) {
                 return Err(invalid_value());
             }
-            let value = unsafe { read_payload(&raw.value, &mut budget, validation)? };
+            let value = unsafe { read_payload(&raw.value, validation)? };
             Ok(Reply {
                 value,
                 handle: raw.handle,
@@ -423,16 +410,6 @@ impl Input {
 fn invalid_value() -> Error {
     Error::Unknown("invalid ABI result".into())
 }
-struct Budget(usize);
-impl Budget {
-    fn new() -> Self {
-        Self(cordis_wire::MAX_MESSAGE)
-    }
-    fn take(&mut self, count: usize) -> Result<()> {
-        self.0 = self.0.checked_sub(count).ok_or_else(invalid_value)?;
-        Ok(())
-    }
-}
 unsafe fn read_slice<'a, T>(data: *const T, len: usize) -> Result<&'a [T]> {
     if len == 0 {
         return Ok(&[]);
@@ -447,23 +424,26 @@ unsafe fn read_slice<'a, T>(data: *const T, len: usize) -> Result<&'a [T]> {
     // of this size for the result lifetime; bounds checks cannot prove provenance.
     Ok(unsafe { slice::from_raw_parts(data, len) })
 }
-unsafe fn read_text(raw: Slice, budget: &mut Budget) -> Result<String> {
-    budget.take(raw.len)?;
+unsafe fn read_text(raw: Slice) -> Result<String> {
     // SAFETY: delegated readable result slice contract.
     let bytes = unsafe { read_slice(raw.data, raw.len)? };
-    str::from_utf8(bytes)
-        .map(str::to_owned)
-        .map_err(|_| invalid_value())
+    let text = str::from_utf8(bytes).map_err(|_| invalid_value())?;
+    let mut owned = String::new();
+    owned
+        .try_reserve_exact(text.len())
+        .map_err(|_| invalid_value())?;
+    owned.push_str(text);
+    Ok(owned)
 }
-unsafe fn read_payload(
-    raw: &RawBuffer,
-    budget: &mut Budget,
-    validation: Validation,
-) -> Result<Payload> {
-    budget.take(raw.len)?;
+unsafe fn read_payload(raw: &RawBuffer, validation: Validation) -> Result<Payload> {
     // SAFETY: copy before releasing foreign storage. Parsed bytes share our owner.
-    let bytes = Bytes::copy_from_slice(unsafe { read_slice(raw.data, raw.len)? });
-    Payload::decode_with(bytes, validation).map_err(|e| Error::Unknown(e.to_string()))
+    let borrowed = unsafe { read_slice(raw.data, raw.len)? };
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(borrowed.len())
+        .map_err(|_| invalid_value())?;
+    bytes.extend_from_slice(borrowed);
+    Payload::decode_with(bytes.into(), validation).map_err(|e| Error::Unknown(e.to_string()))
 }
 pub(crate) fn validate(value: &Value) -> Result<()> {
     cordis_wire::validate(value, 0).map_err(|e| Error::InvalidInput(e.to_string()))

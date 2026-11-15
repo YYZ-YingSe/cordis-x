@@ -18,7 +18,7 @@ async fn declarative_loader_reconfigures_one_binary_across_endpoints() {
             let trace = trace.clone();
             move |config| {
                 let mut spec = ProcessSpec::new(&executable);
-                spec.timeout = Duration::from_secs(5);
+                spec.initialization_timeout = Duration::from_secs(5);
                 spec.args = vec![
                     "--test-hooks".into(),
                     "--trace".into(),

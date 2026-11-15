@@ -100,6 +100,68 @@ impl Process {
     }
     async fn execute(&self, operation: Operation) -> Result<Reply> {
         let (command, mut args) = match operation {
+            Operation::ReferenceExport { descriptor, object } => {
+                let definition = descriptor.clone();
+                let callback: WireCallback = Rc::new(move |ctx, payload| {
+                    let object = object.clone();
+                    let definition = definition.clone();
+                    Box::pin(async move {
+                        if payload.control["close"] == true {
+                            object.close(ctx).await?;
+                            return Ok(Value::Null.into());
+                        }
+                        let method = text(&payload.control, "method")?.to_owned();
+                        let signature = cordis_sdk_core::contract::method(
+                            &definition.interface().methods,
+                            &method,
+                        )
+                        .map_err(unknown)?;
+                        let args = cordis_sdk_core::Message::from_bytes(
+                            signature.args.clone(),
+                            payload.one().map_err(unknown)?,
+                        )
+                        .map_err(unknown)?;
+                        if !object.typed_dispatch() {
+                            args.validate(ctx.validation()).map_err(unknown)?;
+                        }
+                        let result = object.invoke(ctx, method, args).await?;
+                        result.check(&signature.result).map_err(unknown)?;
+                        Ok(Payload::message(result.encode(None).map_err(unknown)?))
+                    })
+                });
+                let id = self.registry.insert_payload('i', callback)?;
+                let result = self.channel.request("reference_export", json!({"context":self.token,"callback":id,"interface":cordis_sdk_core::contract::encode(&descriptor)})).await;
+                if matches!(result, Err(Failure::Rejected(_) | Failure::Refused(_))) {
+                    self.registry.remove(&id);
+                }
+                return result.map(Reply::Value);
+            }
+            Operation::ReferenceInvoke {
+                key,
+                digest,
+                descriptor,
+                method,
+                args,
+            } => {
+                let signature =
+                    cordis_sdk_core::contract::method(&descriptor.interface().methods, &method)
+                        .map_err(unknown)?;
+                let payload = Payload::with_message(
+                    json!({"context":self.token,"reference":key,"digest":digest,"method":method}),
+                    args.encode(None).map_err(unknown)?,
+                );
+                let value = self
+                    .channel
+                    .request_payload("reference_invoke", payload)
+                    .await?;
+                return cordis_sdk_core::Message::from_bytes(
+                    signature.result.clone(),
+                    value.one().map_err(unknown)?,
+                )
+                .map(Reply::Message)
+                .map_err(unknown);
+            }
+            Operation::ReferenceDispose { key } => ("reference_dispose", json!({"reference":key})),
             Operation::Acquire {
                 dependency,
                 kind,
@@ -110,7 +172,7 @@ impl Process {
                     return Err(refused("undeclared_dependency", dependency));
                 }
                 let args = args
-                    .encode(cordis_wire::MAX_MESSAGE)
+                    .encode(None)
                     .map_err(|e| refused("invalid_argument", e))?;
                 let id = self.registry.id('r')?;
                 let reply = self.channel.request_payload("dependency_resource_acquire", Payload::with_message(json!({"context":self.token,"dependency":dependency,"kind":kind,"resource":id}), args)).await?.control_only().map_err(unknown)?;
@@ -131,7 +193,7 @@ impl Process {
                 payload["context"] = json!(self.token);
                 payload["method"] = json!(method);
                 let bytes = args
-                    .encode(cordis_wire::MAX_MESSAGE)
+                    .encode(None)
                     .map_err(|e| refused("invalid_argument", e))?;
                 let command = if self.cleanup {
                     "cleanup_resource_call"
@@ -177,7 +239,7 @@ impl Process {
                     return Err(refused("undeclared_dependency", dependency));
                 }
                 let args = args
-                    .encode(cordis_wire::MAX_MESSAGE)
+                    .encode(None)
                     .map_err(|e| refused("invalid_argument", e))?;
                 let command = if self.cleanup {
                     "cleanup_call"
@@ -337,7 +399,7 @@ impl Process {
                                 value.check(&signature.result).map_err(unknown)?;
                                 Payload::with_message(
                                     json!({"kind":"break"}),
-                                    value.encode(cordis_wire::MAX_MESSAGE).map_err(unknown)?,
+                                    value.encode(None).map_err(unknown)?,
                                 )
                             }
                         })
@@ -365,7 +427,7 @@ impl Process {
                 let id = self.registry.id('d')?;
                 let input = Payload::with_message(
                     json!({"context":self.token,"event":event,"mode":if serial {"serial"}else{"parallel"},"dispatch":id}),
-                    args.encode(cordis_wire::MAX_MESSAGE)
+                    args.encode(None)
                         .map_err(|e| refused("invalid_argument", e))?,
                 );
                 let reply = self
@@ -444,9 +506,7 @@ impl Process {
                             e.check_declared(&signature.errors, "middleware errors")
                         })?;
                         value.check(&signature.result).map_err(unknown)?;
-                        Ok(Payload::message(
-                            value.encode(cordis_wire::MAX_MESSAGE).map_err(unknown)?,
-                        ))
+                        Ok(Payload::message(value.encode(None).map_err(unknown)?))
                     })
                 });
                 return self
@@ -482,15 +542,13 @@ impl Process {
                             .await
                             .map_err(|e| e.check_declared(&shape.errors, "terminal errors"))?;
                         value.check(&shape.result).map_err(unknown)?;
-                        Ok(Payload::message(
-                            value.encode(cordis_wire::MAX_MESSAGE).map_err(unknown)?,
-                        ))
+                        Ok(Payload::message(value.encode(None).map_err(unknown)?))
                     })
                 });
                 let id = self.registry.insert_payload('q', callback)?;
                 let input = Payload::with_message(
                     json!({"context":self.token,"middleware":name,"run":id}),
-                    args.encode(cordis_wire::MAX_MESSAGE)
+                    args.encode(None)
                         .map_err(|e| refused("invalid_argument", e))?,
                 );
                 let result = self.channel.request_payload("middleware_run", input).await;
@@ -509,7 +567,7 @@ impl Process {
                 control["context"] = json!(self.token);
                 let input = Payload::with_message(
                     control,
-                    args.encode(cordis_wire::MAX_MESSAGE)
+                    args.encode(None)
                         .map_err(|e| refused("invalid_argument", e))?,
                 );
                 let value = self
@@ -522,7 +580,7 @@ impl Process {
             }
             Operation::Install { factory, config } => {
                 let config = config
-                    .encode(cordis_wire::MAX_MESSAGE)
+                    .encode(None)
                     .map_err(|e| refused("invalid_argument", e))?;
                 if !self.bindings.factories.contains(&factory) {
                     return Err(refused("undeclared_factory", factory));
@@ -549,7 +607,7 @@ impl Process {
             Operation::ChildDispose { child } => ("child_dispose", self.args(&child, "child")?),
             Operation::Provide { service, value } => {
                 let value = value
-                    .encode(cordis_wire::MAX_MESSAGE)
+                    .encode(None)
                     .map_err(|e| refused("invalid_argument", e))?;
                 if !self.bindings.provisions.contains_key(&service) {
                     return Err(refused("undeclared_provision", service));
@@ -615,6 +673,7 @@ impl Backend for Process {
                 && matches!(
                     operation,
                     Operation::Defer { .. }
+                        | Operation::ReferenceExport { .. }
                         | Operation::Acquire { .. }
                         | Operation::Effect { .. }
                         | Operation::Scope { .. }

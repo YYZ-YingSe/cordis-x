@@ -10,7 +10,7 @@ pub mod runtime;
 pub mod service;
 
 pub use context::{Context, ContractId, InterceptConfig, Intercepts, RealmId, View};
-pub use cordis_runtime::{BoxFuture, Error, Result};
+pub use cordis_runtime::{BoxFuture, Error, Reference, Result};
 pub use effects::{
     EffectCompletion, EffectHandle, EffectSequence, EffectSnapshot, EffectStatus, EffectStep,
     Inverse, ScopeHandle, StepCompletion, TaskHandle, WeakEffectHandle, WeakEffectSequence,

@@ -54,6 +54,12 @@ impl<P: Plugin> Host<P> {
             .ok_or_else(|| refused("invalid_argument", "max_inflight must be in 1..=128"))?
             as usize;
         self.max_inflight.set(max_inflight);
+        let frame_capacity = args["frame_capacity"]
+            .as_u64()
+            .filter(|capacity| (1..=i32::MAX as u64).contains(capacity))
+            .ok_or_else(|| refused("invalid_argument", "invalid frame_capacity"))?
+            as usize;
+        self.channel.frame_capacity.set(frame_capacity);
         let validation = serde_json::from_value(args["validation"].clone())
             .map_err(|e| refused("invalid_argument", format!("validation: {e}")))?;
         let descriptor = &self.descriptor;
@@ -125,7 +131,7 @@ impl<P: Plugin> Host<P> {
         Ok(
             json!({"contract":args["contract"],"interface":cordis_sdk_core::contract::encode(descriptor),"dependency_interfaces":dependency_interfaces,"dependencies":*self.dependencies,"events":args["events"],"middleware":args["middleware"],"composition":composition,
             "http":self.url,"capabilities":{"multiplex":true,"reverse_calls":true,"effects":true,"effect_sequences":true,"scopes":true,
-            "tasks":true,"events":true,"middleware":true,"composition":true,"metadata":true,"streams":false,"resources":true,"dependency_resources":self.channel.dependency_resources.get(),"max_inflight":max_inflight,"max_message":cordis_wire::MAX_MESSAGE}}),
+            "tasks":true,"events":true,"middleware":true,"composition":true,"metadata":true,"streams":false,"resources":true,"dependency_resources":self.channel.dependency_resources.get(),"max_inflight":max_inflight}}),
         )
     }
     async fn execute(&self, request: &Request) -> Result<Payload> {
@@ -134,6 +140,7 @@ impl<P: Plugin> Host<P> {
             "call"
                 | "resource_acquire"
                 | "resource_call"
+                | "reference_call"
                 | "event_call"
                 | "middleware_call"
                 | "middleware_terminal"
@@ -176,6 +183,7 @@ impl<P: Plugin> Host<P> {
             command,
             "deactivate"
                 | "resource_release"
+                | "reference_close"
                 | "effect_release"
                 | "sequence_undo"
                 | "sequence_release"
@@ -300,9 +308,7 @@ impl<P: Plugin> Host<P> {
                         .await
                         .map_err(|e| e.check_declared(&signature.errors, "resource errors"))?;
                     value.check(&signature.result).map_err(unknown)?;
-                    return Ok(Payload::message(
-                        value.encode(cordis_wire::MAX_MESSAGE).map_err(unknown)?,
-                    ));
+                    return Ok(Payload::message(value.encode(None).map_err(unknown)?));
                 }
                 "resource_release" => {
                     self.resources.get(args)?.close(ctx, frame.clone()).await?;
@@ -349,9 +355,20 @@ impl<P: Plugin> Host<P> {
                         .await
                         .map_err(|e| e.check_declared(&signature.errors, "method errors"))?;
                     value.check(&signature.result).map_err(unknown)?;
-                    return Ok(Payload::message(
-                        value.encode(cordis_wire::MAX_MESSAGE).map_err(unknown)?,
-                    ));
+                    return Ok(Payload::message(value.encode(None).map_err(unknown)?));
+                }
+                "reference_call" | "reference_close" => {
+                    let closing = command == "reference_close";
+                    let id = text(args, "callback")?;
+                    let result = self
+                        .registry
+                        .get(id)?
+                        .call_payload(ctx, request.payload.clone(), closing, closing)
+                        .await?;
+                    if closing {
+                        self.registry.release(id)?;
+                    }
+                    return Ok(result);
                 }
                 "effect_release" => {
                     self.registry
@@ -433,7 +450,7 @@ impl<P: Plugin> Host<P> {
             "scope_call" => 3,
             "sequence_next" => 2,
             "effect_release" | "sequence_undo" | "sequence_release" | "event_release"
-            | "middleware_release" | "resource_release" => 1,
+            | "middleware_release" | "resource_release" | "reference_close" => 1,
             _ => 0,
         };
         let result = if self.lanes[lane].get()
@@ -537,7 +554,7 @@ pub async fn serve<P: Plugin>(options: Options) -> Result<()> {
     let mut input = tokio::io::BufReader::with_capacity(stdio::BUFFER_CAPACITY, tokio::io::stdin());
     let mut jobs = tokio::task::JoinSet::new();
     let result = loop {
-        let received = tokio::select! { biased; _=stopping.changed()=>{break stopping.borrow().clone().unwrap_or_else(||Err(unknown("host stopped")));}, value=stdio::read(&mut input, host.channel.carrier_validation())=>value };
+        let received = tokio::select! { biased; _=stopping.changed()=>{break stopping.borrow().clone().unwrap_or_else(||Err(unknown("host stopped")));}, value=stdio::read(&mut input, host.channel.carrier_validation(), host.channel.frame_capacity.get())=>value };
         let request = match received {
             Ok(Incoming::Request(request)) => request,
             Ok(Incoming::Response(response)) => {

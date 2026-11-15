@@ -18,7 +18,6 @@
 #undef GetMessage
 
 namespace cordis::protobuf {
-inline constexpr std::size_t max_bytes = 1024 * 1024;
 inline constexpr std::size_t max_nodes = 65536;
 inline constexpr std::size_t max_depth = 64;
 using Message = google::protobuf::Message;
@@ -65,7 +64,7 @@ class Plan {
   std::vector<Node> nodes_;
 
   void leaf(const Message &message, const Step &step, int index,
-            std::size_t depth, std::size_t &budget, std::size_t &bytes,
+            std::size_t depth, std::size_t &budget,
             Validation policy, bool decoded) const {
     const auto *r = message.GetReflection();
     const auto *f = step.field;
@@ -74,7 +73,7 @@ class Plan {
       visit(step.child,
             repeated ? r->GetRepeatedMessage(message, f, index)
                      : r->GetMessage(message, f),
-            depth, budget, bytes, policy, decoded);
+            depth, budget, policy, decoded);
       return;
     }
     take(depth, budget);
@@ -102,9 +101,6 @@ class Plan {
       const auto &text =
           repeated ? r->GetRepeatedStringReference(message, f, index, &scratch)
                    : r->GetStringReference(message, f, &scratch);
-      if (text.size() > bytes)
-        throw std::runtime_error("message byte limit exceeded");
-      bytes -= text.size();
       if (!decoded && step.text && !utf8_range::IsStructurallyValid(text))
         throw std::runtime_error("invalid Unicode string");
       break;
@@ -114,7 +110,7 @@ class Plan {
     }
   }
   void visit(std::size_t node, const Message &message, std::size_t depth,
-             std::size_t &budget, std::size_t &bytes, Validation policy,
+             std::size_t &budget, Validation policy,
              bool decoded) const {
     take(depth, budget);
     const auto *r = message.GetReflection();
@@ -173,9 +169,9 @@ class Plan {
       }
       if (step.repeated) {
         for (int j = 0; j < count; ++j)
-          leaf(message, step, j, depth + 1, budget, bytes, policy, decoded);
+          leaf(message, step, j, depth + 1, budget, policy, decoded);
       } else
-        leaf(message, step, -1, depth + 1, budget, bytes, policy, decoded);
+        leaf(message, step, -1, depth + 1, budget, policy, decoded);
     }
   }
 
@@ -238,8 +234,8 @@ public:
       return;
     if (message.GetDescriptor() != nodes_[0].descriptor)
       throw std::runtime_error("validation schema mismatch");
-    std::size_t budget = max_nodes, bytes = max_bytes;
-    visit(0, message, 0, budget, bytes, policy, decoded);
+    std::size_t budget = max_nodes;
+    visit(0, message, 0, budget, policy, decoded);
   }
 };
 

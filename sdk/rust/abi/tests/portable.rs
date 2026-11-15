@@ -7,6 +7,16 @@ use std::sync::{Arc, Mutex};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn portable_rust_cdylib_runs_reentrant_callbacks() {
+    for validation in [
+        cordis_sdk_core::Validation::Contract,
+        cordis_sdk_core::Validation::Checked,
+        cordis_sdk_core::Validation::Audit,
+    ] {
+        reentrant_callbacks(validation).await;
+    }
+}
+
+async fn reentrant_callbacks(validation: cordis_sdk_core::Validation) {
     let rt = Runtime::new();
     let logs = Arc::new(Mutex::new(Vec::<Value>::new()));
     let logger = Service::<Mutex<Vec<Value>>>::new("example.portable-log", "1");
@@ -26,6 +36,7 @@ async fn portable_rust_cdylib_runs_reentrant_callbacks() {
     .unwrap();
     let caps = Capabilities {
         bindings: cordis_host::HostBindings {
+            validation,
             dependencies: vec![Dependency::json(
                 &logger,
                 cordis_sdk_core::Descriptor::new(
@@ -111,6 +122,11 @@ async fn portable_rust_cdylib_runs_reentrant_callbacks() {
     for (method, args, expected) in [
         ("resource-support", json!({}), json!("unsupported_resource")),
         ("echo", json!({"text":"中文"}), json!({"text":"中文"})),
+        (
+            "echo",
+            json!({"text":"x".repeat(3 * 1024 * 1024)}),
+            json!({"text":"x".repeat(3 * 1024 * 1024)}),
+        ),
         ("count", json!({}), json!("1")),
         ("count", json!({}), json!("2")),
         ("save-context", json!({}), json!({})),

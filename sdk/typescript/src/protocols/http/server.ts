@@ -1,22 +1,27 @@
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { MAX_MESSAGE } from '../../core/value.ts';
 import { CONTENT_TYPE, decodeFrame, encodeFrame } from '../session/binary.ts';
 import type { Request, Response } from '../session/messages.ts';
 import type { Validation } from '../../core/validation.ts';
-export async function listen(enabled: boolean, state: { active(): boolean; validation(): Validation }, dispatch: (request: Request) => Promise<Response>) {
+export async function listen(enabled: boolean, state: { active(): boolean; validation(): Validation; capacity(): number }, dispatch: (request: Request) => Promise<Response>) {
   let url: string | null = null;
+  let inflight = 0;
   const server = createServer({ maxHeaderSize: 16384, requestTimeout: 5000 }, async (request, response) => {
+    if (inflight >= 2 * (128 + 16)) { request.destroy(); response.destroy(); return; }
+    inflight++;
+    let released = false, settled = false, closed = false;
+    const release = () => { if (!released && settled && closed) { released = true; inflight--; } };
+    response.once('close', () => { closed = true; release(); });
     try {
       if (!state.active() || request.method !== 'POST' || request.url !== '/cordis/call' ||
           request.headers['content-type'] !== CONTENT_TYPE || request.headers['transfer-encoding'])
         throw new Error('unsupported HTTP request');
       const length = request.headers['content-length'];
-      if (!length || !/^[0-9]{1,7}$/.test(length) || Number(length) > MAX_MESSAGE) throw new Error('invalid Content-Length');
+      if (!length || !/^[0-9]{1,10}$/.test(length) || Number(length) > state.capacity()) throw new Error('invalid Content-Length');
       const chunks: Buffer[] = []; let size = 0;
       for await (const chunk of request) {
         size += chunk.length;
-        if (size > MAX_MESSAGE) throw new Error('message too large');
+        if (size > state.capacity()) throw new Error('message too large');
         chunks.push(chunk);
       }
       if (size !== Number(length)) throw new Error('truncated body');
@@ -24,12 +29,13 @@ export async function listen(enabled: boolean, state: { active(): boolean; valid
       if (!('command' in frame) || !['call', 'resource_acquire', 'resource_call', 'resource_release'].includes(frame.command))
         throw new Error('command requires session endpoint');
       const result = await dispatch(frame);
-      const body = encodeFrame(result);
+      const body = encodeFrame(result, state.capacity());
       response.writeHead(result.outcome.kind === 'success' ? 200 : 400, {
         'content-type': CONTENT_TYPE, 'content-length': body.byteLength, 
       });
       response.end(body);
     } catch { request.destroy(); response.destroy(); }
+    finally { settled = true; release(); }
   });
   server.maxConnections = 2 * (128 + 16);
   if (enabled) {

@@ -19,6 +19,9 @@ import type {
 
 /** Authority for one callback. Keeping this object does not extend its lifetime. */
 export interface Context {
+  exportReference(descriptor: import('./contract.ts').Interface, object: import('./reference.ts').ReferenceObject): Promise<string>;
+  invokeReference(key: string, digest: string, method: string, args: Message): Promise<Message>;
+  disposeReference(key: string): Promise<void>;
   readonly validation: import('./validation.ts').Validation;
   acquire(dependency: string, kind: string, args: Message): Promise<ResourceHandle>;
   invoke(dependency: string, method: string, args: Message): Promise<Message>;

@@ -72,6 +72,7 @@ async fn scenario(endpoint: Endpoint) {
             Ok(Plugin::new("child", |_| async { Ok(()) }))
         }));
     spec.endpoint = endpoint;
+    spec.frame_capacity = 4 * 1024 * 1024;
     if matches!(endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());
     }
@@ -166,7 +167,7 @@ async fn scenario(endpoint: Endpoint) {
     );
     // Exercise the real stdio buffers across their capacity in both directions,
     // including reverse calls; the same scenario also covers HTTP management.
-    let large = json!({"text":"中文".repeat(32 * 1024)});
+    let large = json!({"text":"中文".repeat(512 * 1024)});
     let expected = large.clone();
     assert_eq!(
         handle

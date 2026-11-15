@@ -226,6 +226,7 @@ pub fn compile(
         _resources: resources,
         name: package.replace('.', "_"),
         services: BTreeMap::new(),
+        references: BTreeMap::new(),
         pool,
         descriptor,
         includes: dirs,
@@ -233,6 +234,83 @@ pub fn compile(
         rust_packages: BTreeMap::new(),
     };
     let mut identities = BTreeSet::new();
+    // Object interfaces use ordinary method descriptions but never enter the
+    // global service namespace. Their references are rooted in Runtime objects.
+    for service in module.pool.services() {
+        if !protobuf::flag(&service.options(), "cordis.schema.interface") {
+            continue;
+        }
+        if option(&service.options(), "cordis.schema.contract").is_some()
+            || protobuf::flag(&service.options(), "cordis.schema.resource")
+        {
+            return Err(Diagnostic::new(
+                service.full_name(),
+                "an interface is neither a named service nor an acquisition-only resource",
+            ));
+        }
+        let mut methods = BTreeMap::new();
+        for rpc in service.methods() {
+            if control(&module, &rpc)?.is_some()
+                || option(&rpc.options(), "cordis.schema.acquires").is_some()
+            {
+                return Err(Diagnostic::new(
+                    rpc.full_name(),
+                    "interface methods return data or interface references directly",
+                ));
+            }
+            if methods
+                .insert(wire_name(&rpc), method(&module, &rpc)?)
+                .is_some()
+            {
+                return Err(Diagnostic::new(
+                    rpc.full_name(),
+                    "duplicate interface method",
+                ));
+            }
+        }
+        let descriptor = Descriptor::new(Interface {
+            methods: Dispatch::Named(methods),
+            resources: Dispatch::Named(BTreeMap::new()),
+            controls: BTreeMap::new(),
+            capabilities: BTreeSet::new(),
+        })
+        .map_err(|e| Diagnostic::new(service.full_name(), e))?;
+        if module
+            .references
+            .insert(service.name().into(), descriptor)
+            .is_some()
+        {
+            return Err(Diagnostic::new(
+                service.full_name(),
+                "duplicate interface symbol",
+            ));
+        }
+    }
+    for message in module.pool.all_messages() {
+        if let Some(Value::String(target)) = option(&message.options(), "cordis.schema.reference") {
+            let service = module.pool.get_service_by_name(&target).ok_or_else(|| {
+                Diagnostic::new(message.full_name(), "unknown referenced interface")
+            })?;
+            if !protobuf::flag(&service.options(), "cordis.schema.interface") {
+                return Err(Diagnostic::new(
+                    message.full_name(),
+                    "reference target must be an interface",
+                ));
+            }
+            let fields: Vec<_> = message.fields().collect();
+            if fields.len() != 1
+                || fields[0].name() != "key"
+                || fields[0].number() != 1
+                || fields[0].kind() != prost_reflect::Kind::String
+                || fields[0].is_list()
+            {
+                return Err(Diagnostic::new(
+                    message.full_name(),
+                    "reference messages contain exactly string key = 1",
+                ));
+            }
+        }
+    }
     let mut dependencies = BTreeMap::new();
     let mut control_identities = BTreeMap::new();
     for service in module.pool.services() {
@@ -453,7 +531,7 @@ pub fn compile(
         }
         module.services.get_mut(&key).unwrap().dependencies = resolved;
     }
-    if module.services.is_empty() {
+    if module.services.is_empty() && module.references.is_empty() {
         return Err(Diagnostic::new(
             "services",
             "no Cordis contract declarations",

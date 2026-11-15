@@ -17,6 +17,33 @@ fn ty(s: &Shape) -> String {
     s.rust.clone()
 }
 
+/// Ordinary callable methods expose interface objects as clients. The protobuf
+/// message remains the transport representation, including when nested in DTOs.
+fn call_type(s: &Shape) -> String {
+    s.reference
+        .as_ref()
+        .map(|name| format!("{name}Client"))
+        .unwrap_or_else(|| ty(s))
+}
+fn from_wire(s: &Shape, value: &str) -> String {
+    s.reference
+        .as_ref()
+        .map(|name| format!("{name}Client::from_reference({value})"))
+        .unwrap_or_else(|| value.into())
+}
+fn to_wire(s: &Shape, value: &str) -> String {
+    if s.reference.is_some() {
+        format!("({value}).reference()")
+    } else {
+        value.into()
+    }
+}
+enum CallTarget {
+    Service,
+    Resource,
+    Reference,
+}
+
 fn shape(t: &cordis_contract::MessageContract) -> String {
     format!(
         "sdk::typed::shape({})",
@@ -71,11 +98,11 @@ fn provider_method(w: &mut Writer, o: &Operation) {
         } else {
             ""
         },
-        ty(&o.args),
-        ty(&o.result)
+        call_type(&o.args),
+        call_type(&o.result)
     ));
 }
-fn client_method(w: &mut Writer, o: &Operation, resource: bool) {
+fn client_method(w: &mut Writer, o: &Operation, target: CallTarget) {
     w.open(format!(
         "pub async fn {}(&self, ctx: &sdk::Context, {}args: {}) -> sdk::Result<{}> {{",
         o.name,
@@ -84,25 +111,27 @@ fn client_method(w: &mut Writer, o: &Operation, resource: bool) {
         } else {
             ""
         },
-        ty(&o.args),
-        ty(&o.result)
+        call_type(&o.args),
+        call_type(&o.result)
     ));
     let sig = sig(&o.prefix);
     w.line(format!(
-        "let args = sdk::message::argument(args, &{sig}.args.with_validation(ctx.validation()))?;"
+        "let args = sdk::message::argument({}, &{sig}.args.with_validation(ctx.validation()))?;",
+        to_wire(&o.args, "args")
     ));
     let method = o.wire.as_deref().map(lit).unwrap_or("method".into());
-    let call = if resource {
-        format!("self.handle.invoke(ctx, {method}, args, &{sig}.result)")
-    } else {
-        format!("ctx.invoke(&self.dependency, {method}, args, &{sig}.result)")
+    let call = match target {
+        CallTarget::Resource => format!("self.handle.invoke(ctx, {method}, args, &{sig}.result)"),
+        CallTarget::Reference => format!("self.handle.invoke(ctx, {method}, args)"),
+        CallTarget::Service => {
+            format!("ctx.invoke(&self.dependency, {method}, args, &{sig}.result)")
+        }
     };
     w.line(format!(
         "let value = {call}.await.map_err(|e| e.check_declared(&{sig}.errors, \"result\"))?;"
     ));
-    w.line(format!(
-        "sdk::message::result(value, &{sig}.result.with_validation(ctx.validation()))"
-    ));
+    w.line(format!("let value = sdk::message::result::<{}>(value, &{sig}.result.with_validation(ctx.validation()))?;", ty(&o.result)));
+    w.line(format!("Ok({})", from_wire(&o.result, "value")));
     w.close("}");
 }
 fn dispatch(w: &mut Writer, methods: &[Operation]) {
@@ -122,13 +151,68 @@ fn dispatch_body(w: &mut Writer, methods: &[Operation]) {
             w.open("{");
         }
         w.line("let validation = ctx.validation();");
-        w.line(format!("{}sdk::message::output(self.0.clone().{}(ctx, {}sdk::message::input::<{}>(args, &{sig}.args.with_validation(validation))?).await.map_err(|e| e.check_declared(&{sig}.errors, \"result\"))?, &{sig}.result.with_validation(validation)){}",if o.wire.is_none(){""}else{"return "},o.name,
-            if o.wire.is_none(){"method, "}else{""},ty(&o.args),if o.wire.is_none(){""}else{";"}));
+        w.line(format!(
+            "let args = sdk::message::input::<{}>(args, &{sig}.args.with_validation(validation))?;",
+            ty(&o.args)
+        ));
+        w.line(format!("let value = self.0.clone().{}(ctx, {}{}).await.map_err(|e| e.check_declared(&{sig}.errors, \"result\"))?;",o.name,if o.wire.is_none(){"method, "}else{""},from_wire(&o.args,"args")));
+        w.line(format!(
+            "{}sdk::message::output({}, &{sig}.result.with_validation(validation)){}",
+            if o.wire.is_none() { "" } else { "return " },
+            to_wire(&o.result, "value"),
+            if o.wire.is_none() { "" } else { ";" }
+        ));
         w.close("}");
     }
     if !methods.iter().any(|o| o.wire.is_none()) {
         w.line("Err(sdk::refused(\"unknown_method\", method))");
     }
+}
+fn object_interface(w: &mut Writer, object: &super::plan::ObjectInterface) {
+    let p = &object.prefix;
+    for o in &object.methods {
+        signature_literal(
+            w,
+            &o.prefix,
+            "method",
+            serde_json::to_string(&o.signature).unwrap(),
+        );
+        error_type(w, &o.prefix, &o.signature.errors);
+    }
+    w.line("/// Implementation of a scope-owned callable object. Closing releases its effects.");
+    w.open(format!("pub trait {p}Server: 'static {{"));
+    for o in &object.methods {
+        provider_method(w, o);
+    }
+    w.line("fn close(self: Rc<Self>, ctx: sdk::Context) -> sdk::LocalFuture<()>;");
+    w.close("}");
+    w.line(format!("struct {p}Object(Rc<dyn {p}Server>);"));
+    w.open(format!("impl sdk::ResourceObject for {p}Object {{"));
+    w.line("fn typed_dispatch(&self) -> bool { true }");
+    w.open("fn invoke(self: Rc<Self>, ctx: sdk::Context, method: String, args: sdk::Message) -> sdk::message::FutureResult {");
+    dispatch(w, &object.methods);
+    w.close("}");
+    w.line("fn close(self: Rc<Self>, ctx: sdk::Context) -> sdk::LocalFuture<()> { self.0.clone().close(ctx) }");
+    w.close("}");
+    w.line(
+        "/// A transferable reference within one host lifetime. Clones refer to the same object.",
+    );
+    w.line(format!(
+        "#[derive(Clone)] pub struct {p}Client {{ handle: sdk::InterfaceRef }}"
+    ));
+    w.open(format!("impl {p}Client {{"));
+    w.line(format!("pub fn descriptor() -> sdk::Descriptor {{ static VALUE: std::sync::LazyLock<sdk::Descriptor> = std::sync::LazyLock::new(|| sdk::Descriptor::new(sdk::typed::interface({})).expect(\"generated interface\")); VALUE.clone() }}",lit(&cordis_contract::portable::encode(&object.descriptor).to_string())));
+    w.line(format!("pub fn from_reference(value: {}) -> Self {{ Self {{ handle: sdk::InterfaceRef::from_key(value.key, Self::descriptor()) }} }}",object.reference.rust));
+    w.line(format!(
+        "pub fn reference(&self) -> {} {{ {} {{ key: self.handle.key().into() }} }}",
+        object.reference.rust, object.reference.rust
+    ));
+    w.line(format!("pub async fn export(ctx: &sdk::Context, object: Rc<dyn {p}Server>) -> sdk::Result<Self> {{ Ok(Self {{ handle: sdk::InterfaceRef::export(ctx, Self::descriptor(), Rc::new({p}Object(object))).await? }}) }}"));
+    for o in &object.methods {
+        client_method(w, o, CallTarget::Reference);
+    }
+    w.line("pub async fn dispose(&self, ctx: &sdk::Context) -> sdk::Result<()> { self.handle.dispose(ctx).await }");
+    w.close("}");
 }
 fn service(w: &mut Writer, module: &Module, s: &Service) {
     let p = &s.prefix;
@@ -171,7 +255,7 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
         ));
         w.open(format!("impl {rp}Client {{"));
         for o in &r.methods {
-            client_method(w, o, true);
+            client_method(w, o, CallTarget::Resource);
         }
         w.line("pub async fn dispose(&self, ctx: &sdk::Context) -> sdk::Result<()> { self.handle.dispose(ctx).await }");
         w.close("}");
@@ -294,7 +378,7 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
         lit(&cordis_contract::portable::encode(&model.descriptor).to_string())
     ));
     for o in &s.methods {
-        client_method(w, o, false);
+        client_method(w, o, CallTarget::Service);
     }
     for r in &s.resources {
         let sig = sig(&r.prefix);
@@ -418,6 +502,9 @@ impl Backend for Rust {
             let constructor = shape(&module.shape(&m.name));
             w.line(format!("fn contract()->&'static sdk::MessageContract{{ static VALUE:std::sync::LazyLock<sdk::MessageContract>=std::sync::LazyLock::new(||{constructor}); &VALUE }}"));
             w.close("}");
+        }
+        for reference in &plan.references {
+            object_interface(&mut w, reference);
         }
         for s in &plan.services {
             service(&mut w, module, s);

@@ -388,6 +388,7 @@ dependencies = [
  "cordis-contract",
  "cordis-kernel",
  "futures-util",
+ "getrandom 0.4.3",
  "loom",
  "tokio",
 ]

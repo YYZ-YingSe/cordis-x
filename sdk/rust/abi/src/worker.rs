@@ -70,7 +70,7 @@ impl<P: Plugin> Instance<P> {
             }
             self.active.set(false);
         }
-        let cleanup = matches!(op, 3 | 6 | 7 | 9 | 10 | 16);
+        let cleanup = matches!(op, 3 | 6 | 7 | 9 | 10 | 16 | 18);
         let inflight = if cleanup {
             &self.cleanup_inflight
         } else {
@@ -93,7 +93,7 @@ impl<P: Plugin> Instance<P> {
         };
         let ctx = Context::from_backend(Rc::new(backend));
         let result = std::panic::AssertUnwindSafe(async {
-            if matches!(op, 2 | 4 | 5 | 13 | 14 | 15) {
+            if matches!(op, 2 | 4 | 5 | 13 | 14 | 15 | 17 | 18) {
                 return match op {
                     2 => {
                         let signature =
@@ -111,9 +111,7 @@ impl<P: Plugin> Instance<P> {
                             .await
                             .map_err(|e| e.check_declared(&signature.errors, "method result"))?;
                         output.check(&signature.result).map_err(unknown)?;
-                        Ok(Payload::message(
-                            output.encode(cordis_wire::MAX_MESSAGE).map_err(unknown)?,
-                        ))
+                        Ok(Payload::message(output.encode(None).map_err(unknown)?))
                     }
                     4 => {
                         let contract = self
@@ -151,6 +149,12 @@ impl<P: Plugin> Instance<P> {
                         )
                         .await
                         .map(Payload::message),
+                    17 | 18 => {
+                        self.registry
+                            .get(&format!("r{target}"))?
+                            .call_payload(ctx, args, op == 18, op == 18)
+                            .await
+                    }
                     13 | 14 => {
                         self.registry
                             .get(&format!("r{target}"))?

@@ -627,11 +627,64 @@ async fn wasi_tcp_transfers_bytes_through_granted_socket() {
 }
 #[tokio::test]
 async fn tasks_outlive_ordinary_call_deadlines() {
-    let app = app_with(|caps| caps.call_timeout = std::time::Duration::from_millis(100)).await;
+    let app =
+        app_with(|caps| caps.execution_timeout = Some(std::time::Duration::from_millis(100))).await;
     app.call("task", json!({})).await.unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     app.call("echo", json!(42)).await.unwrap();
     app.rt.shutdown().await.unwrap();
+}
+#[tokio::test]
+async fn ordinary_calls_are_unbounded_until_owner_cancellation() {
+    assert_eq!(Capabilities::default().execution_timeout, None);
+    let app = app_with(|caps| caps.stop_timeout = Duration::from_millis(100)).await;
+    let handle = app.handle.clone();
+    let pending = tokio::spawn(async move {
+        handle
+            .call(|remote, context| {
+                Box::pin(async move {
+                    remote
+                        .invoke_json(&context, "pending", json!({}))
+                        .await
+                        .map_err(Into::into)
+                })
+            })
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!pending.is_finished());
+    assert_eq!(app.call("echo", json!(42)).await.unwrap(), json!(42.0));
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), app.rt.shutdown())
+            .await
+            .unwrap()
+            .is_err()
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err()
+    );
+}
+
+#[test]
+fn invalid_execution_and_lifecycle_deadlines_fail_before_compilation() {
+    for timeout in [Duration::ZERO, Duration::MAX] {
+        for setting in 0..3 {
+            let mut capabilities = Capabilities::default();
+            match setting {
+                0 => capabilities.initialization_timeout = timeout,
+                1 => capabilities.execution_timeout = Some(timeout),
+                _ => capabilities.stop_timeout = timeout,
+            }
+            assert!(matches!(
+                ContextComponent::from_bytes(&[], Limits::default(), capabilities),
+                Err(cordis_wasm::Error::InvalidInput(_))
+            ));
+        }
+    }
 }
 #[tokio::test]
 async fn effect_admission_limit_does_not_fault_healthy_instance() {
@@ -784,7 +837,7 @@ async fn traps_fuel_suspended_calls_and_blocking_wasi_keep_failed_responsibility
         "pending",
         "wasi-block",
     ] {
-        let app = app_with(|caps| caps.call_timeout = Duration::from_secs(1)).await;
+        let app = app_with(|caps| caps.execution_timeout = Some(Duration::from_secs(1))).await;
         let error = tokio::time::timeout(Duration::from_secs(5), app.call(method, json!({})))
             .await
             .unwrap()

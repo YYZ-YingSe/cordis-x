@@ -65,8 +65,33 @@ int main() {
   (void)decode(unknown, cordis::Validation::Contract);
   (void)decode(unknown, cordis::Validation::Checked);
   rejected([&] { decode(unknown, cordis::Validation::Audit); });
-  rejected(
-      [] { encode(Payload(cordis::Message(std::string(max_message, 'x')))); });
+  const Payload large(cordis::Message(std::string(3 * 1024 * 1024, 'x')));
+  for (auto policy : {cordis::Validation::Contract, cordis::Validation::Checked, cordis::Validation::Audit}) {
+    auto bytes = encode(large);
+    const auto result = decode_payload(bytes.data(), bytes.size(), policy);
+    bytes.assign(bytes.size(), 0);
+    check(result.one().bytes() == large.one().bytes());
+  }
+  rejected([&] { auto frame = request; frame.payload = large; encode(Frame(frame)); });
+  {
+    constexpr size_t capacity = 4 * 1024 * 1024;
+    auto outgoing = request;
+    outgoing.payload = large;
+    const auto bytes = encode(Frame(outgoing), capacity);
+    for (auto policy : {cordis::Validation::Contract, cordis::Validation::Checked, cordis::Validation::Audit}) {
+      std::stringstream stream;
+      cordis::transports::write_frame(stream, bytes, capacity);
+      Frame incoming;
+      check(cordis::transports::read_frame(stream, incoming, policy, capacity));
+      check(std::get<Request>(incoming).payload.one().bytes() == large.one().bytes());
+    }
+    std::stringstream oversized(std::string("\x00\x40\x00\x01", 4));
+    Frame incoming;
+    rejected([&] { cordis::transports::read_frame(oversized, incoming, cordis::Validation::Checked, capacity); });
+    check(oversized.tellg() == 4);
+  }
+  rejected([] { decode_payload(nullptr, static_cast<std::size_t>(std::numeric_limits<int>::max()) + 1); });
+  rejected([] { validate_control(cordis::Value(std::string(max_control_bytes, 'x'))); });
   cordis::Value nested = nullptr;
   for (unsigned n = 0; n < 16; ++n)
     nested = cordis::Value::array({nested});

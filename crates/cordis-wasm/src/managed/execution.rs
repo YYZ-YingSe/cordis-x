@@ -22,7 +22,9 @@ pub(super) fn start(instance: &Arc<Instance>, guest: Guest) {
     let (send, mut receive) = mpsc::unbounded_channel();
     *instance.worker.lock().unwrap() = Some(send);
     let weak = Arc::downgrade(instance);
-    let timeout = instance.module.capabilities.call_timeout;
+    let execution_timeout = instance.module.capabilities.execution_timeout;
+    let initialization_timeout = instance.module.capabilities.initialization_timeout;
+    let stop_timeout = instance.module.capabilities.stop_timeout;
     let fuel = instance.module.limits.fuel_on_admission;
     let initialization_fuel = instance.module.limits.initialization_fuel;
     let validation = instance.module.capabilities.bindings.validation;
@@ -50,10 +52,29 @@ pub(super) fn start(instance: &Arc<Instance>, guest: Guest) {
                                 let guest = bindings.cordis_plugin_managed_service();
                                 let expired = expired.clone();
                                 let cancellation = call.context.clone();
+                                let timeout = if matches!(call.command.as_str(), "create" | "activate") {
+                                    Some(initialization_timeout)
+                                } else if call.cleanup || call.command == "deactivate" {
+                                    Some(stop_timeout)
+                                } else if call.background {
+                                    None
+                                } else {
+                                    execution_timeout
+                                };
                                 let watchdog = tokio::spawn(async move {
-                                    if call.background { cancellation.cancelled().await; }
-                                    tokio::time::sleep(timeout).await;
-                                    let _ = expired.send(unknown("guest call deadline exceeded"));
+                                    let execution = async {
+                                        match timeout {
+                                            Some(timeout) => tokio::time::sleep(timeout).await,
+                                            None => std::future::pending().await,
+                                        }
+                                    };
+                                    tokio::select! {
+                                        _ = execution => {},
+                                        _ = cancellation.cancelled() => {
+                                            tokio::time::sleep(stop_timeout).await;
+                                        }
+                                    }
+                                    let _ = expired.send(unknown("guest execution or stop deadline exceeded"));
                                 });
                                 calls.push(Box::pin(async move {
                                     struct Deadline(tokio::task::JoinHandle<()>);

@@ -4,12 +4,13 @@ import { encodeFrame } from './binary.ts';
 import { payload, one, controlOnly, type Payload, type Request, type Response } from './messages.ts';
 import { Refusal } from '../../core/error.ts';
 import { RpcError } from '../../core/error.ts';
-import type { Value } from '../../core/value.ts';
+import { DEFAULT_FRAME_CAPACITY, type Value } from '../../core/value.ts';
 import type { Identity } from './messages.ts';
 export type { Identity, Envelope } from './messages.ts';
 type Pending = { lane: number; command: string; resolve(value: Payload): void; reject(error: Error): void };
 
 export class DependencyChannel {
+  frameCapacity = DEFAULT_FRAME_CAPACITY;
   validation: import('../../core/validation.ts').Validation = 'checked';
   private pending = new Map<string, Pending>();
   private operations = new OperationOutbox();
@@ -59,7 +60,7 @@ export class DependencyChannel {
   requestPayload(command: string, payload: Payload): Promise<Payload> {
     if (!this.output) return Promise.reject(new Refusal('closed', 'dependency channel closed'));
     const lane =
-      command === 'dependency_resource_call'
+      command === 'dependency_resource_call' || command === 'reference_invoke'
         ? 13
         : command === 'child_install' || command === 'value_provide'
           ? 12
@@ -86,6 +87,7 @@ export class DependencyChannel {
                                 'event_dispose',
                                 'middleware_dispose',
                                 'dependency_resource_dispose',
+                                'reference_dispose',
                               ].includes(command)
                             ? 1
                             : command === 'scope_run'
@@ -104,7 +106,7 @@ export class DependencyChannel {
         operation,
         command,
         payload,
-      }); } catch (error) { this.operations.complete(operation); return Promise.reject(new Refusal('invalid_argument', String(error))); }
+      }, this.frameCapacity); } catch (error) { this.operations.complete(operation); return Promise.reject(new Refusal('invalid_argument', String(error))); }
     return new Promise((resolve, reject) => {
       this.pending.set(operation, { lane, command, resolve, reject });
       this.output!(bytes).catch((error) => {

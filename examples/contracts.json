@@ -1,4 +1,8 @@
 {
+  "references": {
+    "source": "references.proto",
+    "languages": "cpp,rust,typescript"
+  },
   "examples": {
     "source": "examples.proto",
     "languages": "cpp,rust,typescript"

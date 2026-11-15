@@ -1,11 +1,13 @@
 #pragma once
 #include "host.hpp"
 #include <cordis/adapters/context.hpp>
+#include <cordis/adapters/references.hpp>
 
 namespace cordis::adapters {
 template <> struct Advanced<process::Context> {
   static void fill(Context::Operations &ops, const process::Context &backend) {
     resources(ops, backend);
+    references(ops, backend);
     ops.effect = [backend](std::string label,
                            std::function<Async<EffectStep>(Context)> next)
         -> Async<EffectSequence> {

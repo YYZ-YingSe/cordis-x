@@ -1,5 +1,5 @@
 use super::{host::Host, *};
-use cordis_wire::{CONTENT_TYPE, Incoming, MAX_MESSAGE};
+use cordis_wire::{CONTENT_TYPE, Incoming};
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{
     Request, Response,
@@ -37,12 +37,13 @@ async fn dispatch<P: Plugin>(
     let length = header("content-length")?
         .parse::<usize>()
         .map_err(|e| refused("http", e))?;
-    if length > MAX_MESSAGE {
+    let frame_capacity = host.channel.frame_capacity.get();
+    if length > frame_capacity {
         return Err(refused("http", "body too large"));
     }
     let bytes = tokio::time::timeout(
         Duration::from_secs(5),
-        Limited::new(body, MAX_MESSAGE).collect(),
+        Limited::new(body, frame_capacity).collect(),
     )
     .await
     .map_err(unknown)?
@@ -64,7 +65,7 @@ async fn dispatch<P: Plugin>(
     }
     let response = host.dispatch(request).await?;
     let status = if response.is_success() { 200 } else { 400 };
-    let bytes = response.encode().map_err(unknown)?;
+    let bytes = response.encode(frame_capacity).map_err(unknown)?;
     Response::builder()
         .status(status)
         .header("content-type", CONTENT_TYPE)

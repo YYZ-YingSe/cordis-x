@@ -20,8 +20,8 @@ class Child {
           if (!api_)
             throw Refusal("closed", "empty child");
           detail::Output input;
-          detail::Budget budget;
-          auto value = input.build(Value(nullptr), budget);
+
+          auto value = input.build(Value(nullptr));
           co_return (co_await detail::receive(
                          base_, host_, false,
                          [&](uint64_t caller, CordisAbiCompletion completion) {
@@ -64,8 +64,8 @@ inline Async<Child> Context::install(std::string factory,
         if (!composition_)
           throw Refusal("unsupported", "Composition extension unavailable");
         detail::Output input;
-        detail::Budget budget;
-        auto raw = input.build(config, budget);
+
+        auto raw = input.build(config);
         auto result = (co_await detail::receive(
             raw_.api, raw_.host, true,
             [&](uint64_t caller, CordisAbiCompletion completion) {
@@ -83,8 +83,8 @@ inline Async<void> Context::provide(std::string alias, Message value) const {
         if (!composition_)
           throw Refusal("unsupported", "Composition extension unavailable");
         detail::Output input;
-        detail::Budget budget;
-        auto raw = input.build(value, budget);
+
+        auto raw = input.build(value);
         (co_await detail::receive(
             raw_.api, raw_.host, false,
             [&](uint64_t caller, CordisAbiCompletion completion) {

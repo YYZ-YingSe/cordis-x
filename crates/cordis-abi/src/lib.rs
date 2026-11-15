@@ -9,6 +9,7 @@ mod resource_dependencies;
 pub use composition::CompositionLimits;
 mod managed;
 mod reactive;
+mod references;
 pub use managed::ManagedLimits;
 pub use reactive::ReactiveLimits;
 mod ffi;
@@ -600,15 +601,9 @@ pub struct AbiService {
     activation: Activation,
 }
 impl AbiService {
-    fn check(&self, context: &Context, method: &str, args: &Bytes) -> Result<()> {
+    fn check(&self, context: &Context) -> Result<()> {
         if context.activation() != self.activation {
             return Err(Error::Closed);
-        }
-        if method.len() > cordis_wire::MAX_MESSAGE {
-            return Err(Error::InvalidInput("method too long".into()));
-        }
-        if args.len() > cordis_wire::MAX_MESSAGE {
-            return Err(Error::InvalidInput("message too large".into()));
         }
         Ok(())
     }
@@ -644,11 +639,7 @@ impl AbiService {
         method: &str,
         args: Envelope,
     ) -> Result<Envelope> {
-        self.check(
-            context,
-            method,
-            &args.one().map_err(|e| Error::InvalidInput(e.to_string()))?,
-        )?;
+        self.check(context)?;
         let instance = self.instance.clone();
         let method = method.to_owned();
         context
@@ -670,11 +661,7 @@ impl AbiService {
         kind: &str,
         mut args: Envelope,
     ) -> Result<AbiResource> {
-        self.check(
-            context,
-            kind,
-            &args.one().map_err(|e| Error::InvalidInput(e.to_string()))?,
-        )?;
+        self.check(context)?;
         let schema =
             contract::resource(&self.instance.descriptor, kind).map_err(Error::InvalidInput)?;
         args.check(&schema.args).map_err(Error::InvalidInput)?;
@@ -807,17 +794,6 @@ impl AbiResource {
         method: &str,
         mut args: cordis_wire::local::Envelope,
     ) -> Result<cordis_wire::local::Envelope> {
-        if args
-            .one()
-            .map_err(|e| Error::InvalidInput(e.to_string()))?
-            .len()
-            > cordis_wire::MAX_MESSAGE
-        {
-            return Err(Error::InvalidInput("message too large".into()));
-        }
-        if method.len() > cordis_wire::MAX_MESSAGE {
-            return Err(Error::InvalidInput("method too long".into()));
-        }
         let method = method.to_owned();
         self.resource
             .call(move |ticket, context| {
@@ -925,10 +901,12 @@ impl Error {
 pub(crate) fn json_body(shape: &cordis_contract::MessageContract, value: &Value) -> Result<Bytes> {
     use prost::Message;
     let value = shape.parse_json(value).map_err(Error::InvalidInput)?;
-    if value.encoded_len() > cordis_wire::MAX_MESSAGE {
-        return Err(Error::InvalidInput("message too large".into()));
-    }
-    Ok(value.encode_to_vec().into())
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(value.encoded_len())
+        .map_err(|error| Error::InvalidInput(error.to_string()))?;
+    value.encode_raw(&mut bytes);
+    Ok(bytes.into())
 }
 pub(crate) fn body_json(shape: &cordis_contract::MessageContract, bytes: &Bytes) -> Result<Value> {
     let value = shape.parse_binary(bytes).map_err(Error::Unknown)?;

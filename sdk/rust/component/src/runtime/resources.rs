@@ -133,7 +133,7 @@ impl Entry {
             .check(&signature.result)
             .map_err(cordis_sdk_core::typed::violation)?;
         output
-            .encode(cordis_component::MAX_BYTES)
+            .encode(None)
             .map_err(cordis_sdk_core::typed::violation)
     }
     pub async fn close(self: Rc<Self>, ctx: Context) -> Result<()> {

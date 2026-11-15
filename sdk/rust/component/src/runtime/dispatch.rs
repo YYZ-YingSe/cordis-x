@@ -174,9 +174,7 @@ pub async fn call<P: Plugin>(
                             .await
                             .map_err(|e| e.check_declared(&signature.errors, "method errors"))?;
                         value.check(&signature.result).map_err(unknown)?;
-                        Ok(Payload::message(
-                            value.encode(cordis_component::MAX_BYTES).map_err(unknown)?,
-                        ))
+                        Ok(Payload::message(value.encode(None).map_err(unknown)?))
                     }
                     _ => Err(refused("unknown_command", command)),
                 }
@@ -250,7 +248,7 @@ mod tests {
             let body =
                 Message::from_json(cordis_sdk_core::MessageContract::json_value(), &Value::Null)
                     .unwrap()
-                    .encode(cordis_component::MAX_BYTES)
+                    .encode(None)
                     .unwrap();
             let payload = Payload::with_message(json!({"method":"echo"}), body);
             let mut bytes = encode(&payload).unwrap();

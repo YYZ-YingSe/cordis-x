@@ -18,6 +18,9 @@ enum Semantics { RECORD = 0; OPTION = 1; NULLABLE = 2; VARIANT = 3; }
 extend google.protobuf.ServiceOptions {
   Contract contract = 51000;
   bool resource = 51001;
+  // A callable object type. It has no global service name and is transferred
+  // through messages marked reference, using the same methods on every backend.
+  bool interface = 51015;
 }
 extend google.protobuf.MethodOptions {
   repeated string errors = 51002;
@@ -32,7 +35,12 @@ extend google.protobuf.MethodOptions {
   // Publish the input value; output must be data.Unit.
   Endpoint provision = 51014;
 }
-extend google.protobuf.MessageOptions { Semantics semantics = 51004; }
+extend google.protobuf.MessageOptions {
+  Semantics semantics = 51004;
+  // Names an interface service. The message contains exactly string key = 1;
+  // code generation exposes a typed object client for direct parameters/results.
+  string reference = 51016;
+}
 extend google.protobuf.FieldOptions {
   bool required = 51005;
   optional uint32 exact_size = 51006;

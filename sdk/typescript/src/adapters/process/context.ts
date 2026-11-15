@@ -1,4 +1,7 @@
 import { Identities, makeRoom, Completion, registration } from './retention.ts';
+import { ReferenceRegistry } from './references.ts';
+import type { Interface } from '../../core/contract.ts';
+import type { ReferenceObject } from '../../core/reference.ts';
 import type { Message } from '../../core/message.ts';
 import type { EventFlow } from '../../core/events.ts';
 import { payload as data, one, controlOnly } from '../../protocols/session/messages.ts';
@@ -43,6 +46,7 @@ export class Context {
   private events?: EventRegistry;
   private middlewares?: MiddlewareRegistry;
   private composition?: Composition;
+  private references?: ReferenceRegistry;
   constructor(
     channel: DependencyChannel,
     token: string,
@@ -56,6 +60,7 @@ export class Context {
     events?: EventRegistry,
     middlewares?: MiddlewareRegistry,
     composition?: Composition,
+    references?: ReferenceRegistry,
   ) {
     this.channel = channel;
     this.token = token;
@@ -69,6 +74,7 @@ export class Context {
     this.events = events;
     this.middlewares = middlewares;
     this.composition = composition;
+    this.references = references;
     bindResourceContext(this, channel, (dispose, resource, grant, method, args) =>
       this.resourceRequest(dispose, resource, grant, method, args));
   }
@@ -78,6 +84,29 @@ export class Context {
     if (!Object.hasOwn(this.dependencies, dependency))
       return Promise.reject(new Refusal('undeclared_dependency', dependency));
     return this.track(acquireResource(this.channel, this.token, dependency, kind, args));
+  }
+  exportReference(descriptor: Interface, object: ReferenceObject): Promise<string> {
+    if (!this.open || !this.token || this.cleanup || !this.references)
+      return Promise.reject(new Refusal('closed', 'export requires a live ordinary Context'));
+    return this.track(this.references.export(descriptor, object, async (callback, contract) => {
+      const key = await this.channel.request('reference_export', {
+        context: this.token, callback, interface: contract as unknown as Value,
+      });
+      if (typeof key !== 'string') throw new Error('invalid interface reference');
+      return key;
+    }));
+  }
+  invokeReference(key: string, digest: string, method: string, args: Message): Promise<Message> {
+    if (!this.open || !this.token)
+      return Promise.reject(new Refusal('closed', 'reference requires a live Context'));
+    return this.track(this.channel.requestPayload('reference_invoke', data({
+      context: this.token, reference: key, digest, method,
+    }, args)).then(one));
+  }
+  disposeReference(key: string): Promise<void> {
+    if (!this.open || !this.token)
+      return Promise.reject(new Refusal('closed', 'reference requires a live Context'));
+    return this.track(this.channel.request('reference_dispose', { context: this.token, reference: key }).then(() => {}));
   }
   private resourceRequest(
     dispose: boolean, resource: string, grant: string, method: string, args: Message | undefined,

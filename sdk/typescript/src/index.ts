@@ -1,5 +1,7 @@
 // The business API deliberately has no dependency on Node, a host or a codec.
 export type { Message } from './core/message.ts';
+export { InterfaceRef } from './core/reference.ts';
+export type { ReferenceObject } from './core/reference.ts';
 export type { Value } from './core/value.ts';
 export { RpcError, Refusal } from './core/error.ts';
 export type { Context } from './core/context.ts';

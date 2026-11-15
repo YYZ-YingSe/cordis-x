@@ -15,6 +15,7 @@
 #include <google/protobuf/struct.pb.h>
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/wrappers.pb.h>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -134,8 +135,8 @@ cordis::Message encode_binary(const T &message,
                               Validation policy = Validation::Contract) {
   validate(message, policy);
   const auto size = message.ByteSizeLong();
-  if (size > max_bytes)
-    throw std::runtime_error("encoded message byte limit exceeded");
+  if (size > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+    throw std::runtime_error("message exceeds protobuf's representable size");
   if (!message.IsInitialized())
     throw std::runtime_error("uninitialized protobuf message");
   std::string bytes(size, '\0');

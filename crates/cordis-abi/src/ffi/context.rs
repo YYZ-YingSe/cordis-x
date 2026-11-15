@@ -158,9 +158,6 @@ impl Module {
                 return Err(Error::InvalidInput("not a scoped ABI operation".into()));
             }
         };
-        if method.len() > cordis_wire::MAX_MESSAGE {
-            return Err(Error::InvalidInput("method too long".into()));
-        }
         let receive = {
             let mut buffer = Input::default();
             let value = buffer.build(args)?;
@@ -298,9 +295,6 @@ fn output(result: Result<Reply>) -> RawResult {
             (3, Bytes::new(), 0, code, message)
         }
     };
-    if code.len() + message.len() > cordis_wire::MAX_MESSAGE / 2 {
-        return output(Err(Error::Unknown("invalid host result".into())));
-    }
     let mut owner = Box::new(Owned {
         bytes,
         code,
@@ -387,14 +381,13 @@ unsafe extern "C" fn invoke(
     completion: Completion,
 ) {
     launch(host, caller, completion, |router| {
-        let mut budget = Budget::new();
         // SAFETY: guest supplies valid borrowed slices/buffer for this call.
         let (dependency, method, args) = unsafe {
             let args = read_slice(args, 1)?.first().ok_or_else(invalid_value)?;
             (
-                read_text(dependency, &mut budget)?,
-                read_text(method, &mut budget)?,
-                read_payload(args, &mut budget, router.capabilities.bindings.validation)?,
+                read_text(dependency)?,
+                read_text(method)?,
+                read_payload(args, router.capabilities.bindings.validation)?,
             )
         };
         Ok(async move {
@@ -423,7 +416,7 @@ unsafe extern "C" fn defer(
 ) {
     launch(host, caller, completion, |router| {
         // SAFETY: guest supplies a readable label for this call.
-        let label = unsafe { read_text(label, &mut Budget::new()) }?;
+        let label = unsafe { read_text(label) }?;
         Ok(async move {
             let handle = router.defer(grant, callback, label)?;
             Ok(Reply {
@@ -516,13 +509,12 @@ unsafe extern "C" fn managed_call(
     completion: Completion,
 ) {
     launch(host, caller, completion, |router| {
-        let mut budget = Budget::new();
         // SAFETY: borrowed input allocations remain readable through this call.
         let (label, args) = unsafe {
             let args = read_slice(args, 1)?.first().ok_or_else(invalid_value)?;
             (
-                read_text(label, &mut budget)?,
-                read_payload(args, &mut budget, router.capabilities.bindings.validation)?,
+                read_text(label)?,
+                read_payload(args, router.capabilities.bindings.validation)?,
             )
         };
         Ok(async move {
@@ -634,13 +626,12 @@ unsafe extern "C" fn reactive_call(
     completion: Completion,
 ) {
     launch(host, caller, completion, |router| {
-        let mut budget = Budget::new();
         // SAFETY: borrowed input buffer and alias remain valid through this call.
         let (alias, args) = unsafe {
             let args = read_slice(args, 1)?.first().ok_or_else(invalid_value)?;
             (
-                read_text(alias, &mut budget)?,
-                read_payload(args, &mut budget, router.capabilities.bindings.validation)?,
+                read_text(alias)?,
+                read_payload(args, router.capabilities.bindings.validation)?,
             )
         };
         Ok(async move {
@@ -749,13 +740,12 @@ unsafe extern "C" fn composition_call(
     completion: Completion,
 ) {
     launch(host, caller, completion, |router| {
-        let mut budget = Budget::new();
         // SAFETY: guest lends readable buffer and alias through this call.
         let (alias, args) = unsafe {
             let args = read_slice(args, 1)?.first().ok_or_else(invalid_value)?;
             (
-                read_text(alias, &mut budget)?,
-                read_payload(args, &mut budget, router.capabilities.bindings.validation)?,
+                read_text(alias)?,
+                read_payload(args, router.capabilities.bindings.validation)?,
             )
         };
         Ok(async move { router.compose(grant, operation, target, alias, args).await })

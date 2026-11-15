@@ -14,9 +14,31 @@ fn value<T: serde::Serialize>(v: &T) -> String {
     format!("JSON.parse({})", lit(&serde_json::to_string(v).unwrap()))
 }
 fn ty(s: &Shape) -> String {
-    s.ts.clone()
+    format!(
+        "import(\"@bufbuild/protobuf\").MessageShape<typeof {}>",
+        s.schema
+    )
 }
 
+fn call_type(s: &Shape) -> String {
+    s.reference
+        .as_ref()
+        .map(|p| format!("{p}Client"))
+        .unwrap_or_else(|| ty(s))
+}
+fn from_wire(s: &Shape, v: &str) -> String {
+    s.reference
+        .as_ref()
+        .map(|p| format!("{p}Client.fromReference({v})"))
+        .unwrap_or_else(|| v.into())
+}
+fn to_wire(s: &Shape, v: &str) -> String {
+    if s.reference.is_some() {
+        format!("({v}).reference()")
+    } else {
+        v.into()
+    }
+}
 fn codec(s: &Shape) -> String {
     format!("sdk.typed.protobuf({})", s.schema)
 }
@@ -53,8 +75,8 @@ fn signature(w: &mut Writer, o: &Operation) {
         } else {
             ""
         },
-        ty(&o.args),
-        ty(&o.result)
+        call_type(&o.args),
+        call_type(&o.result)
     ));
 }
 fn client_method(w: &mut Writer, o: &Operation, resource: bool) {
@@ -67,11 +89,12 @@ fn client_method(w: &mut Writer, o: &Operation, resource: bool) {
         } else {
             ""
         },
-        ty(&o.args),
-        ty(&o.result)
+        call_type(&o.args),
+        call_type(&o.result)
     ));
     w.line(format!(
-        "const encoded = sdk.typed.argument(args, {p}Signature.args, {}, ctx.validation);",
+        "const encoded = sdk.typed.argument({}, {p}Signature.args, {}, ctx.validation);",
+        to_wire(&o.args, "args"),
         codec(&o.args)
     ));
     let method = o.wire.as_deref().map(lit).unwrap_or("method".into());
@@ -84,9 +107,10 @@ fn client_method(w: &mut Writer, o: &Operation, resource: bool) {
         "const result = await sdk.typed.checked({p}Signature.errors, async () => {call});"
     ));
     w.line(format!(
-        "return sdk.typed.result(result, {p}Signature.result, {}, ctx.validation);",
+        "const decoded = sdk.typed.result(result, {p}Signature.result, {}, ctx.validation);",
         codec(&o.result)
     ));
+    w.line(format!("return {};", from_wire(&o.result, "decoded")));
     w.close("}");
 }
 fn dispatch(w: &mut Writer, methods: &[Operation], server: &str) {
@@ -101,9 +125,10 @@ fn dispatch(w: &mut Writer, methods: &[Operation], server: &str) {
             "const decoded = sdk.typed.input(args, {p}Signature.args, {}, ctx.validation);",
             codec(&o.args)
         ));
-        w.line(format!("const result = await sdk.typed.checked({p}Signature.errors, async () => {server}.{}(ctx, {}decoded));",o.name,if o.wire.is_none(){"method, "}else{""}));
+        w.line(format!("const result = await sdk.typed.checked({p}Signature.errors, async () => {server}.{}(ctx, {}{}));",o.name,if o.wire.is_none(){"method, "}else{""},from_wire(&o.args,"decoded")));
         w.line(format!(
-            "return sdk.typed.output(result, {p}Signature.result, {}, ctx.validation);",
+            "return sdk.typed.output({}, {p}Signature.result, {}, ctx.validation);",
+            to_wire(&o.result, "result"),
             codec(&o.result)
         ));
         w.close("}");
@@ -111,6 +136,51 @@ fn dispatch(w: &mut Writer, methods: &[Operation], server: &str) {
     if !methods.iter().any(|o| o.wire.is_none()) {
         w.line("throw new sdk.Refusal('unknown_method', method);");
     }
+}
+fn object_interface(w: &mut Writer, object: &super::plan::ObjectInterface) {
+    let p = &object.prefix;
+    for o in &object.methods {
+        operation_descriptor(w, o);
+    }
+    w.open(format!("export interface {p}Server {{"));
+    for o in &object.methods {
+        signature(w, o);
+    }
+    w.line("close(ctx: sdk.Context): Promise<void>;");
+    w.close("}");
+    w.open(format!("class {p}Object implements sdk.ReferenceObject {{"));
+    w.line("readonly typedDispatch = true as const;");
+    w.line(format!(
+        "private readonly server: {p}Server;\nconstructor(server: {p}Server) {{ this.server = server; }}"
+    ));
+    w.open("async invoke(method: string, args: sdk.Message, ctx?: sdk.Context): Promise<sdk.Message> {");
+    w.line("if (!ctx) throw new sdk.Refusal('closed', 'reference requires a live caller');");
+    dispatch(w, &object.methods, "this.server");
+    w.close("}");
+    w.line("async close(ctx?: sdk.Context): Promise<void> { if (!ctx) throw new sdk.Refusal('closed', 'reference requires cleanup authority'); await this.server.close(ctx); }");
+    w.close("}");
+    w.line(
+        "/** A host-lifetime object reference; serializing its DTO does not make it durable. */",
+    );
+    w.open(format!("export class {p}Client {{"));
+    w.line("private readonly handle: sdk.InterfaceRef;");
+    w.line("private constructor(handle: sdk.InterfaceRef) { this.handle = handle; }");
+    w.line(format!(
+        "static descriptor(): sdk.Interface {{ return {}; }}",
+        value(&cordis_contract::portable::encode(&object.descriptor))
+    ));
+    w.line(format!("static fromReference(value: {}) : {p}Client {{ return new {p}Client(new sdk.InterfaceRef(value.key, {})); }}",ty(&object.reference),lit(&object.descriptor.digest())));
+    w.line(format!(
+        "reference(): {} {{ return create({}, {{key: this.handle.key}}); }}",
+        ty(&object.reference),
+        object.reference.schema
+    ));
+    w.line(format!("static async export(ctx: sdk.Context, server: {p}Server): Promise<{p}Client> {{ return new {p}Client(await sdk.InterfaceRef.export(ctx, this.descriptor(), {}, new {p}Object(server))); }}",lit(&object.descriptor.digest())));
+    for o in &object.methods {
+        client_method(w, o, true);
+    }
+    w.line("async dispose(ctx: sdk.Context): Promise<void> { await this.handle.dispose(ctx); }");
+    w.close("}");
 }
 fn service(w: &mut Writer, module: &Module, s: &Service) {
     let p = &s.prefix;
@@ -341,6 +411,9 @@ impl Backend for Typescript {
         let mut w = Writer::default();
         w.line("// @generated by cordis-codegen. Edit the contract source and regenerate.");
         w.line(format!("import * as sdk from {};", lit(&self.sdk)));
+        if !plan.references.is_empty() {
+            w.line("import { create } from '@bufbuild/protobuf';");
+        }
         let mut standard = std::collections::BTreeSet::new();
         for m in &plan.messages {
             if m.file.starts_with("google/protobuf/") && standard.insert(&m.file) {
@@ -356,6 +429,9 @@ impl Backend for Typescript {
             w.line(format!(
                 "import * as {alias} from \"./proto/{stem}_pb.ts\";"
             ));
+        }
+        for object in &plan.references {
+            object_interface(&mut w, object);
         }
         for s in &plan.services {
             service(&mut w, module, s);

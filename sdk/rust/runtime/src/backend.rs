@@ -84,6 +84,44 @@ impl Native {
         let client = instance.client()?;
         let ctx = &self.ctx;
         let value = match op {
+            Operation::ReferenceExport { descriptor, object } => {
+                let id = instance.export_object(object)?;
+                let target = Arc::new(ReferenceObject {
+                    client: client.clone(),
+                    id,
+                    descriptor: descriptor.clone(),
+                });
+                match cordis_host::reference::export(ctx, descriptor, target).await {
+                    Ok(key) => json!(key),
+                    Err(error) => {
+                        if matches!(error, Failure::Refused(_) | Failure::Rejected(_)) {
+                            instance.remove_resource(id);
+                        }
+                        return Err(error);
+                    }
+                }
+            }
+            Operation::ReferenceInvoke {
+                key,
+                digest,
+                descriptor,
+                method,
+                args,
+            } => {
+                let signature =
+                    cordis_contract::portable::method(&descriptor.interface().methods, &method)
+                        .map_err(|e| refused("unknown_method", e))?;
+                let value =
+                    cordis_host::reference::invoke(ctx, &key, &digest, &method, args.into())
+                        .await?;
+                return Ok(Reply::Message(
+                    value.into_message(&signature.result).map_err(unknown)?,
+                ));
+            }
+            Operation::ReferenceDispose { key } => {
+                cordis_host::reference::dispose(ctx, &key).await?;
+                Value::Null
+            }
             Operation::Acquire {
                 dependency,
                 kind,
@@ -640,5 +678,37 @@ impl Backend for Native {
     }
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+/// Reuses the instance's ordinary object dispatch. The shared host reference
+/// binding supplies caller context, method contracts and runtime ownership.
+struct ReferenceObject {
+    client: super::worker::Client,
+    id: u64,
+    descriptor: cordis_contract::Descriptor,
+}
+impl cordis_host::reference::Object for ReferenceObject {
+    fn invoke(
+        &self,
+        ctx: rt::Context,
+        method: String,
+        args: cordis_host::Body,
+    ) -> rt::BoxFuture<'_, Result<cordis_host::Body>> {
+        Box::pin(async move {
+            // The host already selected the exact signature. Native Body keeps
+            // its generated DTO, so no JSON or protobuf round trip is introduced.
+            let signature =
+                cordis_contract::portable::method(&self.descriptor.interface().methods, &method)
+                    .map_err(unknown)?;
+            let args = args.into_message(&signature.args).map_err(unknown)?;
+            self.client
+                .resource_call(ctx, self.id, method, args)
+                .await
+                .map(Into::into)
+        })
+    }
+    fn close(&self, ctx: rt::Context) -> rt::BoxFuture<'_, Result<()>> {
+        Box::pin(async move { self.client.release(ctx, self.id).await })
     }
 }

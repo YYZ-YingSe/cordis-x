@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+#[cfg(feature = "loader")]
+use std::path::Path;
+use std::path::PathBuf;
 
 pub fn binary(name: &str) -> PathBuf {
     let file = format!(

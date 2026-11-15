@@ -10,6 +10,8 @@ extern "C" {
 #define CORDIS_ABI_MIDDLEWARE_CALL 14u
 #define CORDIS_ABI_TERMINAL_CALL 15u
 #define CORDIS_ABI_CALLBACK_RELEASE 16u
+#define CORDIS_ABI_REFERENCE_CALL 17u
+#define CORDIS_ABI_REFERENCE_CLOSE 18u
 /* Host calls; ON, USE and EMIT return nonzero handles. */
 #define CORDIS_ABI_EVENT_ON 1u
 #define CORDIS_ABI_MIDDLEWARE_USE 2u
@@ -19,6 +21,9 @@ extern "C" {
 #define CORDIS_ABI_MIDDLEWARE_RUN 6u
 #define CORDIS_ABI_NEXT_RUN 7u
 #define CORDIS_ABI_DISPATCH_STATUS 8u
+#define CORDIS_ABI_REFERENCE_EXPORT 9u
+#define CORDIS_ABI_REFERENCE_INVOKE 10u
+#define CORDIS_ABI_REFERENCE_DISPOSE 11u
 typedef struct {
   uint32_t version;
   uint32_t struct_size;

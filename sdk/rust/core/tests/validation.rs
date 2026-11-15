@@ -115,12 +115,17 @@ fn policy_consumption_and_immutable_snapshot_proofs() {
             malformed.into_typed::<Text>().is_err(),
             "standard decoder always constructs safe strings"
         );
-        assert!(
-            Message::from_bytes(
-                Text::contract().with_validation(policy),
-                vec![0; cordis_contract::budget::MAX_BYTES + 1].into()
-            )
-            .is_err()
+        let large = Text {
+            value: "hello".repeat(300_000),
+        };
+        let bytes = prost::Message::encode_to_vec(&large);
+        assert_eq!(
+            Message::from_bytes(Text::contract().with_validation(policy), bytes.into())
+                .unwrap()
+                .into_typed::<Text>()
+                .unwrap()
+                .value,
+            large.value
         );
     }
 }

@@ -40,7 +40,7 @@ impl Fixture {
                         &cordis_wire::json!(42),
                     )
                     .unwrap()
-                    .encode(cordis_wire::MAX_MESSAGE)
+                    .encode(None)
                     .unwrap(),
                 ),
             ),
@@ -52,7 +52,7 @@ impl Fixture {
                         &cordis_wire::json!(-1),
                     )
                     .unwrap()
-                    .encode(cordis_wire::MAX_MESSAGE)
+                    .encode(None)
                     .unwrap(),
                 ),
             ),
@@ -64,7 +64,7 @@ impl Fixture {
                         &cordis_wire::Value::Null,
                     )
                     .unwrap()
-                    .encode(cordis_wire::MAX_MESSAGE)
+                    .encode(None)
                     .unwrap(),
                 ),
             ),

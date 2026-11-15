@@ -226,7 +226,7 @@ async fn rig(files: &Files, config: Value, capabilities: Capabilities) -> Rig {
 
 #[allow(dead_code)]
 fn wire_json(value: Value) -> cordis_abi::Bytes {
-    cordis_sdk_core::Message::from_json(cordis_contract::MessageContract::json_value(),&value).unwrap().encode(cordis_wire::MAX_MESSAGE).unwrap()
+    cordis_sdk_core::Message::from_json(cordis_contract::MessageContract::json_value(),&value).unwrap().encode(None).unwrap()
 }
 #[allow(dead_code)]
 fn unwire_json(value: &cordis_abi::Bytes) -> Value {

@@ -79,7 +79,7 @@ fn decode_body(value: WitValue, shape: &cordis_contract::MessageContract) -> Res
 }
 fn encode_body(value: Value, shape: &cordis_contract::MessageContract) -> Result<WitValue> {
     let body = cordis_sdk_core::Message::from_json(shape.clone(), &value)
-        .and_then(|m| m.encode(cordis_component::MAX_BYTES))
+        .and_then(|m| m.encode(None))
         .map_err(|e| {
             Failure::Unknown(ErrorInfo {
                 code: "invalid_result".into(),

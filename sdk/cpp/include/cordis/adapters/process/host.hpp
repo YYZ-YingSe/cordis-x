@@ -1,5 +1,6 @@
 #pragma once
 #include "context.hpp"
+#include "references.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cordis/core/contract.hpp>
@@ -143,7 +144,8 @@ class Host {
         co_await drained_calls;
       std::exception_ptr error;
       try {
-        if (!resource) throw std::runtime_error("resource acquisition unresolved");
+        if (!resource)
+          throw std::runtime_error("resource acquisition unresolved");
         co_await native::with_cleanup([&] { return resource->close(ctx); },
                                       [ctx] { return ctx.finish(); });
         resource.reset();
@@ -176,10 +178,12 @@ class Host {
   std::map<std::string, std::shared_ptr<ResourceRecord>> resources;
   std::uint64_t next_resource = 0;
   native::Runtime runtime;
-  http::Server http_server{runtime, [this](Request request) {
-                             return dispatch(std::move(request));
-                           }, [this] { return greeted ? dependencies->validation : Validation::Audit; }};
-  transports::Stdio stdio{runtime, [this] { stop(1, true); }};
+  http::Server http_server{
+      runtime, [this](Request request) { return dispatch(std::move(request)); },
+      [this] {
+        return greeted ? dependencies->validation : Validation::Audit;
+      }, [this] { return dependencies->frame_capacity; }};
+  transports::Stdio stdio{runtime, [this] { stop(1, true); }, [this] { return dependencies->frame_capacity; }};
   bool closed = false;
   std::string url;
   bool enable_http;
@@ -197,6 +201,8 @@ class Host {
   std::shared_ptr<TaskRegistry> tasks = std::make_shared<TaskRegistry>();
   std::shared_ptr<EventRegistry> events;
   std::shared_ptr<MiddlewareRegistry> middlewares;
+  std::shared_ptr<ReferenceRegistry> references =
+      std::make_shared<ReferenceRegistry>();
   Lane middleware_lane{runtime};
   Lane terminal_lane{runtime};
   Lane event_lane{runtime};
@@ -244,10 +250,11 @@ class Host {
     if (command == "resource_acquire") {
       const auto kind = payload.at("kind").get<std::string>();
       try {
-        if (!service.typed_dispatch()) cordis::contract::check_value(
-            cordis::contract::operation(descriptor.at("resources"), kind)
-                .at("args"),
-            input.one(), "resources." + kind + ".args", ctx.validation());
+        if (!service.typed_dispatch())
+          cordis::contract::check_value(
+              cordis::contract::operation(descriptor.at("resources"), kind)
+                  .at("args"),
+              input.one(), "resources." + kind + ".args", ctx.validation());
       } catch (const std::exception &e) {
         throw Refusal("invalid_argument", e.what());
       }
@@ -258,17 +265,23 @@ class Host {
       {
         std::lock_guard lock(state_mutex);
         if (resources.size() >= 4096)
-          std::erase_if(resources, [](const auto &item) { return item.second->released(); });
-        if (resources.size() >= 4096) throw Refusal("overloaded", "live resource capacity reached");
-        if (next_resource == UINT64_MAX) throw Refusal("exhausted", "resource identity space exhausted");
+          std::erase_if(resources, [](const auto &item) {
+            return item.second->released();
+          });
+        if (resources.size() >= 4096)
+          throw Refusal("overloaded", "live resource capacity reached");
+        if (next_resource == UINT64_MAX)
+          throw Refusal("exhausted", "resource identity space exhausted");
         id = "r" + std::to_string(++next_resource);
         resources.emplace(id, entry);
       }
       try {
         entry->resource = (co_await checked_business(
-            cordis::contract::operation(descriptor.at("resources"), kind).at("errors"),
+            cordis::contract::operation(descriptor.at("resources"), kind)
+                .at("errors"),
             [&] { return service.acquire(kind, input.one(), ctx); }));
-        if (!entry->resource) throw std::runtime_error("acquire returned no resource");
+        if (!entry->resource)
+          throw std::runtime_error("acquire returned no resource");
       } catch (const RpcError &) {
         std::lock_guard lock(state_mutex);
         resources.erase(id);
@@ -299,17 +312,20 @@ class Host {
           cordis::contract::operation(descriptor.at("resources"), entry->kind)
               .at("methods"),
           method);
-      if (!service.typed_dispatch()) cordis::contract::check_value(signature.at("args"), input.one(),
-                                    "resources." + entry->kind + "." + method +
-                                        ".args", ctx.validation());
+      if (!service.typed_dispatch())
+        cordis::contract::check_value(signature.at("args"), input.one(),
+                                      "resources." + entry->kind + "." +
+                                          method + ".args",
+                                      ctx.validation());
     } catch (const std::exception &e) {
       throw Refusal("invalid_argument", e.what());
     }
     auto result = (co_await checked_business(signature.at("errors"), [&] {
       return entry->invoke(method, input.one(), ctx);
     }));
-    if (!service.typed_dispatch()) cordis::contract::check_value(signature.at("result"), result,
-                                  "resource result", ctx.validation());
+    if (!service.typed_dispatch())
+      cordis::contract::check_value(signature.at("result"), result,
+                                    "resource result", ctx.validation());
     co_return Payload(result);
   }
 
@@ -348,14 +364,16 @@ class Host {
                                      message});
   }
   void output(const Response &response) {
-    stdio.write(encode(Frame(response)));
+    stdio.write(encode(Frame(response), dependencies->frame_capacity));
   }
   // dispatch owns the request until execution and its Context drain finish.
   Async<Payload> execute(const Request &request) {
     shape(request);
     {
       std::lock_guard lock(state_mutex);
-      if (request.command != "hello" && (!greeted || request.session != session || request.activation != activation))
+      if (request.command != "hello" &&
+          (!greeted || request.session != session ||
+           request.activation != activation))
         throw Refusal("stale_session", "session or activation mismatch");
     }
     auto operation_admission = seen.admit(request.operation);
@@ -363,7 +381,8 @@ class Host {
     const std::size_t bodies =
         command == "call" || command == "resource_acquire" ||
                 command == "resource_call" || command == "event_call" ||
-                command == "middleware_call" || command == "middleware_terminal"
+                command == "middleware_call" ||
+                command == "middleware_terminal" || command == "reference_call"
             ? 1
             : 0;
     if (request.payload.messages.size() != bodies)
@@ -397,9 +416,15 @@ class Host {
       if (greeted)
         throw Refusal("protocol", "hello must be first encoded");
       max_inflight = payload.at("max_inflight").get<std::size_t>();
-      if (max_inflight < 1 || max_inflight > 128) throw Refusal("invalid_argument", "max_inflight must be in 1..=128");
+      if (max_inflight < 1 || max_inflight > 128)
+        throw Refusal("invalid_argument", "max_inflight must be in 1..=128");
       ordinary_lane.capacity(max_inflight);
-      dependencies->validation = cordis::validation(payload.at("validation").get<std::string>());
+      const auto frame_capacity = payload.at("frame_capacity").get<std::uint64_t>();
+      if (frame_capacity == 0 || frame_capacity > static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
+        throw Refusal("invalid_argument", "invalid frame_capacity");
+      dependencies->frame_capacity = static_cast<std::size_t>(frame_capacity);
+      dependencies->validation =
+          cordis::validation(payload.at("validation").get<std::string>());
       if (payload.at("contract") != service.contract())
         throw Refusal("contract_mismatch", "exact contract revision required");
       if (payload.value("dependencies", Json::object()) !=
@@ -495,8 +520,7 @@ class Host {
                        {"streams", false},
                        {"resources", true},
                        {"dependency_resources", true},
-                       {"max_inflight", max_inflight},
-                       {"max_message", max_message}}}};
+                       {"max_inflight", max_inflight}}}};
     }
     {
       std::lock_guard lock(state_mutex);
@@ -534,7 +558,8 @@ class Host {
         service.dependencies(), effects_enabled ? effects : nullptr,
         command == "effect_release" || command == "resource_release" ||
             command == "deactivate" || command == "sequence_undo" ||
-            command == "sequence_release" || command == "middleware_release",
+            command == "sequence_release" || command == "middleware_release" ||
+            command == "reference_close",
         sequences_enabled ? sequences : nullptr,
         scopes_enabled ? scopes : nullptr, tasks_enabled ? tasks : nullptr,
         tasks_enabled && command == "task_call"
@@ -542,9 +567,18 @@ class Host {
             : std::shared_ptr<corral::Event>(),
         events_enabled ? events : nullptr,
         middleware_enabled ? middlewares : nullptr,
-        composition_enabled ? std::optional<Json>(composition) : std::nullopt);
+        composition_enabled ? std::optional<Json>(composition) : std::nullopt,
+        references);
     co_return co_await native::with_cleanup(
         [&]() -> Async<Payload> {
+          if (command == "reference_call" || command == "reference_close") {
+            const auto id = payload.at("callback").get<std::string>();
+            auto callback = references->get(id);
+            auto result = co_await (*callback)(ctx, request.payload);
+            if (command == "reference_close")
+              references->remove(id);
+            co_return result;
+          }
           if (command == "activate") {
             {
               std::lock_guard lock(state_mutex);
@@ -659,6 +693,9 @@ class Host {
             co_return Json::object();
           }
           if (command == "deactivate") {
+            if (!references->empty())
+              throw Refusal("references_remaining",
+                            "interface objects not released");
             {
               std::unique_lock lock(state_mutex);
               active = false;
@@ -708,8 +745,10 @@ class Host {
             signature = &cordis::contract::operation(
                 descriptor.at("methods"),
                 payload.at("method").get<std::string>());
-            if (!service.typed_dispatch()) cordis::contract::check_value(signature->at("args"),
-                                          request.payload.one(), "method args", ctx.validation());
+            if (!service.typed_dispatch())
+              cordis::contract::check_value(signature->at("args"),
+                                            request.payload.one(),
+                                            "method args", ctx.validation());
           } catch (const std::exception &e) {
             throw Refusal("invalid_argument", e.what());
           }
@@ -718,8 +757,9 @@ class Host {
                 return service.invoke(payload.at("method").get<std::string>(),
                                       request.payload.one(), ctx);
               }));
-          if (!service.typed_dispatch()) cordis::contract::check_value(signature->at("result"), result,
-                                        "method result", ctx.validation());
+          if (!service.typed_dispatch())
+            cordis::contract::check_value(signature->at("result"), result,
+                                          "method result", ctx.validation());
           co_return Payload(result);
         },
         [ctx] { return ctx.finish(); });
@@ -762,7 +802,8 @@ public:
     runtime.close();
   }
   Async<void> read() {
-    while (auto frame = co_await stdio.read(greeted ? dependencies->validation : Validation::Audit)) {
+    while (auto frame = co_await stdio.read(greeted ? dependencies->validation
+                                                    : Validation::Audit)) {
       if (auto *reply = std::get_if<Response>(&*frame)) {
         dependencies->receive(*reply);
         continue;
@@ -783,8 +824,8 @@ public:
           : command == "sequence_next"       ? step_lane
           : (command == "effect_release" || command == "sequence_undo" ||
              command == "sequence_release" || command == "event_release" ||
-             command == "middleware_release" || command == "resource_release" ||
-             command == "task_cancel")
+             command == "middleware_release" || command == "reference_close" ||
+             command == "resource_release" || command == "task_cancel")
               ? cleanup_lane
               : ordinary_lane;
       if (!lane.post([this, request, command]() mutable -> Async<void> {

@@ -14,6 +14,7 @@ class Server {
   native::Runtime &runtime;
   std::function<Async<Response>(Request)> dispatch;
   std::function<Validation()> validation;
+  std::function<std::size_t()> capacity;
   asio::ip::tcp::acceptor listener;
   std::map<std::uint64_t, std::weak_ptr<Socket>> connections;
   std::uint64_t next_connection = 0;
@@ -79,13 +80,14 @@ class Server {
         throw std::runtime_error(
             "chunked requests not supported by this profile");
       const auto &length_text = headers.at("content-length");
-      if (length_text.empty() || length_text.size() > 7 ||
+      if (length_text.empty() || length_text.size() > 10 ||
           !std::all_of(length_text.begin(), length_text.end(),
                        [](char c) { return c >= '0' && c <= '9'; }))
         throw std::runtime_error("invalid Content-Length");
-      const auto length = static_cast<std::size_t>(std::stoul(length_text));
-      if (length > max_message)
+      const auto advertised_length = std::stoull(length_text);
+      if (advertised_length > capacity())
         throw std::runtime_error("HTTP body too large");
+      const auto length = static_cast<std::size_t>(advertised_length);
       const auto type = headers.at("content-type");
       if (type != content_type)
         throw std::runtime_error("unsupported HTTP content type");
@@ -137,7 +139,7 @@ class Server {
                  : code == "stale_session" || code == "closed" ? 409
                                                                : 400;
       }
-      const auto body = encode(Frame(response));
+      const auto body = encode(Frame(response), capacity());
       const auto prefix =
           "HTTP/1.1 " + std::to_string(status) +
           (ok ? " OK\r\n" : " Error\r\n") + "Content-Type: " + content_type +
@@ -200,9 +202,10 @@ public:
   }
   Server(native::Runtime &runtime,
          std::function<Async<Response>(Request)> dispatch,
-         std::function<Validation()> validation)
+         std::function<Validation()> validation,
+         std::function<std::size_t()> capacity)
       : runtime(runtime), dispatch(std::move(dispatch)),
-        validation(std::move(validation)), listener(runtime.io()) {}
+        validation(std::move(validation)), capacity(std::move(capacity)), listener(runtime.io()) {}
   // The owner stops this server and drains Runtime before destroying either.
   const std::string &endpoint() const { return url; }
 };

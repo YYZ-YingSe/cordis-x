@@ -38,7 +38,7 @@ impl Setup {
         let mut spec = ProcessSpec::new(executable);
 
         spec.endpoint = endpoint;
-        spec.timeout = timeout;
+        spec.execution_timeout = Some(timeout);
         spec.args = vec![
             "--test-hooks".into(),
             "--trace".into(),
@@ -649,7 +649,7 @@ async fn cpp_stdio_backpressure_keeps_input_and_other_calls_moving() {
     .await;
     for _ in 0..12 {
         let size = bounded(process.output.read_u32()).await.unwrap();
-        assert!(size <= cordis_wire::MAX_MESSAGE as u32);
+        assert!(size <= cordis_wire::DEFAULT_FRAME_CAPACITY as u32);
 
         let mut bytes = vec![0; size as usize];
         bounded(process.output.read_exact(&mut bytes))
@@ -740,7 +740,7 @@ async fn cpp_streaming_frames_preserve_boundaries_and_allow_queued_calls_to_prog
     bounded(process.input.write_all(&rest)).await.unwrap();
     for _ in 0..48 {
         let length = bounded(process.output.read_u32()).await.unwrap();
-        assert!(length <= cordis_wire::MAX_MESSAGE as u32);
+        assert!(length <= cordis_wire::DEFAULT_FRAME_CAPACITY as u32);
 
         let mut bytes = vec![0; length as usize];
         bounded(process.output.read_exact(&mut bytes))

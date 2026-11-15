@@ -152,12 +152,9 @@ impl Plan {
                     }
                 }
                 Value::Map(values) => {
-                    for (key, value) in values {
+                    for value in values.values() {
                         budget.take(depth + 1)?;
                         budget.take(depth + 2)?;
-                        if let prost_reflect::MapKey::String(key) = key {
-                            budget.bytes(key.len())?;
-                        }
                         self.leaf(field, value, depth + 2, budget, validation)?;
                     }
                 }
@@ -185,8 +182,6 @@ impl Plan {
         }
         budget.take(depth)?;
         match (value, &field.kind) {
-            (Value::String(v), _) => budget.bytes(v.len()),
-            (Value::Bytes(v), _) => budget.bytes(v.len()),
             (Value::F32(v), _) if !v.is_finite() => Err("non-finite float32".into()),
             (Value::F64(v), _) if !v.is_finite() => Err("non-finite float64".into()),
             (Value::EnumNumber(v), Kind::Enum(e)) if e.get_value(*v).is_none() => {

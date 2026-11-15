@@ -126,7 +126,7 @@ mod exports {
                         &value,
                     )
                     .unwrap()
-                    .encode(cordis_component::MAX_BYTES)
+                    .encode(None)
                     .unwrap(),
                 ))
                 .map_err(|e| types::Failure::from(refused("invalid_argument", e)))?;

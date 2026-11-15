@@ -75,6 +75,72 @@ fn copied_business_body_outlives_foreign_buffer() {
     assert_eq!(count.load(Ordering::SeqCst), 1);
 }
 #[test]
+fn large_business_body_outlives_foreign_release_for_every_validation_policy() {
+    for validation in [Validation::Contract, Validation::Checked, Validation::Audit] {
+        let count = AtomicUsize::new(0);
+        let payload = Payload::message(vec![173; 3 * 1024 * 1024].into());
+        let mut bytes = payload.encode().unwrap().to_vec();
+        let result = finish(
+            RawResult {
+                value: RawBuffer {
+                    data: bytes.as_ptr(),
+                    len: bytes.len(),
+                },
+                owner: (&count as *const AtomicUsize).cast_mut().cast(),
+                ..RawResult::default()
+            },
+            release,
+            false,
+            validation,
+        )
+        .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        bytes.fill(0);
+        assert_eq!(result.value, payload);
+    }
+}
+#[test]
+fn large_error_text_preserves_failure_responsibility_and_releases_once() {
+    let count = AtomicUsize::new(0);
+    let message = "x".repeat(2 * 1024 * 1024);
+    for status in [1, 2, 3] {
+        let result = finish(
+            RawResult {
+                status,
+                code: Slice::new("failed"),
+                message: Slice::new(&message),
+                owner: (&count as *const AtomicUsize).cast_mut().cast(),
+                ..RawResult::default()
+            },
+            release,
+            false,
+            Validation::Checked,
+        );
+        match (status, result) {
+            (
+                1,
+                Err(Error::Rejected {
+                    code,
+                    message: actual,
+                }),
+            )
+            | (
+                3,
+                Err(Error::Refused {
+                    code,
+                    message: actual,
+                }),
+            ) => {
+                assert_eq!(code, "failed");
+                assert_eq!(actual, message);
+            }
+            (2, Err(Error::Unknown(actual))) => assert!(actual.ends_with(&message)),
+            _ => panic!("failure responsibility changed"),
+        }
+    }
+    assert_eq!(count.load(Ordering::SeqCst), 3);
+}
+#[test]
 fn rejects_invalid_buffer_before_dereferencing_and_preserves_acquisition_uncertainty() {
     for raw in [
         RawBuffer {
@@ -83,10 +149,10 @@ fn rejects_invalid_buffer_before_dereferencing_and_preserves_acquisition_uncerta
         },
         RawBuffer {
             data: std::ptr::dangling(),
-            len: cordis_wire::MAX_MESSAGE + 1,
+            len: isize::MAX as usize + 1,
         },
     ] {
-        assert!(unsafe { read_payload(&raw, &mut Budget::new(), Validation::Checked) }.is_err());
+        assert!(unsafe { read_payload(&raw, Validation::Checked) }.is_err());
     }
     let count = AtomicUsize::new(0);
     let bytes = Payload::from(Value::Null).encode().unwrap();

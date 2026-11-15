@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub use serde_json::{Value, json};
 use std::fmt;
 
-pub const MAX_MESSAGE: usize = 1024 * 1024;
+pub const DEFAULT_FRAME_CAPACITY: usize = 1024 * 1024;
 pub use cordis_contract::portable::{MAX_DEPTH, MAX_INTEGER};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error(pub String);
@@ -67,7 +67,7 @@ pub enum Incoming {
     Response(Response),
 }
 impl Request {
-    pub fn encode(&self) -> Result<Bytes> {
+    pub fn encode(&self, capacity: usize) -> Result<Bytes> {
         binary::Frame {
             session: self.session.clone(),
             activation: self.activation.clone(),
@@ -77,7 +77,7 @@ impl Request {
                 payload: self.payload.clone(),
             },
         }
-        .encode()
+        .encode(capacity)
     }
     pub fn response(&self, outcome: Outcome) -> Response {
         Response {
@@ -98,7 +98,7 @@ impl Request {
     }
 }
 impl Response {
-    pub fn encode(&self) -> Result<Bytes> {
+    pub fn encode(&self, capacity: usize) -> Result<Bytes> {
         binary::Frame {
             session: self.session.clone(),
             activation: self.activation.clone(),
@@ -110,7 +110,7 @@ impl Response {
                 Outcome::Unknown { error } => binary::Outcome::Unknown(error.clone()),
             }),
         }
-        .encode()
+        .encode(capacity)
     }
     pub fn is_success(&self) -> bool {
         matches!(self.outcome, Outcome::Success { .. })

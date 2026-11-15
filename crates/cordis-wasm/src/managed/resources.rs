@@ -61,9 +61,6 @@ impl ContextService {
         let factory = contract::resource(self.instance.module.descriptor(), kind)
             .map_err(Error::InvalidInput)?;
         args.check(&factory.args).map_err(Error::InvalidInput)?;
-        if kind.len() > cordis_component::MAX_BYTES {
-            return Err(Error::InvalidInput("kind too long".into()));
-        }
         if ctx.is_cleanup() {
             return Err(refused(
                 "cleanup_resource",
@@ -216,9 +213,6 @@ impl ContextResource {
         method: &str,
         mut args: cordis_wire::local::Envelope,
     ) -> Result<cordis_wire::local::Envelope> {
-        if method.len() > cordis_component::MAX_BYTES {
-            return Err(Error::InvalidInput("method too long".into()));
-        }
         let method = method.to_owned();
         self.resource
             .call(move |ticket, ctx| {

@@ -4,6 +4,7 @@
 
 namespace cordis {
 struct Resource {
+  virtual bool typed_dispatch() const { return false; }
   virtual ~Resource() = default;
   virtual Async<Message> invoke(Context ctx, std::string method,
                                 Message args) = 0;

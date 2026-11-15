@@ -1,4 +1,5 @@
 import { Identities, makeRoom, Completion } from './retention.ts';
+import { ReferenceRegistry } from './references.ts';
 import { OperationInbox, parseOperation } from '../../protocols/session/operations.ts';
 import type { Message } from '../../core/message.ts';
 import { checkBinary } from '../../core/protobuf.ts';
@@ -25,7 +26,7 @@ export type { ScopeCallback } from './scope.ts';
 export { EffectSequence, Inverse, iterate } from './sequence.ts';
 export type { EffectStep, EffectProducer, EffectCompletion } from './sequence.ts';
 import { listen } from '../../protocols/http/server.ts';
-import { MAX_MESSAGE, validate } from '../../core/value.ts';
+import { validate } from '../../core/value.ts';
 import type { Value } from '../../core/value.ts';
 import { ResourceRecord, ResourceClosed } from './resources.ts';
 import { Context, DependencyChannel, EffectRegistry, RpcError } from './context.ts';
@@ -84,6 +85,7 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
     inflight = 0;
   const channel = new DependencyChannel();
   const effects = new EffectRegistry();
+  const references = new ReferenceRegistry();
   let effectsEnabled = false,
     sequencesEnabled = false,
     scopesEnabled = false,
@@ -160,7 +162,7 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
     outcome: { kind, error: { code, message } },
   });
   const executeRequest = async (request: Request): Promise<Payload> => {
-    const bodies=['call','resource_acquire','resource_call','event_call','middleware_call','middleware_terminal'].includes(request.command)?1:0;
+    const bodies=['call','resource_acquire','resource_call','event_call','middleware_call','middleware_terminal','reference_call'].includes(request.command)?1:0;
     if(request.payload.messages.length!==bodies) throw new Refusal('invalid_argument','unexpected business message count');
     if (
       Object.keys(request).length !== 5 ||
@@ -228,6 +230,9 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
         throw new Refusal('composition_mismatch', 'composition bindings must match installation');
       if (typeof payload.max_inflight !== "number" || !Number.isInteger(payload.max_inflight) || payload.max_inflight < 1 || payload.max_inflight > 128) throw new Refusal("invalid_argument", "max_inflight must be in 1..=128");
       maxInflight = payload.max_inflight;
+      if (typeof payload.frame_capacity !== 'number' || !Number.isSafeInteger(payload.frame_capacity) || payload.frame_capacity < 1 || payload.frame_capacity > 0x7fffffff)
+        throw new Refusal('invalid_argument', 'invalid frame_capacity');
+      channel.frameCapacity = payload.frame_capacity;
       channel.validation = input(() => validation(payload.validation));
       activation = request.activation;
       compositionEnabled = object(payload.capabilities ?? {}).composition === true;
@@ -266,7 +271,6 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
           resources: !!service.acquire,
           dependency_resources: object(payload.capabilities ?? {}).dependency_resources === true,
           max_inflight: maxInflight,
-          max_message: MAX_MESSAGE,
         },
       });
     }
@@ -285,6 +289,7 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
         'sequence_undo',
         'sequence_release',
         'middleware_release',
+        'reference_close',
       ].includes(request.command),
       sequencesEnabled ? sequences : undefined,
       scopesEnabled ? scopes : undefined,
@@ -295,6 +300,7 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
       eventsEnabled ? events : undefined,
       middlewareEnabled ? middlewares : undefined,
       compositionEnabled ? composition : undefined,
+      references,
     );
     const scoped = async <T>(callback: () => T | Promise<T>): Promise<T> => {
       try {
@@ -303,6 +309,16 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
         await ctx.finish();
       }
     };
+    if (request.command === 'reference_call' || request.command === 'reference_close') {
+      if (!attempted || typeof payload.callback !== 'string')
+        throw new Refusal('closed', 'reference callback unavailable');
+      if (request.command === 'reference_close') {
+        await scoped(() => references.close(payload.callback as string, ctx));
+        return data(null);
+      }
+      if (typeof payload.method !== 'string') throw new Refusal('invalid_argument', 'missing reference method');
+      return data(null, await scoped(() => references.invoke(payload.callback as string, payload.method as string, one(request.payload), ctx)));
+    }
     if (request.command === 'activate') {
       if (attempted) throw new Refusal('protocol', 'activation already attempted');
       attempted = true;
@@ -411,6 +427,8 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
         throw new Refusal('effects_remaining', 'sequences not confirmed released');
       if (!effects.released)
         throw new Refusal('effects_remaining', 'caller effects not confirmed released');
+      if (!references.released)
+        throw new Refusal('references_remaining', 'interface objects not confirmed released');
       if ([...resources.values()].some((entry) => !entry.released))
         throw new Refusal('resources_remaining', 'caller resources not confirmed released');
       if (attempted) await scoped(() => service.deactivate(ctx));
@@ -485,15 +503,15 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
   };
   const server = await listen(
     options.http !== false,
-    { active: () => !!activation, validation: () => channel.validation },
+    { active: () => !!activation, validation: () => channel.validation, capacity: () => channel.frameCapacity },
     dispatch,
   );
   url = server.url;
   const write = (bytes: Uint8Array) => writeFrame(process.stdout, bytes);
-  const respond = (response: Response) => write(encodeFrame(response));
+  const respond = (response: Response) => write(encodeFrame(response, channel.frameCapacity));
   let acknowledged = false;
   try {
-    for await (const value of readFrames(process.stdin, () => session ? channel.validation : 'audit')) {
+    for await (const value of readFrames(process.stdin, () => session ? channel.validation : 'audit', () => channel.frameCapacity)) {
       if ('outcome' in value) { channel.receive(value); continue; }
       const request = value;
       if (request.command === 'hello') {
@@ -522,6 +540,7 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
                             'sequence_release',
                             'event_release',
                             'middleware_release',
+                            'reference_close',
                           ].includes(request.command)
                         ? 1
                         : 0;

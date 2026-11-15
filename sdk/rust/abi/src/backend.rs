@@ -120,6 +120,83 @@ impl Abi {
     }
     async fn execute(&self, operation: Operation) -> Result<Reply> {
         let result = match operation {
+            Operation::ReferenceExport { descriptor, object } => {
+                let definition = descriptor.clone();
+                let callback: callbacks::WireCallback = Rc::new(move |ctx, payload| {
+                    let object = object.clone();
+                    let definition = definition.clone();
+                    Box::pin(async move {
+                        if payload.control["close"] == true {
+                            object.close(ctx).await?;
+                            return Ok(Value::Null.into());
+                        }
+                        let method = payload.control["method"]
+                            .as_str()
+                            .ok_or_else(|| refused("invalid_argument", "missing reference method"))?
+                            .to_owned();
+                        let signature = cordis_sdk_core::contract::method(
+                            &definition.interface().methods,
+                            &method,
+                        )
+                        .map_err(unknown)?;
+                        let args = cordis_sdk_core::Message::from_bytes(
+                            signature.args.clone(),
+                            payload.one().map_err(unknown)?,
+                        )
+                        .map_err(unknown)?;
+                        if !object.typed_dispatch() {
+                            args.validate(ctx.validation()).map_err(unknown)?;
+                        }
+                        let result = object.invoke(ctx, method, args).await?;
+                        result.check(&signature.result).map_err(unknown)?;
+                        Ok(Payload::message(result.encode(None).map_err(unknown)?))
+                    })
+                });
+                let id = self.registry.insert_payload('r', callback)?;
+                let result = self
+                    .reactive(
+                        9,
+                        0,
+                        numeric(&id),
+                        String::new(),
+                        json!({"interface":cordis_sdk_core::contract::encode(&descriptor)}),
+                    )
+                    .await;
+                if matches!(result, Err(Failure::Rejected(_) | Failure::Refused(_))) {
+                    self.registry.remove(&id);
+                }
+                return result
+                    .and_then(|r| r.value.control_only().map_err(unknown))
+                    .map(Reply::Value);
+            }
+            Operation::ReferenceInvoke {
+                key,
+                digest,
+                descriptor,
+                method,
+                args,
+            } => {
+                let signature =
+                    cordis_sdk_core::contract::method(&descriptor.interface().methods, &method)
+                        .map_err(unknown)?;
+                let payload = Payload::with_message(
+                    json!({"reference":key,"digest":digest,"method":method}),
+                    args.encode(None).map_err(unknown)?,
+                );
+                let reply = self
+                    .reactive_payload(10, 0, 0, String::new(), payload)
+                    .await?;
+                return cordis_sdk_core::Message::from_bytes(
+                    signature.result.clone(),
+                    reply.value.one().map_err(unknown)?,
+                )
+                .map(Reply::Message)
+                .map_err(unknown);
+            }
+            Operation::ReferenceDispose { key } => {
+                self.reactive(11, 0, 0, String::new(), json!({"reference":key}))
+                    .await?
+            }
             Operation::Acquire {
                 dependency,
                 kind,
@@ -136,7 +213,7 @@ impl Abi {
                         dependency,
                         kind,
                         Payload::message(
-                            args.encode(cordis_wire::MAX_MESSAGE)
+                            args.encode(None)
                                 .map_err(|e| refused("invalid_argument", e))?,
                         ),
                     ))
@@ -157,7 +234,7 @@ impl Abi {
                         String::new(),
                         method,
                         Payload::message(
-                            args.encode(cordis_wire::MAX_MESSAGE)
+                            args.encode(None)
                                 .map_err(|e| refused("invalid_argument", e))?,
                         ),
                     ))
@@ -196,7 +273,7 @@ impl Abi {
                         dependency,
                         method,
                         Payload::message(
-                            args.encode(cordis_wire::MAX_MESSAGE)
+                            args.encode(None)
                                 .map_err(|e| refused("invalid_argument", e))?,
                         ),
                     ))
@@ -353,7 +430,7 @@ impl Abi {
                                 value.check(&signature.result).map_err(unknown)?;
                                 Ok(Payload::with_message(
                                     json!({"kind":"break"}),
-                                    value.encode(cordis_wire::MAX_MESSAGE).map_err(unknown)?,
+                                    value.encode(None).map_err(unknown)?,
                                 ))
                             }
                         }
@@ -382,7 +459,7 @@ impl Abi {
                         event,
                         Payload::with_message(
                             json!({"serial":serial}),
-                            args.encode(cordis_wire::MAX_MESSAGE).map_err(unknown)?,
+                            args.encode(None).map_err(unknown)?,
                         ),
                     )
                     .await?
@@ -484,7 +561,7 @@ impl Abi {
                         0,
                         numeric(&id),
                         name,
-                        Payload::message(args.encode(cordis_wire::MAX_MESSAGE).map_err(unknown)?),
+                        Payload::message(args.encode(None).map_err(unknown)?),
                     )
                     .await;
                 if !matches!(result, Err(Failure::Unknown(_))) {
@@ -504,7 +581,7 @@ impl Abi {
                         self.id(&next, Kind::Next)?,
                         0,
                         String::new(),
-                        Payload::message(args.encode(cordis_wire::MAX_MESSAGE).map_err(unknown)?),
+                        Payload::message(args.encode(None).map_err(unknown)?),
                     )
                     .await?
                     .value;
@@ -515,7 +592,7 @@ impl Abi {
             Operation::Install { factory, config } => {
                 let config = Payload::message(
                     config
-                        .encode(cordis_wire::MAX_MESSAGE)
+                        .encode(None)
                         .map_err(|e| refused("invalid_argument", e))?,
                 );
                 if !self.bindings.factories.contains(&factory) {
@@ -554,7 +631,7 @@ impl Abi {
             Operation::Provide { service, value } => {
                 let value = Payload::message(
                     value
-                        .encode(cordis_wire::MAX_MESSAGE)
+                        .encode(None)
                         .map_err(|e| refused("invalid_argument", e))?,
                 );
                 if !self.bindings.provisions.contains_key(&service) {
@@ -582,6 +659,7 @@ impl Backend for Abi {
                 && matches!(
                     operation,
                     Operation::Defer { .. }
+                        | Operation::ReferenceExport { .. }
                         | Operation::Acquire { .. }
                         | Operation::Effect { .. }
                         | Operation::Scope { .. }
@@ -637,7 +715,5 @@ fn binary_output(
     value: cordis_sdk_core::Message,
 ) -> Result<Payload> {
     value.check(contract).map_err(unknown)?;
-    Ok(Payload::message(
-        value.encode(cordis_wire::MAX_MESSAGE).map_err(unknown)?,
-    ))
+    Ok(Payload::message(value.encode(None).map_err(unknown)?))
 }

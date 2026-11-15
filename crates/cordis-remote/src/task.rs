@@ -154,7 +154,7 @@ async fn execute(ctx: &Context, id: &str, session: WeakSession) -> Result<Value>
                 session.request("task_cancel", json!({"task":id})).await?;
                 running.await
             };
-            match tokio::time::timeout(session.task_stop_timeout(), stopping).await {
+            match tokio::time::timeout(session.stop_timeout(), stopping).await {
                 Ok(Ok(reply)) => Ok(reply),
                 other => {
                     let failure = Error::OutcomeUnknown(format!("task {id} did not confirm exit: {other:?}"));

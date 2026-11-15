@@ -9,6 +9,7 @@ pub struct Module {
     pub(crate) _resources: tempfile::TempDir,
     pub(crate) name: String,
     pub(crate) services: BTreeMap<String, Service>,
+    pub(crate) references: BTreeMap<String, Descriptor>,
     pub(crate) pool: DescriptorPool,
     pub(crate) descriptor: Vec<u8>,
     pub(crate) includes: Vec<PathBuf>,

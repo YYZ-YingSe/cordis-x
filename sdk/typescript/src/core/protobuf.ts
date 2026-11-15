@@ -8,7 +8,7 @@ const standardFiles = new Map(Object.values(wkt).filter((v): v is DescFile => ty
 import { reflect, isReflectMessage, type ReflectMessage, type ReflectList, type ReflectMap } from '@bufbuild/protobuf/reflect';
 import type { MessageContract } from './contract.ts';
 import type { Value } from './value.ts';
-const MAX_BYTES = 1024 * 1024, MAX_NODES = 65536, MAX_DEPTH = 64;
+const MAX_DESCRIPTOR_BYTES = 1024 * 1024, MAX_NODES = 65536, MAX_DEPTH = 64;
 const resolved = new WeakMap<MessageContract, {
     name: string;
     descriptor: string;
@@ -90,7 +90,7 @@ export function messageType(contract: MessageContract): DescMessage {
     if (contract.descriptor.length > 1398104)
         throw new Error('schema byte limit exceeded');
     const bytes = Buffer.from(contract.descriptor, 'base64');
-    if (bytes.length > MAX_BYTES || bytes.toString('base64') !== contract.descriptor)
+    if (bytes.length > MAX_DESCRIPTOR_BYTES || bytes.toString('base64') !== contract.descriptor)
         throw new Error('invalid schema descriptor');
     const files = fromBinary(FileDescriptorSetSchema, bytes).file;
     let registry = createFileRegistry();
@@ -107,7 +107,7 @@ export function messageType(contract: MessageContract): DescMessage {
 export function validateMessage<Desc extends DescMessage>(schema: Desc, value: MessageShape<Desc>, policy: Validation = 'audit', decoded = false): void {
     if (policy === 'contract') return;
     const plan = messagePlan(schema);
-    let budget = MAX_NODES, remainingBytes = MAX_BYTES;
+    let budget = MAX_NODES;
     const active = new Set<Message>();
     const take = (depth: number) => { if (depth > MAX_DEPTH || --budget < 0)
         throw new Error('message depth/node limit exceeded'); };
@@ -118,12 +118,6 @@ export function validateMessage<Desc extends DescMessage>(schema: Desc, value: M
             return;
         }
         take(depth);
-        if (typeof value === 'string')
-            remainingBytes -= Buffer.byteLength(value);
-        else if (value instanceof Uint8Array)
-            remainingBytes -= value.byteLength;
-        if (remainingBytes < 0)
-            throw new Error('message byte limit exceeded');
         if (step.enumValues && !step.enumValues.has(value as number))
             throw new Error('undeclared enum value');
         if (field.scalar === ScalarType.FLOAT || field.scalar === ScalarType.DOUBLE) {
@@ -180,11 +174,6 @@ export function validateMessage<Desc extends DescMessage>(schema: Desc, value: M
                     take(depth + 2);
                     if (!decoded && typeof key === 'string' && !key.isWellFormed())
                         throw new Error('invalid map key');
-                    if (typeof key === 'string') {
-                        remainingBytes -= Buffer.byteLength(key);
-                        if (remainingBytes < 0)
-                            throw new Error('message byte limit exceeded');
-                    }
                     leaf(step, child, depth + 2);
                 }
             }
@@ -241,7 +230,7 @@ function parse<Desc extends DescMessage>(schema: Desc, value: Value): MessageSha
     return fromBinary(schema, toBinary(schema, message), { recursionLimit: 100 });
 }
 export function parseBinary(contract: MessageContract, bytes: Uint8Array, policy: Validation = 'checked'): Message {
-    if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_BYTES) throw new Error('invalid protobuf body');
+    if (!(bytes instanceof Uint8Array)) throw new Error('invalid protobuf body');
     const schema = messageType(contract);
     if (policy === 'audit') auditBinary(schema, bytes);
     const message = fromBinary(schema, bytes, { recursionLimit: 100 });
@@ -263,11 +252,10 @@ export function protobuf<Desc extends DescMessage>(schema: Desc): MessageCodec<M
         encode(value, policy = 'contract') {
             validateMessage(schema, value, policy);
             const bytes = toBinary(schema, value);
-            if (bytes.byteLength > MAX_BYTES) throw new Error('encoded message byte limit exceeded');
             return bytes;
         },
         decode(bytes, policy = 'contract') {
-            if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_BYTES) throw new Error('invalid protobuf body');
+            if (!(bytes instanceof Uint8Array)) throw new Error('invalid protobuf body');
             if (policy === 'audit') auditBinary(schema, bytes);
             const value = fromBinary(schema, bytes, { recursionLimit: 100 });
             validateMessage(schema, value, policy, true);
@@ -281,6 +269,6 @@ export function protobuf<Desc extends DescMessage>(schema: Desc): MessageCodec<M
 }
 
 export function checkBinary(contract: MessageContract, bytes: Uint8Array, policy: Validation): void {
-    if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_BYTES) throw new Error('invalid protobuf body');
+    if (!(bytes instanceof Uint8Array)) throw new Error('invalid protobuf body');
     if (policy !== 'contract') parseBinary(contract, bytes, policy);
 }

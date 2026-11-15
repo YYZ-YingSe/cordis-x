@@ -4,7 +4,8 @@
 #include <ostream>
 namespace cordis::transports {
 inline bool read_frame(std::istream &input, session::Frame &frame,
-                       Validation validation = Validation::Checked) {
+                       Validation validation = Validation::Checked,
+                       size_t capacity = session::default_frame_capacity) {
   unsigned char header[4];
   input.read(reinterpret_cast<char *>(header), 4);
   if (input.gcount() == 0 && input.eof())
@@ -14,7 +15,7 @@ inline bool read_frame(std::istream &input, session::Frame &frame,
   uint32_t length = 0;
   for (auto byte : header)
     length = (length << 8) | byte;
-  if (length < 1 || length > session::max_message)
+  if (length < 1 || length > capacity)
     throw std::runtime_error("invalid frame length");
   std::vector<uint8_t> bytes(length);
   input.read(reinterpret_cast<char *>(bytes.data()), length);
@@ -24,8 +25,10 @@ inline bool read_frame(std::istream &input, session::Frame &frame,
   return true;
 }
 inline void write_frame(std::ostream &output,
-                        const std::vector<uint8_t> &bytes) {
-  if (bytes.empty() || bytes.size() > session::max_message)
+                        const std::vector<uint8_t> &bytes,
+                        size_t capacity = session::default_frame_capacity) {
+  if (bytes.empty() || bytes.size() > capacity ||
+      bytes.size() > std::numeric_limits<uint32_t>::max())
     throw std::runtime_error("invalid frame length");
   auto length = static_cast<uint32_t>(bytes.size());
   unsigned char header[] = {static_cast<unsigned char>(length >> 24),

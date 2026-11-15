@@ -27,6 +27,55 @@ service Test {{option(cordis.schema.contract)={{name:"test.probe" revision:"1" c
 }
 
 #[test]
+fn callable_interfaces_are_transferable_data_without_global_service_registration() {
+    let definition = proto(
+        r#"
+message Data { ObjectRef nested = 1; }
+message ObjectRef { option(cordis.schema.reference)="test.Object"; string key=1; }
+service Object {
+  option(cordis.schema.interface)=true;
+  rpc Next(ObjectRef) returns(ObjectRef);
+  rpc Read(Data) returns(Data);
+}
+"#,
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("test.proto");
+    std::fs::write(&input, &definition).unwrap();
+    let module = compile(
+        &input,
+        &[directory.path().into(), root()],
+        &GeneratorTools::default(),
+    )
+    .unwrap();
+    assert_eq!(module.services().len(), 1);
+    let output = backend::generate(
+        &module,
+        &[
+            &Rust,
+            &Cpp,
+            &Typescript {
+                sdk: "@cordis-x/sdk".into(),
+            },
+        ],
+        &GeneratorTools::default(),
+    )
+    .unwrap();
+    for filename in ["rust/mod.rs", "cpp/module.hpp", "typescript/module.ts"] {
+        let text = output.iter().find(|(name, _)| *name == filename).unwrap().1;
+        assert!(text.contains("ObjectClient"));
+        assert!(text.contains("ObjectServer"));
+    }
+    for broken in [
+        definition.replace("string key=1", "uint64 key=1"),
+        definition.replace("test.Object", "test.Test"),
+        definition.replace("string key=1", "string key=1; string implementation=2"),
+    ] {
+        assert!(source(&broken).is_err());
+    }
+}
+
+#[test]
 fn nested_proto_paths_work_with_spaces_and_unicode() {
     let directory = tempfile::tempdir().unwrap();
     let include = directory.path().join("合同 sources");
@@ -41,6 +90,42 @@ fn nested_proto_paths_work_with_spaces_and_unicode() {
             .iter()
             .any(|(name, _)| name == "cpp/proto/nested/test.pb.cc")
     );
+}
+#[test]
+fn typescript_types_follow_generated_schemas_for_reserved_message_names() {
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("test.proto");
+    let definition = proto("message Object { string value=1; }").replace(
+        "rpc Echo(Data)returns(Data)",
+        "rpc Echo(Object)returns(Object)",
+    );
+    std::fs::write(&input, definition).unwrap();
+    let module = compile(
+        &input,
+        &[directory.path().into(), root()],
+        &GeneratorTools::default(),
+    )
+    .unwrap();
+    let output = backend::generate(
+        &module,
+        &[&Typescript {
+            sdk: "@cordis-x/sdk".into(),
+        }],
+        &GeneratorTools::default(),
+    )
+    .unwrap();
+    let bindings = output
+        .iter()
+        .find(|(name, _)| *name == "typescript/module.ts")
+        .unwrap()
+        .1;
+    assert!(bindings.contains("MessageShape<typeof pb_test.ObjectSchema>"));
+    let messages = output
+        .iter()
+        .find(|(name, _)| *name == "typescript/proto/test_pb.ts")
+        .unwrap()
+        .1;
+    assert!(messages.contains("type Object$"));
 }
 #[test]
 fn rejects_invalid_types_constraints_and_nonproductive_recursion() {

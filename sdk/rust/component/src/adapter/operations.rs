@@ -1,6 +1,6 @@
 use super::ComponentBackend;
 use super::callbacks::WireCallback;
-use cordis_component::{MAX_BYTES, Payload};
+use cordis_component::Payload;
 use cordis_sdk_core::typed::{Flow, violation};
 use cordis_sdk_core::{
     Result, Value,
@@ -51,9 +51,7 @@ fn binary_output(
     value: cordis_sdk_core::Message,
 ) -> Result<Payload> {
     value.check(shape).map_err(violation)?;
-    Ok(Payload::message(
-        value.encode(MAX_BYTES).map_err(violation)?,
-    ))
+    Ok(Payload::message(value.encode(None).map_err(violation)?))
 }
 impl ComponentBackend {
     async fn register(&self, command: &str, mut args: Value, callback: Callback) -> Result<Reply> {
@@ -88,12 +86,61 @@ impl ComponentBackend {
     pub(super) async fn execute(&self, operation: Operation) -> Result<Reply> {
         use Operation::*;
         let (command, args) = match operation {
+            Operation::ReferenceExport { descriptor, object } => {
+                let definition = descriptor.clone();
+                let callback: WireCallback = Rc::new(move |ctx, payload| {
+                    let definition = definition.clone();
+                    let object = object.clone();
+                    Box::pin(async move {
+                        if payload.control["close"] == true {
+                            object.close(ctx).await?;
+                            return Ok(Value::Null.into());
+                        }
+                        let method = payload.control["method"]
+                            .as_str()
+                            .ok_or_else(|| invalid("missing reference method"))?
+                            .to_owned();
+                        let signature = cordis_sdk_core::contract::method(
+                            &definition.interface().methods,
+                            &method,
+                        )
+                        .map_err(invalid)?;
+                        let args = binary_input(&signature.args, &payload)?;
+                        if !object.typed_dispatch() {
+                            args.validate(ctx.validation()).map_err(invalid)?;
+                        }
+                        binary_output(&signature.result, object.invoke(ctx, method, args).await?)
+                    })
+                });
+                let id = self.callbacks.insert_payload(callback);
+                let result = self.request("reference-export", json!({"callback":id,"interface":cordis_sdk_core::contract::encode(&descriptor)})).await;
+                self.callbacks.registration_result(id, &result);
+                return result.map(Reply::Value);
+            }
+            Operation::ReferenceInvoke {
+                key,
+                digest,
+                descriptor,
+                method,
+                args,
+            } => {
+                let signature =
+                    cordis_sdk_core::contract::method(&descriptor.interface().methods, &method)
+                        .map_err(invalid)?;
+                let payload = Payload::with_message(
+                    json!({"reference":key,"digest":digest,"method":method}),
+                    args.encode(None).map_err(invalid)?,
+                );
+                let result = self.request_payload("reference-invoke", payload).await?;
+                return binary_input(&signature.result, &result).map(Reply::Message);
+            }
+            Operation::ReferenceDispose { key } => ("reference-dispose", json!({"reference":key})),
             Acquire {
                 dependency,
                 kind,
                 args,
             } => {
-                let args = args.encode(MAX_BYTES).map_err(invalid)?;
+                let args = args.encode(None).map_err(invalid)?;
                 let value = self
                     .request_payload(
                         "dependency-resource-acquire",
@@ -123,7 +170,7 @@ impl ComponentBackend {
                 args,
                 result,
             } => {
-                let args = args.encode(MAX_BYTES).map_err(invalid)?;
+                let args = args.encode(None).map_err(invalid)?;
                 let value = self
                     .request_payload(
                         "dependency-resource-invoke",
@@ -152,7 +199,7 @@ impl ComponentBackend {
                 args,
                 result,
             } => {
-                let args = args.encode(MAX_BYTES).map_err(invalid)?;
+                let args = args.encode(None).map_err(invalid)?;
                 let value = self
                     .request_payload(
                         "invoke",
@@ -231,7 +278,7 @@ impl ComponentBackend {
                         "emit",
                         Payload::with_message(
                             json!({"event":event,"serial":serial}),
-                            args.encode(MAX_BYTES).map_err(invalid)?,
+                            args.encode(None).map_err(invalid)?,
                         ),
                     )
                     .await?;
@@ -308,7 +355,7 @@ impl ComponentBackend {
                 let id = self.callbacks.insert_payload(callback);
                 let args = Payload::with_message(
                     json!({"name":name,"callback":id}),
-                    args.encode(MAX_BYTES).map_err(invalid)?,
+                    args.encode(None).map_err(invalid)?,
                 );
                 let result = self.request_payload("run", args).await;
                 if !matches!(result, Err(cordis_sdk_core::Failure::Unknown(_))) {
@@ -323,7 +370,7 @@ impl ComponentBackend {
             }
             Install { factory, config } => {
                 let config = config
-                    .encode(MAX_BYTES)
+                    .encode(None)
                     .map_err(|e| refused("invalid_argument", e))?;
                 return handle(
                     self.request_payload(
@@ -337,7 +384,7 @@ impl ComponentBackend {
             }
             Provide { service, value } => {
                 let value = value
-                    .encode(MAX_BYTES)
+                    .encode(None)
                     .map_err(|e| refused("invalid_argument", e))?;
                 return self
                     .request_payload(
@@ -358,7 +405,7 @@ impl ComponentBackend {
             ScopeDispose { scope } => ("scope-dispose", json!({"grant":grant(&scope)?})),
             TaskJoin { task } => ("join", json!({"grant":grant(&task)?})),
             Next { next, args, result } => {
-                let args = args.encode(MAX_BYTES).map_err(invalid)?;
+                let args = args.encode(None).map_err(invalid)?;
                 let value = self
                     .request_payload(
                         "next",

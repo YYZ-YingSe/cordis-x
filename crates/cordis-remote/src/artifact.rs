@@ -80,13 +80,16 @@ impl ProcessArtifact {
     }
     fn bind(&self, mut spec: ProcessSpec) -> Result<ProcessSpec> {
         // Validate host-selected startup settings without executing foreign code.
-        if spec.timeout.is_zero()
+        if spec.initialization_timeout.is_zero()
             || std::time::Instant::now()
-                .checked_add(spec.timeout)
+                .checked_add(spec.initialization_timeout)
                 .is_none()
-            || spec.task_stop_timeout.is_zero()
+            || spec.execution_timeout.is_some_and(|timeout| {
+                timeout.is_zero() || std::time::Instant::now().checked_add(timeout).is_none()
+            })
+            || spec.stop_timeout.is_zero()
             || std::time::Instant::now()
-                .checked_add(spec.task_stop_timeout)
+                .checked_add(spec.stop_timeout)
                 .is_none()
             || spec.args.iter().any(|arg| arg.contains('\0'))
         {

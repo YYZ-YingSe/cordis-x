@@ -1,4 +1,4 @@
-use cordis_component::{Bytes, MAX_BYTES, Payload, decode, encode};
+use cordis_component::{Bytes, Payload, Validation, decode, decode_with, encode};
 use cordis_wire::json;
 #[test]
 fn canonical_byte_list_preserves_control_and_opaque_business_bodies() {
@@ -9,13 +9,25 @@ fn canonical_byte_list_preserves_control_and_opaque_business_bodies() {
     assert_eq!(decode(encode(&payload).unwrap()).unwrap(), payload);
 }
 #[test]
-fn rejects_malformed_missing_and_oversized_carriers() {
-    for bytes in [vec![], vec![255], vec![0], vec![0; MAX_BYTES + 1]] {
+fn rejects_malformed_and_missing_carriers() {
+    for bytes in [vec![], vec![255], vec![0]] {
         assert!(decode(bytes).is_err());
     }
-    assert!(encode(&Payload::message(Bytes::from(vec![0; MAX_BYTES]))).is_err());
     assert!(Payload::from(json!({})).one().is_err());
     assert!(Payload::message(Bytes::new()).control_only().is_err());
+}
+#[test]
+fn byte_lists_do_not_inherit_stream_transport_capacity() {
+    let payload = Payload::with_message(
+        json!({"resource":"owned"}),
+        vec![173; 3 * 1024 * 1024].into(),
+    );
+    for policy in [Validation::Contract, Validation::Checked, Validation::Audit] {
+        let encoded = encode(&payload).unwrap();
+        let decoded = decode_with(encoded, policy).unwrap();
+        assert_eq!(decoded, payload);
+        assert_eq!(decoded.one().unwrap().len(), 3 * 1024 * 1024);
+    }
 }
 #[test]
 fn metadata_limits_do_not_interpret_business_bytes() {

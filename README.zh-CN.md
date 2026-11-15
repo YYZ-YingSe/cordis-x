@@ -118,6 +118,10 @@ process.bindings = bindings;
 
 可移植 SDK 提供服务、资源、依赖调用、事件、中间件、子插件、作用域、任务和清理副作用。不同后端的能力仍然明确区分：基础 Wasm world 导出服务和资源，managed world 还可以导入宿主 Context 操作。
 
+业务 DTO 不设隐式字符串/bytes 总额。Native、C ABI 和组件 Payload 不继承 Process 限额。Process/HTTP 由宿主的 `ProcessSpec.frame_capacity` 指定容量（部署默认 1 MiB），初始化时统一传给 Rust/C++/TypeScript；物理读入先检查容量再分配，在途操作、连接和输出槽位保持有界且持有到操作结算。内存分配、protobuf 表示、控制元数据与 Wasm Store 限制仍生效。应用传完整类型值，不编写传输分块协议。
+
+Process 和 managed Wasm 的普通调用默认没有执行期限。宿主可显式设置 `execution_timeout`；初始化、实际取消后的排空与清理使用独立期限。丢弃等待不等于取消操作。
+
 原生插件和 C ABI 动态库拥有宿主进程的权限。独立进程本身不构成插件沙箱。Wasm 能访问什么，取决于宿主授予的导入和 WASI 能力，以及配置的执行限制。
 
 WASI TCP 连接和监听分别通过 `Wasi::tcp_connect`、`Wasi::tcp_bind` 配置，

@@ -137,6 +137,15 @@ impl Drop for CallbackReservation {
     }
 }
 impl Instance {
+    pub(crate) fn export_object(&self, object: Rc<dyn ResourceObject>) -> Result<u64> {
+        let id = self.reserve_resource()?;
+        *self
+            .resources
+            .borrow_mut()
+            .get_mut(&id)
+            .expect("reserved object") = Some(object);
+        Ok(id)
+    }
     fn reserve_resource(&self) -> Result<u64> {
         if self.resources.borrow().len() >= 4096 {
             return Err(refused("overloaded", "resource capacity exhausted"));
@@ -157,7 +166,7 @@ impl Instance {
             .and_then(Clone::clone)
             .ok_or_else(|| refused("closed", "resource absent"))
     }
-    fn remove_resource(&self, id: u64) {
+    pub(crate) fn remove_resource(&self, id: u64) {
         let removed = self.resources.borrow_mut().remove(&id);
         drop(removed);
     }

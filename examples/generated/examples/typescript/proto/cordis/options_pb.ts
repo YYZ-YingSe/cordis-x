@@ -12,7 +12,7 @@ import type { Message, UnknownEnum } from "@bufbuild/protobuf";
  * Describes the file cordis/options.proto.
  */
 export const file_cordis_options: GenFile = /*@__PURE__*/
-  fileDesc("ChRjb3JkaXMvb3B0aW9ucy5wcm90bxINY29yZGlzLnNjaGVtYSIsCgpEZXBlbmRlbmN5Eg0KBWFsaWFzGAEgASgJEg8KB3NlcnZpY2UYAiABKAkiKgoIRW5kcG9pbnQSDAoEbmFtZRgBIAEoCRIQCghyZXZpc2lvbhgCIAEoCSKBAQoIQ29udHJhY3QSDAoEbmFtZRgBIAEoCRIQCghyZXZpc2lvbhgCIAEoCRIOCgZjb25maWcYAyABKAkSLwoMZGVwZW5kZW5jaWVzGAQgAygLMhkuY29yZGlzLnNjaGVtYS5EZXBlbmRlbmN5EhQKDGNhcGFiaWxpdGllcxgFIAMoCSo+CglTZW1hbnRpY3MSCgoGUkVDT1JEEAASCgoGT1BUSU9OEAESDAoITlVMTEFCTEUQAhILCgdWQVJJQU5UEAM6VgoIY29udHJhY3QSHy5nb29nbGUucHJvdG9idWYuU2VydmljZU9wdGlvbnMYuI4DIAEoCzIXLmNvcmRpcy5zY2hlbWEuQ29udHJhY3RSCGNvbnRyYWN0Oj0KCHJlc291cmNlEh8uZ29vZ2xlLnByb3RvYnVmLlNlcnZpY2VPcHRpb25zGLmOAyABKAhSCHJlc291cmNlOjgKBmVycm9ycxIeLmdvb2dsZS5wcm90b2J1Zi5NZXRob2RPcHRpb25zGLqOAyADKAlSBmVycm9yczo8CghhY3F1aXJlcxIeLmdvb2dsZS5wcm90b2J1Zi5NZXRob2RPcHRpb25zGLuOAyABKAlSCGFjcXVpcmVzOj0KCXdpcmVfbmFtZRIeLmdvb2dsZS5wcm90b2J1Zi5NZXRob2RPcHRpb25zGMKOAyABKAlSCHdpcmVOYW1lOk8KBWV2ZW50Eh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMYw44DIAEoCzIXLmNvcmRpcy5zY2hlbWEuRW5kcG9pbnRSBWV2ZW50OlkKCm1pZGRsZXdhcmUSHi5nb29nbGUucHJvdG9idWYuTWV0aG9kT3B0aW9ucxjEjgMgASgLMhcuY29yZGlzLnNjaGVtYS5FbmRwb2ludFIKbWlkZGxld2FyZTo8CghpbnN0YWxscxIeLmdvb2dsZS5wcm90b2J1Zi5NZXRob2RPcHRpb25zGMWOAyABKAhSCGluc3RhbGxzOlcKCXByb3Zpc2lvbhIeLmdvb2dsZS5wcm90b2J1Zi5NZXRob2RPcHRpb25zGMaOAyABKAsyFy5jb3JkaXMuc2NoZW1hLkVuZHBvaW50Uglwcm92aXNpb246WQoJc2VtYW50aWNzEh8uZ29vZ2xlLnByb3RvYnVmLk1lc3NhZ2VPcHRpb25zGLyOAyABKA4yGC5jb3JkaXMuc2NoZW1hLlNlbWFudGljc1IJc2VtYW50aWNzOjsKCHJlcXVpcmVkEh0uZ29vZ2xlLnByb3RvYnVmLkZpZWxkT3B0aW9ucxi9jgMgASgIUghyZXF1aXJlZDpBCgpleGFjdF9zaXplEh0uZ29vZ2xlLnByb3RvYnVmLkZpZWxkT3B0aW9ucxi+jgMgASgNUglleGFjdFNpemWIAQE6PAoHbWluaW11bRIdLmdvb2dsZS5wcm90b2J1Zi5GaWVsZE9wdGlvbnMYv44DIAEoElIHbWluaW11bYgBATo8CgdtYXhpbXVtEh0uZ29vZ2xlLnByb3RvYnVmLkZpZWxkT3B0aW9ucxjAjgMgASgSUgdtYXhpbXVtiAEBOjsKCHNlbGVjdGVkEh0uZ29vZ2xlLnByb3RvYnVmLk9uZW9mT3B0aW9ucxjBjgMgASgIUghzZWxlY3RlZGIGcHJvdG8z", [file_google_protobuf_descriptor]);
+  fileDesc("ChRjb3JkaXMvb3B0aW9ucy5wcm90bxINY29yZGlzLnNjaGVtYSIsCgpEZXBlbmRlbmN5Eg0KBWFsaWFzGAEgASgJEg8KB3NlcnZpY2UYAiABKAkiKgoIRW5kcG9pbnQSDAoEbmFtZRgBIAEoCRIQCghyZXZpc2lvbhgCIAEoCSKBAQoIQ29udHJhY3QSDAoEbmFtZRgBIAEoCRIQCghyZXZpc2lvbhgCIAEoCRIOCgZjb25maWcYAyABKAkSLwoMZGVwZW5kZW5jaWVzGAQgAygLMhkuY29yZGlzLnNjaGVtYS5EZXBlbmRlbmN5EhQKDGNhcGFiaWxpdGllcxgFIAMoCSo+CglTZW1hbnRpY3MSCgoGUkVDT1JEEAASCgoGT1BUSU9OEAESDAoITlVMTEFCTEUQAhILCgdWQVJJQU5UEAM6VgoIY29udHJhY3QSHy5nb29nbGUucHJvdG9idWYuU2VydmljZU9wdGlvbnMYuI4DIAEoCzIXLmNvcmRpcy5zY2hlbWEuQ29udHJhY3RSCGNvbnRyYWN0Oj0KCHJlc291cmNlEh8uZ29vZ2xlLnByb3RvYnVmLlNlcnZpY2VPcHRpb25zGLmOAyABKAhSCHJlc291cmNlOj8KCWludGVyZmFjZRIfLmdvb2dsZS5wcm90b2J1Zi5TZXJ2aWNlT3B0aW9ucxjHjgMgASgIUglpbnRlcmZhY2U6OAoGZXJyb3JzEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMYuo4DIAMoCVIGZXJyb3JzOjwKCGFjcXVpcmVzEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMYu44DIAEoCVIIYWNxdWlyZXM6PQoJd2lyZV9uYW1lEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMYwo4DIAEoCVIId2lyZU5hbWU6TwoFZXZlbnQSHi5nb29nbGUucHJvdG9idWYuTWV0aG9kT3B0aW9ucxjDjgMgASgLMhcuY29yZGlzLnNjaGVtYS5FbmRwb2ludFIFZXZlbnQ6WQoKbWlkZGxld2FyZRIeLmdvb2dsZS5wcm90b2J1Zi5NZXRob2RPcHRpb25zGMSOAyABKAsyFy5jb3JkaXMuc2NoZW1hLkVuZHBvaW50UgptaWRkbGV3YXJlOjwKCGluc3RhbGxzEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMYxY4DIAEoCFIIaW5zdGFsbHM6VwoJcHJvdmlzaW9uEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMYxo4DIAEoCzIXLmNvcmRpcy5zY2hlbWEuRW5kcG9pbnRSCXByb3Zpc2lvbjpZCglzZW1hbnRpY3MSHy5nb29nbGUucHJvdG9idWYuTWVzc2FnZU9wdGlvbnMYvI4DIAEoDjIYLmNvcmRpcy5zY2hlbWEuU2VtYW50aWNzUglzZW1hbnRpY3M6PwoJcmVmZXJlbmNlEh8uZ29vZ2xlLnByb3RvYnVmLk1lc3NhZ2VPcHRpb25zGMiOAyABKAlSCXJlZmVyZW5jZTo7CghyZXF1aXJlZBIdLmdvb2dsZS5wcm90b2J1Zi5GaWVsZE9wdGlvbnMYvY4DIAEoCFIIcmVxdWlyZWQ6QQoKZXhhY3Rfc2l6ZRIdLmdvb2dsZS5wcm90b2J1Zi5GaWVsZE9wdGlvbnMYvo4DIAEoDVIJZXhhY3RTaXpliAEBOjwKB21pbmltdW0SHS5nb29nbGUucHJvdG9idWYuRmllbGRPcHRpb25zGL+OAyABKBJSB21pbmltdW2IAQE6PAoHbWF4aW11bRIdLmdvb2dsZS5wcm90b2J1Zi5GaWVsZE9wdGlvbnMYwI4DIAEoElIHbWF4aW11bYgBATo7CghzZWxlY3RlZBIdLmdvb2dsZS5wcm90b2J1Zi5PbmVvZk9wdGlvbnMYwY4DIAEoCFIIc2VsZWN0ZWRiBnByb3RvMw", [file_google_protobuf_descriptor]);
 
 /**
  * Metadata for Cordis binding. Protoc and language plugins own the data model.
@@ -149,22 +149,31 @@ export const resource: GenExtension<ServiceOptions, boolean> = /*@__PURE__*/
   extDesc(file_cordis_options, 1);
 
 /**
+ * A callable object type. It has no global service name and is transferred
+ * through messages marked reference, using the same methods on every backend.
+ *
+ * @generated from extension: bool interface = 51015;
+ */
+export const interface$: GenExtension<ServiceOptions, boolean> = /*@__PURE__*/
+  extDesc(file_cordis_options, 2);
+
+/**
  * @generated from extension: repeated string errors = 51002;
  */
 export const errors: GenExtension<MethodOptions, string[]> = /*@__PURE__*/
-  extDesc(file_cordis_options, 2);
+  extDesc(file_cordis_options, 3);
 
 /**
  * @generated from extension: string acquires = 51003;
  */
 export const acquires: GenExtension<MethodOptions, string> = /*@__PURE__*/
-  extDesc(file_cordis_options, 3);
+  extDesc(file_cordis_options, 4);
 
 /**
  * @generated from extension: string wire_name = 51010;
  */
 export const wire_name: GenExtension<MethodOptions, string> = /*@__PURE__*/
-  extDesc(file_cordis_options, 4);
+  extDesc(file_cordis_options, 5);
 
 /**
  * Event output is the Break payload; Continue has no payload.
@@ -172,7 +181,7 @@ export const wire_name: GenExtension<MethodOptions, string> = /*@__PURE__*/
  * @generated from extension: cordis.schema.Endpoint event = 51011;
  */
 export const event: GenExtension<MethodOptions, Endpoint> = /*@__PURE__*/
-  extDesc(file_cordis_options, 5);
+  extDesc(file_cordis_options, 6);
 
 /**
  * Middleware output is the result of the continuation or short circuit.
@@ -180,7 +189,7 @@ export const event: GenExtension<MethodOptions, Endpoint> = /*@__PURE__*/
  * @generated from extension: cordis.schema.Endpoint middleware = 51012;
  */
 export const middleware: GenExtension<MethodOptions, Endpoint> = /*@__PURE__*/
-  extDesc(file_cordis_options, 6);
+  extDesc(file_cordis_options, 7);
 
 /**
  * A child-plugin factory: input is its config, output must be data.Child.
@@ -188,7 +197,7 @@ export const middleware: GenExtension<MethodOptions, Endpoint> = /*@__PURE__*/
  * @generated from extension: bool installs = 51013;
  */
 export const installs: GenExtension<MethodOptions, boolean> = /*@__PURE__*/
-  extDesc(file_cordis_options, 7);
+  extDesc(file_cordis_options, 8);
 
 /**
  * Publish the input value; output must be data.Unit.
@@ -196,41 +205,50 @@ export const installs: GenExtension<MethodOptions, boolean> = /*@__PURE__*/
  * @generated from extension: cordis.schema.Endpoint provision = 51014;
  */
 export const provision: GenExtension<MethodOptions, Endpoint> = /*@__PURE__*/
-  extDesc(file_cordis_options, 8);
+  extDesc(file_cordis_options, 9);
 
 /**
  * @generated from extension: cordis.schema.Semantics semantics = 51004;
  */
 export const semantics: GenExtension<MessageOptions, Semantics> = /*@__PURE__*/
-  extDesc(file_cordis_options, 9);
+  extDesc(file_cordis_options, 10);
+
+/**
+ * Names an interface service. The message contains exactly string key = 1;
+ * code generation exposes a typed object client for direct parameters/results.
+ *
+ * @generated from extension: string reference = 51016;
+ */
+export const reference: GenExtension<MessageOptions, string> = /*@__PURE__*/
+  extDesc(file_cordis_options, 11);
 
 /**
  * @generated from extension: bool required = 51005;
  */
 export const required: GenExtension<FieldOptions, boolean> = /*@__PURE__*/
-  extDesc(file_cordis_options, 10);
+  extDesc(file_cordis_options, 12);
 
 /**
  * @generated from extension: optional uint32 exact_size = 51006;
  */
 export const exact_size: GenExtension<FieldOptions, number> = /*@__PURE__*/
-  extDesc(file_cordis_options, 11);
+  extDesc(file_cordis_options, 13);
 
 /**
  * @generated from extension: optional sint64 minimum = 51007;
  */
 export const minimum: GenExtension<FieldOptions, bigint> = /*@__PURE__*/
-  extDesc(file_cordis_options, 12);
+  extDesc(file_cordis_options, 14);
 
 /**
  * @generated from extension: optional sint64 maximum = 51008;
  */
 export const maximum: GenExtension<FieldOptions, bigint> = /*@__PURE__*/
-  extDesc(file_cordis_options, 13);
+  extDesc(file_cordis_options, 15);
 
 /**
  * @generated from extension: bool selected = 51009;
  */
 export const selected: GenExtension<OneofOptions, boolean> = /*@__PURE__*/
-  extDesc(file_cordis_options, 14);
+  extDesc(file_cordis_options, 16);
 

@@ -177,6 +177,64 @@ impl Router {
         alias: String,
         args: Payload,
     ) -> Result<Reply> {
+        if matches!(operation, 9 | 10 | 11) {
+            let ctx = self.context(grant)?;
+            let instance = self.instance.clone();
+            let value = ctx
+                .operation(move |ctx| async move {
+                    let result: Result<Payload> = async {
+                        let control = &args.control;
+                        match operation {
+                            9 => {
+                                let descriptor =
+                                    cordis_contract::portable::decode(&control["interface"])
+                                        .map_err(Error::InvalidInput)?;
+                                cordis_host::reference::export(
+                                    &ctx,
+                                    descriptor,
+                                    Arc::new(crate::references::Object { instance, callback }),
+                                )
+                                .await
+                                .map(|key| json!(key).into())
+                                .map_err(Error::from)
+                            }
+                            10 => {
+                                let field = |key: &str| {
+                                    control[key].as_str().ok_or_else(|| {
+                                        Error::InvalidInput(format!("missing {key}"))
+                                    })
+                                };
+                                let value = cordis_host::reference::invoke(
+                                    &ctx,
+                                    field("reference")?,
+                                    field("digest")?,
+                                    field("method")?,
+                                    Body::from_bytes(args.one().map_err(invalid_payload)?),
+                                )
+                                .await
+                                .map_err(Error::from)?;
+                                value
+                                    .into_bytes()
+                                    .map(Payload::message)
+                                    .map_err(Error::Unknown)
+                            }
+                            _ => {
+                                let key = control["reference"].as_str().ok_or_else(|| {
+                                    Error::InvalidInput("missing reference".into())
+                                })?;
+                                cordis_host::reference::dispose(&ctx, key)
+                                    .await
+                                    .map(|_| Value::Null.into())
+                                    .map_err(Error::from)
+                            }
+                        }
+                    }
+                    .await;
+                    Ok(result)
+                })
+                .await??;
+            return Ok(Reply { value, handle: 0 });
+        }
         if !self
             .instance
             .upgrade()

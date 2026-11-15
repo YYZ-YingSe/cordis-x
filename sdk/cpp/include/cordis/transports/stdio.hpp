@@ -16,9 +16,9 @@ class Stdio {
   std::array<uint8_t, 64 * 1024> input_buffer_{};
   std::size_t input_begin_ = 0, input_end_ = 0, buffered_frames_ = 0;
   std::deque<std::shared_ptr<std::vector<uint8_t>>> writes_;
-  std::size_t bytes_ = 0;
   bool failed_ = false;
   std::function<void()> failure_;
+  std::function<std::size_t()> capacity_;
   static int duplicate(int fd) {
     int result = ::dup(fd);
     if (result < 0)
@@ -58,7 +58,6 @@ class Stdio {
                           failure_();
                           return;
                         }
-                        bytes_ -= bytes->size();
                         writes_.pop_front();
                         if (!writes_.empty())
                           write_next();
@@ -66,10 +65,10 @@ class Stdio {
   }
 
 public:
-  Stdio(native::Runtime &runtime, std::function<void()> failure)
+  Stdio(native::Runtime &runtime, std::function<void()> failure, std::function<std::size_t()> capacity)
       : input_(runtime.io(), duplicate(STDIN_FILENO)),
         output_(runtime.io(), duplicate(STDOUT_FILENO)),
-        failure_(std::move(failure)) {}
+        failure_(std::move(failure)), capacity_(std::move(capacity)) {}
   void stop_reading() {
     std::error_code ignored;
     input_.close(ignored);
@@ -80,24 +79,21 @@ public:
     std::error_code ignored;
     output_.close(ignored);
     writes_.clear();
-    bytes_ = 0;
   }
   void write(std::vector<uint8_t> payload) {
     if (failed_)
       throw std::runtime_error("stdio closed");
+    if (payload.empty() || payload.size() > capacity_() || writes_.size() >= session::output_frames) {
+      abort();
+      failure_();
+      throw std::runtime_error("stdio output capacity exhausted");
+    }
     const auto length = static_cast<uint32_t>(payload.size());
     auto bytes = std::make_shared<std::vector<uint8_t>>();
     bytes->reserve(payload.size() + 4);
     for (int shift : {24, 16, 8, 0})
       bytes->push_back(static_cast<uint8_t>(length >> shift));
     bytes->insert(bytes->end(), payload.begin(), payload.end());
-    if (writes_.size() >= session::output_frames ||
-        bytes->size() > session::output_frames * (session::max_message + 4) - bytes_) {
-      abort();
-      failure_();
-      throw std::runtime_error("stdio output capacity exhausted");
-    }
-    bytes_ += bytes->size();
     writes_.push_back(std::move(bytes));
     if (writes_.size() == 1)
       write_next();
@@ -120,7 +116,7 @@ public:
     uint32_t length = 0;
     for (auto byte : header)
       length = (length << 8) | byte;
-    if (length < 1 || length > session::max_message)
+    if (length < 1 || length > capacity_())
       throw std::runtime_error("invalid frame length");
     std::vector<uint8_t> bytes(length);
     if (co_await read_exact(bytes.data(), bytes.size()) != bytes.size())

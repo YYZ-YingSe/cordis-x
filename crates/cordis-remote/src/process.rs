@@ -25,11 +25,13 @@ pub struct ProcessSpec {
     pub executable: PathBuf,
     pub args: Vec<String>,
     pub endpoint: Endpoint,
-    pub timeout: Duration,
+    pub initialization_timeout: Duration,
+    pub execution_timeout: Option<Duration>,
     /// Per-instance ordinary admission (1..=128). Cleanup has separate slots.
     pub max_inflight: usize,
-    /// Grace period after a managed task receives cancellation.
-    pub task_stop_timeout: Duration,
+    pub frame_capacity: usize,
+    /// Deadline for cancellation, cleanup, deactivation and process exit.
+    pub stop_timeout: Duration,
     pub composition: crate::CompositionLimits,
 }
 impl ProcessSpec {
@@ -39,9 +41,11 @@ impl ProcessSpec {
             executable: executable.into(),
             args: Vec::new(),
             endpoint: Endpoint::Ipc,
-            timeout: Duration::from_secs(10),
+            initialization_timeout: Duration::from_secs(10),
+            execution_timeout: None,
             max_inflight: 16,
-            task_stop_timeout: Duration::from_secs(5),
+            frame_capacity: cordis_wire::DEFAULT_FRAME_CAPACITY,
+            stop_timeout: Duration::from_secs(5),
             composition: crate::CompositionLimits::default(),
         }
     }
@@ -195,6 +199,7 @@ impl ProcessSpec {
         let session = owned.with(Clone::clone)?;
         let ready = session.request("hello", json!({
             "max_inflight": self.max_inflight,
+            "frame_capacity": self.frame_capacity,
             "capabilities": {"dependency_resources":true,"metadata":true,"effects":true,"effect_sequences":true,"scopes":true,"tasks":true,"events":true,"middleware":true,"composition":true},
             "validation": self.bindings.validation,
             "dependencies": declarations,
@@ -288,8 +293,15 @@ impl ProcessSpec {
         let http = ready["http"]
             .as_str()
             .map(|url| {
-                Http::local(url, session.timeout(), self.bindings.validation)
-                    .map(|http| Arc::new(http) as Arc<dyn InvocationBackend>)
+                Http::local(
+                    url,
+                    self.initialization_timeout,
+                    self.execution_timeout,
+                    self.stop_timeout,
+                    self.bindings.validation,
+                    self.frame_capacity,
+                )
+                .map(|http| Arc::new(http) as Arc<dyn InvocationBackend>)
             })
             .transpose()?;
         if matches!(self.endpoint, Endpoint::Http) && http.is_none() {
@@ -482,8 +494,9 @@ impl RemoteService {
                 .scoped_envelope(context, command, payload.into_wire())?;
         let _permit = permit;
         let operation = request.operation.clone();
-        let result = backend
-            .invoke(request)
+        let result = self
+            .session
+            .supervise(context, backend.invoke(request))
             .await
             .map_err(|e| match errors {
                 Some(errors) => e.check_declared(errors, "operation errors"),

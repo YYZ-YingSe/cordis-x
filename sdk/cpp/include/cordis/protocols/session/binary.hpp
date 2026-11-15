@@ -1,12 +1,14 @@
 #pragma once
 #include <cordis/core/handles.hpp>
 #include <cordis/core/protobuf.hpp>
+#include <limits>
 #include <transport.pb.h>
 #include <variant>
 
 namespace cordis::session {
 using Json = Value;
-inline constexpr std::size_t max_message = 1024 * 1024;
+inline constexpr std::size_t default_frame_capacity = 1024 * 1024;
+inline constexpr std::size_t max_control_bytes = 1024 * 1024;
 inline constexpr const char *content_type = "application/protobuf";
 struct Payload {
   Value control = nullptr;
@@ -97,7 +99,7 @@ inline void control_to_proto(const Value &value, google::protobuf::Value *out) {
     throw std::runtime_error("invalid control value");
 }
 inline void validate_control(const Value &value) {
-  std::size_t nodes = 8192, bytes = max_message;
+  std::size_t nodes = 8192, bytes = max_control_bytes;
   auto take = [&](std::size_t n) {
     if (n > bytes)
       throw std::runtime_error("control byte limit exceeded");
@@ -168,12 +170,6 @@ inline void payload_to_proto(const Payload &value, transport::Payload *out) {
   validate_control(value.control);
   if (value.messages.size() > 4096)
     throw std::runtime_error("too many business messages");
-  auto remaining = max_message;
-  for (const auto &body : value.messages) {
-    if (body.bytes().size() > remaining)
-      throw std::runtime_error("message too large");
-    remaining -= body.bytes().size();
-  }
   control_to_proto(value.control, out->mutable_control());
   for (const auto &body : value.messages)
     out->add_messages(body.bytes());
@@ -189,10 +185,10 @@ inline Payload payload_from_proto(transport::Payload &&value) {
     out.messages.emplace_back(std::move(body));
   return out;
 }
-inline std::vector<uint8_t> bounded(const google::protobuf::Message &value) {
+inline std::vector<uint8_t> encode_proto(const google::protobuf::Message &value) {
   const auto size = value.ByteSizeLong();
-  if (size > max_message)
-    throw std::runtime_error("message too large");
+  if (size > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+    throw std::runtime_error("protobuf size is not representable");
   std::vector<uint8_t> bytes(size);
   if (!value.IsInitialized()) throw std::runtime_error("uninitialized protobuf frame");
   if (value.SerializeWithCachedSizesToArray(bytes.data()) != bytes.data() + size)
@@ -202,11 +198,11 @@ inline std::vector<uint8_t> bounded(const google::protobuf::Message &value) {
 inline std::vector<uint8_t> encode(const Payload &value) {
   transport::Payload out;
   payload_to_proto(value, &out);
-  return bounded(out);
+  return encode_proto(out);
 }
 inline Payload decode_payload(const uint8_t *data, std::size_t length, Validation policy = Validation::Checked) {
-  if (length > max_message)
-    throw std::runtime_error("message too large");
+  if (length > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+    throw std::runtime_error("protobuf size is not representable");
   transport::Payload value;
   if (!value.ParseFromArray(data, static_cast<int>(length)))
     throw std::runtime_error("invalid protobuf payload");
@@ -214,7 +210,7 @@ inline Payload decode_payload(const uint8_t *data, std::size_t length, Validatio
     protobuf::audit_binary(data, static_cast<int>(length), value.GetDescriptor());
   return payload_from_proto(std::move(value));
 }
-inline std::vector<uint8_t> encode(const Frame &frame) {
+inline std::vector<uint8_t> encode(const Frame &frame, std::size_t capacity = default_frame_capacity) {
   transport::Frame out;
   std::visit(
       [&](const auto &value) {
@@ -245,11 +241,13 @@ inline std::vector<uint8_t> encode(const Frame &frame) {
         }
       },
       frame);
-  return bounded(out);
+  if (out.ByteSizeLong() > capacity)
+    throw std::runtime_error("frame exceeds transport capacity");
+  return encode_proto(out);
 }
 inline Frame decode(const uint8_t *data, std::size_t length, Validation policy) {
-  if (length > max_message)
-    throw std::runtime_error("message too large");
+  if (length > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+    throw std::runtime_error("protobuf size is not representable");
   transport::Frame value;
   if (!value.ParseFromArray(data, static_cast<int>(length)))
     throw std::runtime_error("invalid protobuf frame");

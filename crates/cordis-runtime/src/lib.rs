@@ -5,6 +5,7 @@ mod effects;
 mod error;
 mod events;
 mod gate;
+mod reference;
 mod retention;
 mod runtime;
 mod scope;
@@ -17,6 +18,7 @@ pub use context::{Context, TaskHandle};
 pub use effects::{EffectHandle, EffectSnapshot, EffectStatus, WeakEffectHandle};
 pub use error::{Error, Result};
 pub use events::{Break, Continue, Dispatch, Event, Middleware, Next};
+pub use reference::Reference;
 pub use runtime::{
     OwnershipChange, Plugin, PluginHandle, RealmChange, RealmReport, Runtime, WeakPluginHandle,
 };

@@ -1,5 +1,6 @@
 #pragma once
 #include "validation.hpp"
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -14,8 +15,8 @@ class Message {
 public:
   explicit Message(std::string bytes)
       : bytes_(std::make_shared<const std::string>(std::move(bytes))) {
-    if (bytes_->size() > 1024 * 1024)
-      throw std::runtime_error("message too large");
+    if (bytes_->size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+      throw std::runtime_error("message exceeds protobuf's representable size");
   }
   const std::string &bytes() const { return *bytes_; }
 };

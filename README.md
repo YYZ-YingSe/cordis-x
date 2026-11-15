@@ -17,6 +17,7 @@ Cordis-X tracks these relationships in the runtime:
 - **Dependencies determine activation.** A consumer declares the services it needs and waits until suitable providers are available.
 - **Effects carry cleanup.** A plugin registers the inverse of work that must be undone. Cleanup runs in the owning scope, in reverse order.
 - **Resources belong to their callers.** A resource can outlive the call that created it. Its owner controls disposal, and admitted calls drain before it closes.
+- **Objects can be passed between plugins.** Generated [interface references](docs/design/0009-interface-references.md) carry callable objects through arguments and results while preserving their scope ownership and current caller context.
 - **Cancellation preserves responsibility.** Dropping a waiting future does not mean that remote work stopped or that a resource was released.
 - **Replacement preserves existing work.** Ordinary provider replacement coordinates dependent lifetimes. A Broker can route new calls to a new implementation while existing resources keep their original implementation alive.
 
@@ -121,6 +122,10 @@ The host runtime is Rust. Plugins can run through the following SDK paths:
 | Process | Rust, C++, TypeScript on Node.js | A child process using framed stdio or HTTP |
 
 The portable SDKs expose services, resources, dependency calls, events, middleware, child plugins, scopes, tasks, and cleanup effects. Backend capabilities remain explicit: the basic Wasm world exports services and resources; the managed world also imports host context operations.
+
+Business DTOs have no implicit total string/bytes quota. Native, C ABI and component payloads do not inherit a Process limit. Process/HTTP use the host's `ProcessSpec.frame_capacity` (1 MiB deployment default), communicated to Rust/C++/TypeScript peers during initialization. Physical readers check capacity before allocation; bounded operation, connection and output slots retain ownership through settlement. Allocation, protobuf representation, control metadata and Wasm Store limits still apply. Applications pass complete typed values, not transport chunks.
+
+Ordinary Process and managed Wasm calls have no default execution deadline. Hosts can select an `execution_timeout`; initialization and actual cancellation/cleanup use separate deadlines. Dropping a waiter does not cancel the operation.
 
 Native plugins and C ABI libraries execute with the host process's privileges. A process boundary does not by itself sandbox a plugin. Wasm access depends on the imports and WASI capabilities the host grants, together with its configured execution limits.
 

@@ -7,6 +7,7 @@ struct Pending {
     lane: usize,
 }
 pub struct Channel {
+    pub frame_capacity: Cell<usize>,
     pub validation: Cell<cordis_sdk_core::Validation>,
     pub identity: RefCell<Option<(String, Identity)>>,
     pub dependency_resources: Cell<bool>,
@@ -25,6 +26,7 @@ impl Channel {
     }
     pub fn new(output: mpsc::Sender<Bytes>) -> Rc<Self> {
         Rc::new(Self {
+            frame_capacity: Cell::new(cordis_wire::DEFAULT_FRAME_CAPACITY),
             validation: Cell::new(cordis_sdk_core::Validation::Checked),
             identity: RefCell::default(),
             dependency_resources: Cell::new(false),
@@ -38,7 +40,11 @@ impl Channel {
     }
     pub async fn write(&self, response: Response) -> Result<()> {
         let permit = self.output.reserve().await.map_err(unknown)?;
-        permit.send(response.encode().map_err(unknown)?);
+        permit.send(
+            response
+                .encode(self.frame_capacity.get())
+                .map_err(unknown)?,
+        );
         Ok(())
     }
     pub async fn request(&self, command: &str, payload: Value) -> Result<Value> {
@@ -57,7 +63,8 @@ impl Channel {
             | "scope_dispose"
             | "event_dispose"
             | "middleware_dispose"
-            | "dependency_resource_dispose" => 1,
+            | "dependency_resource_dispose"
+            | "reference_dispose" => 1,
             "sequence_ready" | "scope_ready" => 2,
             "scope_run" => 3,
             "task_join" => 4,
@@ -69,7 +76,7 @@ impl Channel {
             "child_ready" | "child_settled" => 10,
             "child_dispose" => 11,
             "child_install" | "value_provide" => 12,
-            "dependency_resource_call" => 13,
+            "dependency_resource_call" | "reference_invoke" => 13,
             _ => 0,
         };
         if self
@@ -119,7 +126,9 @@ impl Channel {
                 unknown("Session output queue closed")
             }
         })?;
-        let encoded = request.encode().map_err(|e| refused("invalid_value", e))?;
+        let encoded = request
+            .encode(self.frame_capacity.get())
+            .map_err(|e| refused("invalid_value", e))?;
         let (reply, receive) = oneshot::channel();
         self.pending.borrow_mut().insert(
             operation.clone(),

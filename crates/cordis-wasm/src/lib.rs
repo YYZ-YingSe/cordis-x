@@ -468,21 +468,14 @@ impl WasmService {
         self.acquire(ctx, kind, json_body(&schema.args, &args)?)
             .await
     }
-    fn check(&self, context: &Context, method: &str, args: &Bytes) -> Result<()> {
+    fn check(&self, context: &Context) -> Result<()> {
         if context.activation() != self.activation {
             return Err(Error::Closed);
         }
-        if method.len() > cordis_component::MAX_BYTES {
-            return Err(Error::InvalidInput("method too long".into()));
-        }
-        if args.len() > cordis_component::MAX_BYTES {
-            Err(Error::InvalidInput("message too large".into()))
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
     pub async fn invoke(&self, context: &Context, method: &str, args: Bytes) -> Result<Bytes> {
-        self.check(context, method, &args)?;
+        self.check(context)?;
         let instance = self.instance.clone();
         let method = method.to_owned();
         context
@@ -503,7 +496,7 @@ impl WasmService {
         kind: &str,
         args: Bytes,
     ) -> Result<WasmResource> {
-        self.check(context, kind, &args)?;
+        self.check(context)?;
         let factory = contract::resource(self.instance.module.descriptor(), kind)
             .map_err(Error::InvalidInput)?;
         factory
@@ -653,9 +646,6 @@ impl WasmResource {
         method: &str,
         mut args: cordis_wire::local::Envelope,
     ) -> Result<cordis_wire::local::Envelope> {
-        if method.len() > cordis_component::MAX_BYTES {
-            return Err(Error::InvalidInput("method too long".into()));
-        }
         let method = method.to_owned();
         self.resource
             .call(move |ticket, context| {
@@ -727,10 +717,12 @@ impl Error {
 pub(crate) fn json_body(shape: &cordis_contract::MessageContract, value: &Value) -> Result<Bytes> {
     use prost::Message;
     let value = shape.parse_json(value).map_err(Error::InvalidInput)?;
-    if value.encoded_len() > cordis_component::MAX_BYTES {
-        return Err(Error::InvalidInput("message too large".into()));
-    }
-    Ok(value.encode_to_vec().into())
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(value.encoded_len())
+        .map_err(|error| Error::InvalidInput(error.to_string()))?;
+    value.encode_raw(&mut bytes);
+    Ok(bytes.into())
 }
 pub(crate) fn body_json(shape: &cordis_contract::MessageContract, bytes: &Bytes) -> Result<Value> {
     let value = shape.parse_binary(bytes).map_err(Error::Unknown)?;

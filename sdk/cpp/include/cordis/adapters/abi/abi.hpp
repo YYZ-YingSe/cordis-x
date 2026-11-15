@@ -46,21 +46,12 @@ inline CordisAbiSlice slice(const std::string &value) {
 inline std::string text(CordisAbiSlice value) {
   if (value.len == 0)
     return {};
-  if (!value.data)
-    throw std::runtime_error("null ABI string");
+  if (!value.data || value.len > static_cast<std::size_t>(std::numeric_limits<std::ptrdiff_t>::max()))
+    throw std::runtime_error("invalid ABI string");
   return {reinterpret_cast<const char *>(value.data), value.len};
 }
-struct Budget {
-  std::size_t left = session::max_message;
-  void take(std::size_t count) {
-    if (count > left)
-      throw std::runtime_error("ABI buffer exceeds budget");
-    left -= count;
-  }
-};
-inline Payload read(const CordisAbiBuffer &raw, Budget &budget,
+inline Payload read(const CordisAbiBuffer &raw,
                     Validation validation = Validation::Checked) {
-  budget.take(raw.len);
   if (raw.len && !raw.data)
     throw std::runtime_error("null ABI buffer");
   // Standard protobuf decoding copies the borrowed buffer into owned messages.
@@ -70,22 +61,20 @@ inline Payload read(const CordisAbiBuffer *raw,
                     Validation validation = Validation::Checked) {
   if (!raw)
     throw std::runtime_error("missing ABI buffer");
-  Budget budget;
-  return read(*raw, budget, validation);
+  return read(*raw, validation);
 }
 struct Output {
   std::vector<uint8_t> bytes;
   std::string code, message;
-  CordisAbiBuffer build(const Payload &value, Budget &budget) {
+  CordisAbiBuffer build(const Payload &value) {
     bytes = session::encode(value);
-    budget.take(bytes.size());
     return {bytes.data(), bytes.size()};
   }
-  CordisAbiBuffer build(const Value &value, Budget &budget) {
-    return build(Payload(value), budget);
+  CordisAbiBuffer build(const Value &value) {
+    return build(Payload(value));
   }
-  CordisAbiBuffer build(const Message &value, Budget &budget) {
-    return build(Payload(value), budget);
+  CordisAbiBuffer build(const Message &value) {
+    return build(Payload(value));
   }
 };
 inline CordisAbiResult result(Payload value, uint64_t handle = 0,
@@ -94,12 +83,9 @@ inline CordisAbiResult result(Payload value, uint64_t handle = 0,
   auto storage = std::make_unique<Output>();
   storage->code = std::move(code);
   storage->message = std::move(message);
-  Budget budget;
   CordisAbiBuffer raw{};
   if (status == CORDIS_ABI_OK)
-    raw = storage->build(value, budget);
-  budget.take(storage->code.size());
-  budget.take(storage->message.size());
+    raw = storage->build(value);
   CordisAbiResult output{status,
                          0,
                          raw,

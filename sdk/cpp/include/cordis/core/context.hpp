@@ -6,6 +6,7 @@
 
 namespace cordis {
 class Context;
+struct Resource;
 
 // Callback authority comes from the selected adapter. Copies do not extend its
 // lifetime. No Session token, C function table, codec or socket enters this
@@ -14,6 +15,12 @@ class Context {
 public:
   struct Operations {
     Validation validation = Validation::Checked;
+    std::function<Async<std::string>(Value, std::shared_ptr<Resource>)>
+        reference_export;
+    std::function<Async<Message>(std::string, std::string, std::string,
+                                 Message)>
+        reference_invoke;
+    std::function<Async<void>(std::string)> reference_dispose;
     std::function<Async<Message>(std::string, std::string, Message)> invoke;
     std::function<Async<Value>(std::string, std::string)> metadata;
     std::function<Async<Effect>(std::string,
@@ -63,6 +70,21 @@ public:
       throw std::invalid_argument("incomplete Context adapter");
   }
   Validation validation() const { return operations_->validation; }
+  Async<std::string> export_reference(Value descriptor,
+                                      std::shared_ptr<Resource> object) const {
+    return detail::invoke_owned(require(operations_->reference_export),
+                                std::move(descriptor), std::move(object));
+  }
+  Async<Message> invoke_reference(std::string key, std::string digest,
+                                  std::string method, Message args) const {
+    return detail::invoke_owned(require(operations_->reference_invoke),
+                                std::move(key), std::move(digest),
+                                std::move(method), std::move(args));
+  }
+  Async<void> dispose_reference(std::string key) const {
+    return detail::invoke_owned(require(operations_->reference_dispose),
+                                std::move(key));
+  }
   Async<Message> invoke(std::string dependency, std::string method,
                         Message args) const {
     return detail::invoke_owned(operations_->invoke, dependency, method, args);
@@ -151,6 +173,9 @@ inline Async<Message> ResourceHandle::invoke(Context ctx, std::string method,
 }
 inline Async<void> ResourceHandle::dispose(Context ctx) const {
   auto call = Context::require(ctx.operations_->resource_dispose);
-  return completion_.observe([call = std::move(call), state = state_]() -> Async<void> { co_await call(state); });
+  return completion_.observe(
+      [call = std::move(call), state = state_]() -> Async<void> {
+        co_await call(state);
+      });
 }
 } // namespace cordis

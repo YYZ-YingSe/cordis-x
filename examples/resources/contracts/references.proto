@@ -1,0 +1,26 @@
+syntax = "proto3";
+package references;
+import "cordis/options.proto";
+import "cordis/types.proto";
+
+// Callable objects have no global service name. A reference can be returned,
+// passed directly, or nested inside an ordinary DTO without exposing transport.
+message CounterRef {
+  option (cordis.schema.reference) = "references.Counter";
+  string key = 1;
+}
+message Registered { CounterRef counter = 1; }
+service Counter {
+  option (cordis.schema.interface) = true;
+  rpc Add(cordis.data.Int64) returns (cordis.data.Int64);
+  rpc Get(cordis.data.Unit) returns (cordis.data.Int64);
+  rpc Same(cordis.data.Unit) returns (CounterRef);
+}
+service Directory {
+  option (cordis.schema.contract) = {
+    name: "example.objects" revision: "1" config: "cordis.data.Unit"
+  };
+  rpc Put(CounterRef) returns (cordis.data.Unit);
+  rpc Get(cordis.data.Unit) returns (CounterRef);
+  rpc Nested(Registered) returns (Registered);
+}

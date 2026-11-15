@@ -1,11 +1,11 @@
 #pragma once
-#include <cordis/core/observation.hpp>
 #include <chrono>
 #include <cordis/abi_composition.h>
 #include <cordis/abi_context.h>
 #include <cordis/abi_reactive.h>
 #include <cordis/abi_resources.h>
 #include <cordis/adapters/abi/abi.hpp>
+#include <cordis/core/observation.hpp>
 #include <functional>
 
 namespace cordis::abi {
@@ -77,7 +77,8 @@ struct Callbacks {
   }
 };
 inline HostReply consume(const CordisAbiHostApi *api, CordisAbiResult result,
-                         bool acquisition = false, Validation validation = Validation::Checked) {
+                         bool acquisition = false,
+                         Validation validation = Validation::Checked) {
   struct Guard {
     const CordisAbiHostApi *api;
     CordisAbiResult &result;
@@ -109,15 +110,16 @@ Async<HostReply> receive(const CordisAbiHostApi *api, uint64_t host,
         std::unique_ptr<Pending> pending(static_cast<Pending *>(data));
         native::Outcome<HostReply> outcome;
         try {
-          outcome = consume(pending->api, result, pending->acquisition, pending->validation);
+          outcome = consume(pending->api, result, pending->acquisition,
+                            pending->validation);
         } catch (...) {
           outcome = std::current_exception();
         }
         pending->resume(std::move(outcome));
       }
     };
-    auto pending =
-        std::make_unique<Pending>(Pending{api, acquisition, caller.validation, std::move(resume)});
+    auto pending = std::make_unique<Pending>(
+        Pending{api, acquisition, caller.validation, std::move(resume)});
     CordisAbiCompletion completion{pending.get(), Pending::finish};
     pending.release();
     submit(caller.grant, completion);
@@ -170,6 +172,12 @@ class Context {
 
 public:
   Validation validation() const { return callbacks_->validation; }
+  using ReferenceCallback = std::function<Async<Payload>(Context, Payload)>;
+  Async<std::string> reference_export(Value descriptor,
+                                      ReferenceCallback callback) const;
+  Async<Message> reference_invoke(std::string key, std::string digest,
+                                  std::string method, Message args) const;
+  Async<void> reference_dispose(std::string key) const;
   class ResourceHandle {
     uint64_t host, id;
     std::weak_ptr<detail::Callbacks> owner;
@@ -270,8 +278,8 @@ private:
             throw Refusal("context",
                           "resource operation requires Resource Context");
           detail::Output input;
-          detail::Budget budget;
-          const auto raw = input.build(args, budget);
+
+          const auto raw = input.build(args);
           co_return (co_await detail::receive(
               raw_.api, raw_.host, operation == CORDIS_ABI_DEPENDENCY_ACQUIRE,
               [&](uint64_t caller, CordisAbiCompletion completion) {
@@ -315,8 +323,8 @@ public:
         [*this](std::string dependency, std::string method,
                 Message args) -> Async<Message> {
           detail::Output input;
-          detail::Budget budget;
-          auto raw = input.build(args, budget);
+
+          auto raw = input.build(args);
           co_return (co_await detail::receive(
                          raw_.api, raw_.host, false,
                          [&](uint64_t caller, CordisAbiCompletion completion) {
@@ -377,7 +385,8 @@ struct ContextService {
   virtual Async<void> deactivate(Context) { co_return; }
   virtual Async<std::shared_ptr<ContextResource>> acquire(Context, std::string,
                                                           Message) {
-    co_return co_await ::cordis::detail::failed<std::shared_ptr<ContextResource>>(
+    co_return co_await ::cordis::detail::failed<
+        std::shared_ptr<ContextResource>>(
         Refusal("unsupported", "resource kind unsupported"));
   }
 };
@@ -424,7 +433,8 @@ template <class Model> class ContextHost {
       auto key = id();
       auto i = std::make_shared<Instance>();
       auto settings = detail::read(config, Validation::Audit).control_only();
-      i->callbacks->validation = cordis::validation(settings.at("validation").get<std::string>());
+      i->callbacks->validation =
+          cordis::validation(settings.at("validation").get<std::string>());
       i->service = Model::create(settings.at("config"));
       if (!i->service)
         throw std::runtime_error("null service");
@@ -483,7 +493,8 @@ template <class Model> class ContextHost {
                          operation == CORDIS_ABI_EFFECT_RELEASE ||
                          operation == CORDIS_ABI_SEQUENCE_UNDO ||
                          operation == CORDIS_ABI_SEQUENCE_RELEASE ||
-                         operation == CORDIS_ABI_CALLBACK_RELEASE;
+                         operation == CORDIS_ABI_CALLBACK_RELEASE ||
+                         operation == CORDIS_ABI_REFERENCE_CLOSE;
     bool admitted = false;
     try {
       instance = get(key);
@@ -503,7 +514,8 @@ template <class Model> class ContextHost {
            value = std::move(value)]() mutable -> Async<void> {
             CordisAbiResult result{};
             co_await detail::with_caller(
-                {raw.host, raw.grant, instance->callbacks->validation}, [&]() -> Async<void> {
+                {raw.host, raw.grant, instance->callbacks->validation},
+                [&]() -> Async<void> {
                   result = co_await detail::protect_async([&] {
                     return managed_dispatch_impl(
                         key, operation, target, {raw, managed}, std::move(name),
@@ -641,7 +653,7 @@ template <class Model> class ContextHost {
 
     if (!raw.managed || operation < CORDIS_ABI_SEQUENCE_NEXT ||
         operation >
-            (reactive ? CORDIS_ABI_CALLBACK_RELEASE : CORDIS_ABI_TASK_CALL))
+            (reactive ? CORDIS_ABI_REFERENCE_CLOSE : CORDIS_ABI_TASK_CALL))
       throw Refusal("operation", "unknown managed callback");
     auto i = get(key);
     auto call = i->callbacks->get_managed(target);

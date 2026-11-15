@@ -12,7 +12,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
-use value::{Budget, Input, slice};
+use value::{Input, slice};
 #[cfg(test)]
 mod resource_tests;
 type HostCall = unsafe extern "C" fn(
@@ -334,25 +334,25 @@ fn consume(
     {
         return Err(unknown("invalid ABI outcome fields"));
     }
-    let mut budget = Budget::new();
+
     // SAFETY: host owns readable result storage until its matching release.
     unsafe {
         match r.status {
             0 if (r.handle != 0) == acquisition => Ok(Reply {
-                value: value::read_payload(&r.value, &mut budget, validation)?,
+                value: value::read_payload(&r.value, validation)?,
                 handle: r.handle,
             }),
             3 if r.handle == 0 => Err(Failure::Refused(ErrorInfo {
-                code: value::read_text(r.code, &mut budget)?,
-                message: value::read_text(r.message, &mut budget)?,
+                code: value::read_text(r.code)?,
+                message: value::read_text(r.message)?,
             })),
             1 if r.handle == 0 => Err(Failure::Rejected(ErrorInfo {
-                code: value::read_text(r.code, &mut budget)?,
-                message: value::read_text(r.message, &mut budget)?,
+                code: value::read_text(r.code)?,
+                message: value::read_text(r.message)?,
             })),
             2 => Err(Failure::Unknown(ErrorInfo {
-                code: value::read_text(r.code, &mut budget)?,
-                message: value::read_text(r.message, &mut budget)?,
+                code: value::read_text(r.code)?,
+                message: value::read_text(r.message)?,
             })),
             _ => Err(unknown("invalid ABI host result")),
         }
@@ -374,9 +374,6 @@ fn output(result: Result<Reply>) -> CordisAbiResult {
         Err(Failure::Rejected(e)) => (1, Bytes::new(), 0, e.code, e.message),
         Err(Failure::Unknown(e)) => (2, Bytes::new(), 0, e.code, e.message),
     };
-    if code.len() + message.len() > cordis_wire::MAX_MESSAGE / 2 {
-        return output(Err(unknown("plugin returned oversized ABI error")));
-    }
     let mut owner = Box::new(Owned {
         bytes,
         code,
@@ -414,8 +411,7 @@ unsafe extern "C" fn release(raw: *mut CordisAbiResult) {
 }
 unsafe fn input(raw: *const CordisAbiBuffer, validation: Validation) -> Result<Payload> {
     let raw = unsafe { raw.as_ref() }.ok_or_else(|| refused("invalid_value", "null input"))?;
-    unsafe { value::read_payload(raw, &mut Budget::new(), validation) }
-        .map_err(|e| refused("invalid_value", e))
+    unsafe { value::read_payload(raw, validation) }.map_err(|e| refused("invalid_value", e))
 }
 fn instances() -> &'static Mutex<BTreeMap<u64, (TypeId, worker::Client)>> {
     static INSTANCES: OnceLock<Mutex<BTreeMap<u64, (TypeId, worker::Client)>>> = OnceLock::new();
@@ -522,7 +518,7 @@ unsafe fn dispatch_with<P: Plugin>(
         let client = client::<P>(id)?;
         let mut host = host?;
         host.validation = client.validation;
-        let method = unsafe { value::read_text(method, &mut Budget::new()) }?;
+        let method = unsafe { value::read_text(method) }?;
         let args = unsafe { input(args, client.validation) }?;
         Ok((client, host, method, args))
     }))

@@ -30,6 +30,7 @@ class DependencyChannel {
   bool metadata_enabled = false;
 
 public:
+  std::size_t frame_capacity = default_frame_capacity;
   Validation validation = Validation::Checked;
   std::string resource_id() {
     std::lock_guard lock(mutex);
@@ -109,13 +110,16 @@ public:
                 : (command == "cleanup_call" || command == "cleanup_metadata" ||
                    command == "cleanup_resource_call")
                     ? 5
-                : command == "dependency_resource_call"                     ? 13
+                : (command == "dependency_resource_call" ||
+                   command == "reference_invoke")
+                    ? 13
                 : (command == "sequence_ready" || command == "scope_ready") ? 2
                 : (command == "effect_dispose" ||
                    command == "sequence_dispose" ||
                    command == "scope_dispose" || command == "event_dispose" ||
                    command == "middleware_dispose" ||
-                   command == "dependency_resource_dispose")
+                   command == "dependency_resource_dispose" ||
+                   command == "reference_dispose")
                     ? 1
                 : command == "task_join" ? 4
                 : command == "scope_run" ? 3
@@ -128,15 +132,20 @@ public:
             operation = operations.allocate(lane);
             Request request{Header{session, activation, operation}, command,
                             payload};
-            try { bytes = encode(Frame(std::move(request))); }
-            catch (...) { operations.complete(operation); throw; }
+            try {
+              bytes = encode(Frame(std::move(request)), frame_capacity);
+            } catch (...) {
+              operations.complete(operation);
+              throw;
+            }
             output = write;
             pending.emplace(operation, Pending{std::move(reply), lane});
           }
           try {
             output(std::move(bytes));
           } catch (...) {
-            close(); // Submission may have partially written: retain unknown outcome.
+            close(); // Submission may have partially written: retain unknown
+                     // outcome.
           }
         });
   }

@@ -110,7 +110,7 @@ fn write_log(
         )
     })
 }
-async fn consumer(
+pub(super) async fn consumer(
     runtime: &Runtime,
     service: Service<RemoteService>,
 ) -> (
@@ -193,7 +193,7 @@ fn fault_spec(timeout: Duration) -> ProcessSpec {
         .join("tests/fixtures/dependency_peer.py")
         .display()
         .to_string()]);
-    spec.timeout = timeout;
+    spec.execution_timeout = Some(timeout);
     spec
 }
 

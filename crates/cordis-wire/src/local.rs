@@ -39,7 +39,7 @@ impl Envelope {
     /// Encode a native snapshot while retaining its unforgeable local checks.
     /// The snapshot is private and cannot be replaced independently of the body.
     pub fn from_message(message: cordis_sdk_core::Message) -> Result<Self, String> {
-        let payload = Payload::message(message.encode(crate::MAX_MESSAGE)?);
+        let payload = Payload::message(message.encode(None)?);
         Ok(Self {
             payload,
             checked: None,
@@ -73,8 +73,8 @@ impl Envelope {
         if let Some(native) = &self.native {
             return native.check(shape);
         }
-        // Contract still enforces cardinality and the physical byte limit, but
-        // neither requests a schema plan nor manufactures field evidence.
+        // Contract enforces cardinality without requesting a schema plan or
+        // manufacturing field evidence. The transport owns its byte capacity.
         if !shape.validation().checks_fields() {
             return shape.check_binary(&self.payload.one().map_err(|e| e.to_string())?);
         }
@@ -251,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn contract_keeps_hard_limits_without_resolving_business_schema() {
+    fn contract_keeps_cardinality_without_resolving_schema_or_imposing_transport_limits() {
         let shape = MessageContract::standard("not.a.real.Message");
         let mut value = Envelope::from(Payload::message(vec![255].into()));
         value.check(&shape).unwrap(); // Opaque forwarding has no decoder obligation.
@@ -265,11 +265,33 @@ mod tests {
             .check(&shape)
             .is_err()
         );
-        assert!(
-            Envelope::from(Payload::message(vec![0; crate::MAX_MESSAGE + 1].into()))
-                .check(&shape)
-                .is_err()
+        let mut large = Envelope::from(Payload::message(
+            vec![0; crate::DEFAULT_FRAME_CAPACITY + 1].into(),
+        ));
+        large.check(&shape).unwrap();
+        assert!(large.checked.is_none());
+        assert!(large.into_wire().encode().is_ok());
+    }
+
+    #[test]
+    fn local_messages_do_not_inherit_physical_carrier_capacity() {
+        let shape = MessageContract::standard("google.protobuf.StringValue")
+            .with_validation(Validation::Checked);
+        let text = "x".repeat(2 * 1024 * 1024);
+        let message =
+            cordis_sdk_core::Message::from_json(shape.clone(), &serde_json::json!(text)).unwrap();
+        let mut envelope = Envelope::from_message(message).unwrap();
+        envelope.check(&shape).unwrap();
+        assert_eq!(
+            envelope
+                .clone()
+                .into_message(&shape)
+                .unwrap()
+                .to_json()
+                .unwrap(),
+            serde_json::json!(text)
         );
+        assert!(envelope.into_wire().encode().is_ok());
     }
     #[test]
     fn receipts_follow_body_schema_and_strength_but_never_cross_wire() {

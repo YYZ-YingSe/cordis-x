@@ -126,6 +126,7 @@ pub(crate) struct Inner {
     pub changed: watch::Sender<u64>,
     pub events: Mutex<crate::events::Registry>,
     pub retained: Mutex<Vec<Weak<crate::retention::Pin>>>,
+    pub references: Mutex<crate::reference::Registry>,
     diagnostics: Mutex<VecDeque<Error>>,
 }
 
@@ -150,6 +151,7 @@ impl Runtime {
                 changed,
                 events: Mutex::default(),
                 retained: Mutex::default(),
+                references: Mutex::default(),
                 diagnostics: Mutex::default(),
                 state: Mutex::new(State {
                     kernel: Kernel::new(NEXT_RUNTIME.fetch_add(1, Ordering::Relaxed)),

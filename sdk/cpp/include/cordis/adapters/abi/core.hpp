@@ -2,11 +2,13 @@
 #include "composition.hpp"
 #include "reactive.hpp"
 #include <cordis/adapters/context.hpp>
+#include <cordis/adapters/references.hpp>
 
 namespace cordis::adapters {
 template <> struct Advanced<abi::Context> {
   static void fill(Context::Operations &ops, const abi::Context &backend) {
     resources(ops, backend);
+    references(ops, backend);
     ops.effect = [backend](std::string label,
                            std::function<Async<EffectStep>(Context)> next)
         -> Async<EffectSequence> {

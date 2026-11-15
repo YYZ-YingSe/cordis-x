@@ -67,27 +67,19 @@ fn contract_identity_and_output_budgets_still_apply() {
         matches!(message::result::<Text>(Message::new(Text { value: "ok".into() }).unwrap(), &wrong),
         Err(Failure::Unknown(e)) if e.code == "contract_violation" && e.message.contains("mismatch"))
     );
-    // Native contract mode owns the DTO without a logical budget walk. The
-    // receiving policy checks logical limits; every physical encode is bounded.
-    let excessive = Message::new(Text {
-        value: "\0".repeat(cordis_contract::budget::MAX_BYTES + 1),
+    let large = Message::new(Text {
+        value: "\0".repeat(2 * 1024 * 1024),
     })
     .unwrap();
     assert!(
-        excessive
+        large
             .validate(cordis_sdk_core::Validation::Contract)
             .is_ok()
     );
-    assert!(
-        excessive
-            .validate(cordis_sdk_core::Validation::Checked)
-            .is_err()
-    );
-    assert!(
-        excessive
-            .encode(cordis_contract::budget::MAX_BYTES)
-            .is_err()
-    );
+    assert!(large.validate(cordis_sdk_core::Validation::Checked).is_ok());
+    assert!(large.encode(Some(1024 * 1024)).is_err());
+    assert!(large.encode(None).unwrap().len() > 1024 * 1024);
+    assert!(large.to_json().is_ok());
 }
 
 #[test]

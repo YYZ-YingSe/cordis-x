@@ -1,19 +1,25 @@
 use crate::{Error, Result, error::outcome};
-use cordis_wire::{Bytes, CONTENT_TYPE, Incoming, MAX_MESSAGE, Payload, Request};
+use cordis_wire::{Bytes, CONTENT_TYPE, Incoming, Payload, Request};
 use std::time::Duration;
 
 /// The HTTP body is the same bounded protobuf frame used by IPC.
 #[derive(Clone)]
 pub(crate) struct Http {
     validation: cordis_contract::Validation,
+    frame_capacity: usize,
     client: reqwest::Client,
     url: String,
+    execution_timeout: Option<Duration>,
+    cleanup_timeout: Duration,
 }
 impl Http {
     pub fn local(
         url: &str,
-        deadline: Duration,
+        connection_timeout: Duration,
+        execution_timeout: Option<Duration>,
+        cleanup_timeout: Duration,
         validation: cordis_contract::Validation,
+        frame_capacity: usize,
     ) -> Result<Self> {
         let parsed = reqwest::Url::parse(url).map_err(|e| Error::Protocol(e.to_string()))?;
         if parsed.scheme() != "http"
@@ -33,25 +39,37 @@ impl Http {
             .pool_max_idle_per_host(16)
             .retry(reqwest::retry::never())
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(deadline)
+            .connect_timeout(connection_timeout)
             .build()
             .map_err(|e| Error::Io(e.to_string()))?;
         Ok(Self {
             validation,
+            frame_capacity,
             client,
             url: url.into(),
+            execution_timeout,
+            cleanup_timeout,
         })
     }
     pub async fn call(&self, request: Request) -> Result<Payload> {
         let bytes = request
-            .encode()
+            .encode(self.frame_capacity)
             .map_err(|e| Error::InvalidInput(e.to_string()))?;
-        let mut response = self
+        let mut outgoing = self
             .client
             .post(&self.url)
             .header("Content-Type", CONTENT_TYPE)
             .header("Accept", CONTENT_TYPE)
-            .body(bytes)
+            .body(bytes);
+        let timeout = if request.command == "resource_release" {
+            Some(self.cleanup_timeout)
+        } else {
+            self.execution_timeout
+        };
+        if let Some(timeout) = timeout {
+            outgoing = outgoing.timeout(timeout);
+        }
+        let mut response = outgoing
             .send()
             .await
             .map_err(|e| Error::OutcomeUnknown(e.to_string()))?;
@@ -68,7 +86,7 @@ impl Http {
         }
         if response
             .content_length()
-            .is_some_and(|n| n > MAX_MESSAGE as u64)
+            .is_some_and(|n| n > self.frame_capacity as u64)
         {
             return Err(Error::Protocol("HTTP response too large".into()));
         }
@@ -85,13 +103,17 @@ impl Http {
             let length = joined
                 .as_ref()
                 .map_or_else(|| first.as_ref().map_or(0, Bytes::len), Vec::len);
-            if length + chunk.len() > MAX_MESSAGE {
+            if chunk.len() > self.frame_capacity.saturating_sub(length) {
                 return Err(Error::Protocol("HTTP response too large".into()));
             }
             if let Some(body) = joined.as_mut() {
+                body.try_reserve_exact(chunk.len())
+                    .map_err(|e| Error::OutcomeUnknown(e.to_string()))?;
                 body.extend_from_slice(&chunk);
             } else if let Some(previous) = first.take() {
-                let mut body = Vec::with_capacity(capacity.max(previous.len() + chunk.len()));
+                let mut body = Vec::new();
+                body.try_reserve_exact(capacity.max(previous.len() + chunk.len()))
+                    .map_err(|e| Error::OutcomeUnknown(e.to_string()))?;
                 body.extend_from_slice(&previous);
                 body.extend_from_slice(&chunk);
                 joined = Some(body);

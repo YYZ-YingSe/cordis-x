@@ -1,5 +1,6 @@
 #pragma once
 #include "runtime.hpp"
+#include <cordis/adapters/references.hpp>
 #include <map>
 
 namespace cordis::component::detail {
@@ -142,6 +143,35 @@ inline Context context(std::shared_ptr<Frame> frame,
   };
   Context::Operations ops;
   ops.validation = callbacks->validation;
+  ops.reference_export =
+      [req, callbacks](Value descriptor,
+                       std::shared_ptr<Resource> object) -> Async<std::string> {
+    auto id = callbacks->insert(
+        WireCallback([object, descriptor](Context ctx, Payload args) {
+          return adapters::reference_call(object, descriptor, std::move(ctx),
+                                          std::move(args));
+        }));
+    try {
+      Value args = {{"interface", descriptor}, {"callback", id}};
+      co_return (co_await req("reference-export", std::move(args)))
+          .get<std::string>();
+    } catch (const RpcError &) {
+      callbacks->remove(id);
+      throw;
+    }
+  };
+  ops.reference_invoke = [binary](std::string key, std::string digest,
+                                  std::string method,
+                                  Message args) -> Async<Message> {
+    Payload payload(
+        Value{{"reference", key}, {"digest", digest}, {"method", method}},
+        args);
+    co_return (co_await binary("reference-invoke", std::move(payload))).one();
+  };
+  ops.reference_dispose = [req](std::string key) -> Async<void> {
+    Value args = {{"reference", key}};
+    co_await req("reference-dispose", std::move(args));
+  };
   ops.acquire = [binary, callbacks](std::string dependency, std::string kind,
                                     Message args) -> Async<ResourceHandle> {
     Payload payload(Value{{"dependency", dependency}, {"kind", kind}}, args);

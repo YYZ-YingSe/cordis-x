@@ -1,8 +1,8 @@
 #pragma once
-#include <cordis/core/observation.hpp>
 #include "wire.hpp"
 #include <algorithm>
 #include <cordis/core/error.hpp>
+#include <cordis/core/observation.hpp>
 #include <cordis/protocols/session/channel.hpp>
 #include <cordis/runtime/native.hpp>
 #include <functional>
@@ -36,6 +36,46 @@ public:
   }
 };
 class Context;
+// Callback slots retain implementations until Runtime confirms disposal. They
+// use monotonically allocated local IDs; only the host issues transferable
+// keys.
+class ReferenceRegistry {
+public:
+  using Callback = std::function<Async<Payload>(Context, Payload)>;
+
+private:
+  std::mutex mutex;
+  uint64_t next = 0;
+  std::map<std::string, std::shared_ptr<Callback>> entries;
+
+public:
+  std::string insert(Callback callback) {
+    std::lock_guard lock(mutex);
+    if (entries.size() >= 4096 || next == UINT64_MAX)
+      throw Refusal("overloaded", "reference capacity reached");
+    auto id = "i" + std::to_string(++next);
+    entries.emplace(id, std::make_shared<Callback>(std::move(callback)));
+    return id;
+  }
+  std::shared_ptr<Callback> get(const std::string &id) {
+    std::lock_guard lock(mutex);
+    auto found = entries.find(id);
+    if (found == entries.end())
+      throw Refusal("closed", "reference retired");
+    return found->second;
+  }
+  void remove(const std::string &id) {
+    decltype(entries)::node_type removed;
+    {
+      std::lock_guard lock(mutex);
+      removed = entries.extract(id);
+    }
+  }
+  bool empty() {
+    std::lock_guard lock(mutex);
+    return entries.empty();
+  }
+};
 struct Inverse {
   std::string label;
   std::function<Async<void>(Context)> cleanup;
@@ -126,6 +166,7 @@ class Context {
     std::shared_ptr<corral::Event> cancellation;
     std::shared_ptr<EventRegistry> events;
     std::shared_ptr<MiddlewareRegistry> middlewares;
+    std::shared_ptr<ReferenceRegistry> references;
   };
   std::shared_ptr<Frame> frame;
   Async<std::vector<cordis::Flow>> dispatch_event(std::string, Message,
@@ -163,7 +204,8 @@ public:
           std::shared_ptr<corral::Event> cancellation = {},
           std::shared_ptr<EventRegistry> events = {},
           std::shared_ptr<MiddlewareRegistry> middlewares = {},
-          std::optional<Json> composition = {})
+          std::optional<Json> composition = {},
+          std::shared_ptr<ReferenceRegistry> references = {})
       : frame(std::make_shared<Frame>()) {
     frame->channel = std::move(channel);
     frame->token = std::move(token);
@@ -177,7 +219,14 @@ public:
     frame->events = std::move(events);
     frame->middlewares = std::move(middlewares);
     frame->composition = std::move(composition);
+    frame->references = std::move(references);
   }
+  Async<std::string>
+  reference_export(Value descriptor,
+                   ReferenceRegistry::Callback callback) const;
+  Async<Message> reference_invoke(std::string key, std::string digest,
+                                  std::string method, Message args) const;
+  Async<void> reference_dispose(std::string key) const;
   Async<ResourceHandle> acquire(std::string dependency, std::string kind,
                                 Message args) const {
     return cordis::detail::invoke_owned(
@@ -446,9 +495,15 @@ public:
     entry->cleanup = std::move(cleanup);
     {
       std::lock_guard lock(mutex);
-      if (next == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
-      if (entries.size() >= 4096) std::erase_if(entries, [](const auto &item) { std::lock_guard lock(item.second->mutex); return item.second->finished && !item.second->failure; });
-      if (entries.size() >= 4096) throw Refusal("overloaded", "live capacity reached");
+      if (next == UINT64_MAX)
+        throw Refusal("exhausted", "identity space exhausted");
+      if (entries.size() >= 4096)
+        std::erase_if(entries, [](const auto &item) {
+          std::lock_guard lock(item.second->mutex);
+          return item.second->finished && !item.second->failure;
+        });
+      if (entries.size() >= 4096)
+        throw Refusal("overloaded", "live capacity reached");
       id = "e" + std::to_string(++next);
       entries.emplace(id, entry);
     }
@@ -457,10 +512,14 @@ public:
     // acknowledgement.
     Json args = {{"context", context}, {"effect", id}, {"label", label}};
     Json reply;
-    try { reply = co_await channel->request("effect_register", std::move(args)); }
-    catch (const Refusal &) {
+    try {
+      reply = co_await channel->request("effect_register", std::move(args));
+    } catch (const Refusal &) {
       decltype(entries)::node_type refused;
-      { std::lock_guard lock(mutex); refused = entries.extract(id); }
+      {
+        std::lock_guard lock(mutex);
+        refused = entries.extract(id);
+      }
       throw;
     }
     const auto grant = reply.at("grant").get<std::string>();
@@ -523,7 +582,10 @@ class SequenceRegistry {
       co_await ctx.finish();
       lock.lock();
       failure = error;
-      if (!error) { inverse.reset(); --*budget; }
+      if (!error) {
+        inverse.reset();
+        --*budget;
+      }
       finished = true;
       lock.unlock();
       changed.trigger();
@@ -545,7 +607,8 @@ class SequenceRegistry {
   std::mutex mutex;
   std::map<std::string, std::shared_ptr<Entry>> entries;
   std::uint64_t next_id = 0;
-  std::shared_ptr<std::atomic<std::size_t>> total_steps = std::make_shared<std::atomic<std::size_t>>(0);
+  std::shared_ptr<std::atomic<std::size_t>> total_steps =
+      std::make_shared<std::atomic<std::size_t>>(0);
   std::shared_ptr<Entry> get(std::string id) {
     std::lock_guard lock(mutex);
     auto found = entries.find(id);
@@ -565,18 +628,28 @@ public:
     std::string id;
     {
       std::lock_guard lock(mutex);
-      if (next_id == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
-      if (entries.size() >= 256) std::erase_if(entries, [](const auto &item) { std::lock_guard lock(item.second->mutex); return item.second->released; });
-      if (entries.size() >= 256) throw Refusal("overloaded", "live capacity reached");
+      if (next_id == UINT64_MAX)
+        throw Refusal("exhausted", "identity space exhausted");
+      if (entries.size() >= 256)
+        std::erase_if(entries, [](const auto &item) {
+          std::lock_guard lock(item.second->mutex);
+          return item.second->released;
+        });
+      if (entries.size() >= 256)
+        throw Refusal("overloaded", "live capacity reached");
       id = "s" + std::to_string(++next_id);
       entries.emplace(id, entry);
     }
     Json args = {{"context", context}, {"sequence", id}, {"label", label}};
     Json reply;
-    try { reply = co_await channel->request("sequence_register", std::move(args)); }
-    catch (const Refusal &) {
+    try {
+      reply = co_await channel->request("sequence_register", std::move(args));
+    } catch (const Refusal &) {
       decltype(entries)::node_type refused;
-      { std::lock_guard lock(mutex); refused = entries.extract(id); }
+      {
+        std::lock_guard lock(mutex);
+        refused = entries.extract(id);
+      }
       throw;
     }
     const auto grant = reply.at("grant").get<std::string>();
@@ -597,7 +670,8 @@ public:
         throw Refusal("invalid_step", "step order mismatch");
       auto occupied = total_steps->load();
       do {
-        if (occupied >= 4096) throw Refusal("overloaded", "unrecovered step capacity reached");
+        if (occupied >= 4096)
+          throw Refusal("overloaded", "unrecovered step capacity reached");
       } while (!total_steps->compare_exchange_weak(occupied, occupied + 1));
       ++entry->next;
       entry->running = true;
@@ -628,8 +702,10 @@ public:
     step->budget = total_steps;
     {
       std::lock_guard lock(entry->mutex);
-      if (step->inverse) entry->steps.emplace(number, step);
-      else --*total_steps;
+      if (step->inverse)
+        entry->steps.emplace(number, step);
+      else
+        --*total_steps;
       entry->ended = result.done;
     }
     if ((step->inverse && step->inverse->label.size() > 1024) ||

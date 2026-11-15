@@ -44,6 +44,66 @@ impl Router {
         use crate::dependency_resources::{failure, success, text};
         if matches!(
             command,
+            "reference_export" | "reference_invoke" | "reference_dispose"
+        ) {
+            let control = payload.control.clone();
+            let context = self
+                .scopes
+                .lock()
+                .unwrap()
+                .get(&text(&control, "context")?)
+                .cloned()
+                .ok_or(Error::Closed)?;
+            let session = self.session.get().ok_or(Error::Closed)?.clone();
+            let command = command.to_owned();
+            return context
+                .operation(move |ctx| async move {
+                    let result: Result<Payload> = async {
+                        match command.as_str() {
+                            "reference_export" => {
+                                let descriptor =
+                                    cordis_contract::portable::decode(&control["interface"])
+                                        .map_err(Error::InvalidInput)?;
+                                let object = crate::references::Object::new(
+                                    session,
+                                    text(&control, "callback")?,
+                                );
+                                cordis_host::reference::export(&ctx, descriptor, object)
+                                    .await
+                                    .map(|key| Payload::from(json!(key)))
+                                    .map_err(Error::from)
+                            }
+                            "reference_invoke" => {
+                                let value = cordis_host::reference::invoke(
+                                    &ctx,
+                                    &text(&control, "reference")?,
+                                    &text(&control, "digest")?,
+                                    &text(&control, "method")?,
+                                    cordis_host::Body::from_bytes(payload.one()?),
+                                )
+                                .await
+                                .map_err(Error::from)?;
+                                value
+                                    .into_bytes()
+                                    .map(Payload::message)
+                                    .map_err(Error::Protocol)
+                            }
+                            _ => {
+                                cordis_host::reference::dispose(&ctx, &text(&control, "reference")?)
+                                    .await
+                                    .map(|_| Payload::from(Value::Null))
+                                    .map_err(Error::from)
+                            }
+                        }
+                    }
+                    .await;
+                    Ok(result)
+                })
+                .await
+                .map_err(crate::resource::runtime_error)?;
+        }
+        if matches!(
+            command,
             "child_install"
                 | "value_provide"
                 | "event_emit"

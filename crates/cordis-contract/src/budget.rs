@@ -1,21 +1,16 @@
-//! Logical message limits, independent of JSON spelling and wire encoding.
+//! Structural traversal limits, independent of business payload size.
 
-pub const MAX_BYTES: usize = 1024 * 1024;
 pub const MAX_NODES: usize = 65536;
 pub const MAX_DEPTH: usize = 64;
 
-/// A traversal owns its budget. Check before descending or subtracting bytes.
+/// A traversal owns its node budget and checks depth before descending.
 pub struct Budget {
     nodes: usize,
-    bytes: usize,
 }
 
 impl Default for Budget {
     fn default() -> Self {
-        Self {
-            nodes: MAX_NODES,
-            bytes: MAX_BYTES,
-        }
+        Self { nodes: MAX_NODES }
     }
 }
 
@@ -25,14 +20,6 @@ impl Budget {
             return Err("message depth/node limit exceeded".into());
         }
         self.nodes -= 1;
-        Ok(())
-    }
-
-    pub fn bytes(&mut self, count: usize) -> Result<(), String> {
-        self.bytes = self
-            .bytes
-            .checked_sub(count)
-            .ok_or("message byte limit exceeded")?;
         Ok(())
     }
 }

@@ -204,26 +204,29 @@ const char descriptor_table_protodef_cordis_2foptions_2eproto[] ABSL_ATTRIBUTE_S
     "\010contract\022\037.google.protobuf.ServiceOptio"
     "ns\030\270\216\003 \001(\0132\027.cordis.schema.Contract:3\n\010r"
     "esource\022\037.google.protobuf.ServiceOptions"
-    "\030\271\216\003 \001(\010:0\n\006errors\022\036.google.protobuf.Met"
-    "hodOptions\030\272\216\003 \003(\t:2\n\010acquires\022\036.google."
-    "protobuf.MethodOptions\030\273\216\003 \001(\t:3\n\twire_n"
-    "ame\022\036.google.protobuf.MethodOptions\030\302\216\003 "
-    "\001(\t:H\n\005event\022\036.google.protobuf.MethodOpt"
-    "ions\030\303\216\003 \001(\0132\027.cordis.schema.Endpoint:M\n"
-    "\nmiddleware\022\036.google.protobuf.MethodOpti"
-    "ons\030\304\216\003 \001(\0132\027.cordis.schema.Endpoint:2\n\010"
-    "installs\022\036.google.protobuf.MethodOptions"
-    "\030\305\216\003 \001(\010:L\n\tprovision\022\036.google.protobuf."
-    "MethodOptions\030\306\216\003 \001(\0132\027.cordis.schema.En"
-    "dpoint:N\n\tsemantics\022\037.google.protobuf.Me"
-    "ssageOptions\030\274\216\003 \001(\0162\030.cordis.schema.Sem"
-    "antics:1\n\010required\022\035.google.protobuf.Fie"
-    "ldOptions\030\275\216\003 \001(\010:6\n\nexact_size\022\035.google"
-    ".protobuf.FieldOptions\030\276\216\003 \001(\r\210\001\001:3\n\007min"
-    "imum\022\035.google.protobuf.FieldOptions\030\277\216\003 "
-    "\001(\022\210\001\001:3\n\007maximum\022\035.google.protobuf.Fiel"
-    "dOptions\030\300\216\003 \001(\022\210\001\001:1\n\010selected\022\035.google"
-    ".protobuf.OneofOptions\030\301\216\003 \001(\010b\006proto3"
+    "\030\271\216\003 \001(\010:4\n\tinterface\022\037.google.protobuf."
+    "ServiceOptions\030\307\216\003 \001(\010:0\n\006errors\022\036.googl"
+    "e.protobuf.MethodOptions\030\272\216\003 \003(\t:2\n\010acqu"
+    "ires\022\036.google.protobuf.MethodOptions\030\273\216\003"
+    " \001(\t:3\n\twire_name\022\036.google.protobuf.Meth"
+    "odOptions\030\302\216\003 \001(\t:H\n\005event\022\036.google.prot"
+    "obuf.MethodOptions\030\303\216\003 \001(\0132\027.cordis.sche"
+    "ma.Endpoint:M\n\nmiddleware\022\036.google.proto"
+    "buf.MethodOptions\030\304\216\003 \001(\0132\027.cordis.schem"
+    "a.Endpoint:2\n\010installs\022\036.google.protobuf"
+    ".MethodOptions\030\305\216\003 \001(\010:L\n\tprovision\022\036.go"
+    "ogle.protobuf.MethodOptions\030\306\216\003 \001(\0132\027.co"
+    "rdis.schema.Endpoint:N\n\tsemantics\022\037.goog"
+    "le.protobuf.MessageOptions\030\274\216\003 \001(\0162\030.cor"
+    "dis.schema.Semantics:4\n\treference\022\037.goog"
+    "le.protobuf.MessageOptions\030\310\216\003 \001(\t:1\n\010re"
+    "quired\022\035.google.protobuf.FieldOptions\030\275\216"
+    "\003 \001(\010:6\n\nexact_size\022\035.google.protobuf.Fi"
+    "eldOptions\030\276\216\003 \001(\r\210\001\001:3\n\007minimum\022\035.googl"
+    "e.protobuf.FieldOptions\030\277\216\003 \001(\022\210\001\001:3\n\007ma"
+    "ximum\022\035.google.protobuf.FieldOptions\030\300\216\003"
+    " \001(\022\210\001\001:1\n\010selected\022\035.google.protobuf.On"
+    "eofOptions\030\301\216\003 \001(\010b\006proto3"
 };
 static const ::_pbi::DescriptorTable* PROTOBUF_NONNULL const
     descriptor_table_cordis_2foptions_2eproto_deps[1] = {
@@ -233,7 +236,7 @@ static ::absl::once_flag descriptor_table_cordis_2foptions_2eproto_once;
 PROTOBUF_CONSTINIT const ::_pbi::DescriptorTable descriptor_table_cordis_2foptions_2eproto = {
     false,
     false,
-    1278,
+    1386,
     descriptor_table_protodef_cordis_2foptions_2eproto,
     "cordis/options.proto",
     &descriptor_table_cordis_2foptions_2eproto_once,
@@ -1395,6 +1398,10 @@ PROTOBUF_CONSTINIT
     PROTOBUF_ATTRIBUTE_INIT_PRIORITY2 ::_pbi::ExtensionIdentifier<
         ::google::protobuf::ServiceOptions, ::_pbi::PrimitiveTypeTraits< bool >, 8, false>
         resource(kResourceFieldNumber, false);
+PROTOBUF_CONSTINIT
+    PROTOBUF_ATTRIBUTE_INIT_PRIORITY2 ::_pbi::ExtensionIdentifier<
+        ::google::protobuf::ServiceOptions, ::_pbi::PrimitiveTypeTraits< bool >, 8, false>
+        interface(kInterfaceFieldNumber, false);
 const std::string errors_default("");
 PROTOBUF_CONSTINIT
     PROTOBUF_ATTRIBUTE_INIT_PRIORITY2 ::_pbi::ExtensionIdentifier<
@@ -1430,6 +1437,11 @@ PROTOBUF_CONSTINIT
     PROTOBUF_ATTRIBUTE_INIT_PRIORITY2 ::_pbi::ExtensionIdentifier<
         ::google::protobuf::MessageOptions, ::_pbi::EnumTypeTraits< ::cordis::schema::Semantics>, 14, false>
         semantics(kSemanticsFieldNumber, static_cast< ::cordis::schema::Semantics >(0));
+const std::string reference_default("");
+PROTOBUF_CONSTINIT
+    PROTOBUF_ATTRIBUTE_INIT_PRIORITY2 ::_pbi::ExtensionIdentifier<
+        ::google::protobuf::MessageOptions, ::_pbi::StringTypeTraits, 9, false>
+        reference(kReferenceFieldNumber, reference_default);
 PROTOBUF_CONSTINIT
     PROTOBUF_ATTRIBUTE_INIT_PRIORITY2 ::_pbi::ExtensionIdentifier<
         ::google::protobuf::FieldOptions, ::_pbi::PrimitiveTypeTraits< bool >, 8, false>
@@ -1469,6 +1481,9 @@ PROTOBUF_ATTRIBUTE_INIT_PRIORITY2 static ::std::false_type
             &::google::protobuf::ServiceOptions::default_instance(), 51001, 8,
             false, false, /*is_utf8=*/false),
         ::_pbi::ExtensionSet::RegisterExtension(
+            &::google::protobuf::ServiceOptions::default_instance(), 51015, 8,
+            false, false, /*is_utf8=*/false),
+        ::_pbi::ExtensionSet::RegisterExtension(
             &::google::protobuf::MethodOptions::default_instance(), 51002, 9,
             true, false, /*is_utf8=*/true),
         ::_pbi::ExtensionSet::RegisterExtension(
@@ -1495,6 +1510,9 @@ PROTOBUF_ATTRIBUTE_INIT_PRIORITY2 static ::std::false_type
         ::_pbi::ExtensionSet::RegisterEnumExtension(
             &::google::protobuf::MessageOptions::default_instance(), 51004, 14,
             false, false, ::cordis::schema::Semantics_internal_data_),
+        ::_pbi::ExtensionSet::RegisterExtension(
+            &::google::protobuf::MessageOptions::default_instance(), 51016, 9,
+            false, false, /*is_utf8=*/true),
         ::_pbi::ExtensionSet::RegisterExtension(
             &::google::protobuf::FieldOptions::default_instance(), 51005, 8,
             false, false, /*is_utf8=*/false),

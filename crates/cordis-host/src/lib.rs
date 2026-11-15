@@ -6,6 +6,7 @@ pub use binding::{
     EventBinding, Factory, FactoryBinding, HostBindings, MiddlewareBinding, ProvisionBinding,
 };
 mod endpoint;
+pub mod reference;
 mod resource;
 pub use body::Body;
 pub use cordis_contract::{Failure, refused};

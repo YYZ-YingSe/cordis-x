@@ -13,7 +13,7 @@ use tokio::sync::Semaphore;
 fn wire_json(value: cordis_remote::Value) -> cordis_remote::Bytes {
     cordis_sdk_core::Message::from_json(cordis_sdk_core::MessageContract::json_value(), &value)
         .unwrap()
-        .encode(cordis_wire::MAX_MESSAGE)
+        .encode(Some(cordis_wire::DEFAULT_FRAME_CAPACITY))
         .unwrap()
 }
 fn unwire_json(value: cordis_remote::Bytes) -> cordis_remote::Value {
@@ -92,7 +92,7 @@ impl RawProcess {
         };
         let request = result.request(
             "hello",
-            json!({"max_inflight":16,"validation":"checked", "contract":{"name":"example.calculator","revision":"1"}, "interface": cordis_contract::portable::encode(calculator().descriptor().unwrap()), "dependency_interfaces": {}}),
+            json!({"max_inflight":16,"frame_capacity":cordis_wire::DEFAULT_FRAME_CAPACITY,"validation":"checked", "contract":{"name":"example.calculator","revision":"1"}, "interface": cordis_contract::portable::encode(calculator().descriptor().unwrap()), "dependency_interfaces": {}}),
         );
         assert_eq!(result.exchange(request).await["outcome"]["kind"], "success");
         let request = result.request("activate", json!(null));
@@ -146,7 +146,7 @@ impl RawProcess {
                 // Invalid semantic input is deliberately sent as malformed
                 // protobuf so receiver-side refusal is tested before entry.
                 cordis_sdk_core::Message::from_json(shape, &args)
-                    .and_then(|v| v.encode(cordis_wire::MAX_MESSAGE))
+                    .and_then(|v| v.encode(Some(cordis_wire::DEFAULT_FRAME_CAPACITY)))
                     .unwrap_or_else(|_| vec![255].into())
             } else {
                 vec![255].into()
@@ -160,7 +160,7 @@ impl RawProcess {
             command: command.into(),
             payload: cordis_wire::Payload { control, messages },
         }
-        .encode()
+        .encode(cordis_wire::DEFAULT_FRAME_CAPACITY)
         .unwrap()
     }
     fn decode(&self, bytes: Vec<u8>) -> cordis_remote::Value {
@@ -196,7 +196,7 @@ impl RawProcess {
         self.input.write_all(&bytes).await.unwrap();
         self.input.flush().await.unwrap();
         let length = bounded(self.output.read_u32()).await.unwrap();
-        assert!(length <= cordis_wire::MAX_MESSAGE as u32);
+        assert!(length <= cordis_wire::DEFAULT_FRAME_CAPACITY as u32);
         let mut bytes = vec![0; length as usize];
         self.output.read_exact(&mut bytes).await.unwrap();
         self.decode(bytes)
@@ -405,6 +405,47 @@ async fn acquire(
             })
         })
         .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn host_selected_capacity_carries_large_values_without_application_chunks() {
+    for &backend in Backend::ALL {
+        for validation in [
+            cordis_contract::Validation::Contract,
+            cordis_contract::Validation::Checked,
+            cordis_contract::Validation::Audit,
+        ] {
+            let runtime = Runtime::new();
+            let mut spec = backend.spec("calculator");
+            spec.frame_capacity = 4 * 1024 * 1024;
+            spec.bindings.validation = validation;
+            let service = calculator();
+            let provider = runtime
+                .install(spec.plugin("large-values", &service))
+                .unwrap();
+            bounded(provider.ready()).await.unwrap();
+            let (_, saved) = dependencies::consumer(&runtime, service).await;
+            let handle = saved.lock().unwrap().take().unwrap();
+            for endpoint in [Endpoint::Ipc, Endpoint::Http] {
+                let value = json!({"text": "中".repeat(1024 * 1024)});
+                assert_eq!(
+                    bounded(call(&handle, endpoint, "echo", value.clone()))
+                        .await
+                        .unwrap(),
+                    value
+                );
+                let oversized = json!({"text": "x".repeat(5 * 1024 * 1024)});
+                assert!(call(&handle, endpoint, "echo", oversized).await.is_err());
+                assert_eq!(
+                    call(&handle, endpoint, "echo", json!("still-active"))
+                        .await
+                        .unwrap(),
+                    json!("still-active")
+                );
+            }
+            bounded(runtime.shutdown()).await.unwrap();
+        }
+    }
 }
 
 #[tokio::test]

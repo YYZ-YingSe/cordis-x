@@ -440,7 +440,7 @@ async fn generated_binary_calls_complete_concurrently_with_default_store_limits(
                     right: Some(42),
                 })
                 .unwrap()
-                .encode(cordis_component::MAX_BYTES)
+                .encode(None)
                 .unwrap();
                 barrier.wait().await;
                 let output = handle

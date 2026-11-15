@@ -30,7 +30,7 @@ impl Checks {
 }
 trait Native: Send + Sync {
     fn contract(&self) -> &'static MessageContract;
-    fn encode(&self, limit: usize) -> Result<Vec<u8>, String>;
+    fn encode(&self, limit: Option<usize>) -> Result<Vec<u8>, String>;
     fn validate(&self, policy: Validation) -> Result<(), String>;
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
 }
@@ -42,15 +42,18 @@ impl<T: Codec> Native for Owned<T> {
     fn contract(&self) -> &'static MessageContract {
         T::contract()
     }
-    fn encode(&self, limit: usize) -> Result<Vec<u8>, String> {
+    fn encode(&self, limit: Option<usize>) -> Result<Vec<u8>, String> {
         let length = self.value.encoded_len();
-        if length > limit {
+        if limit.is_some_and(|limit| length > limit) {
             return Err("encoded message byte limit exceeded".into());
         }
-        let mut bytes = Vec::with_capacity(length);
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(length)
+            .map_err(|error| error.to_string())?;
         // Use the standard generated encoder with the already calculated size.
         self.value.encode_raw(&mut bytes);
-        if bytes.len() > limit {
+        if limit.is_some_and(|limit| bytes.len() > limit) {
             return Err("encoded message byte limit exceeded".into());
         }
         Ok(bytes)
@@ -161,9 +164,6 @@ impl Message {
         contract: MessageContract,
         bytes: prost::bytes::Bytes,
     ) -> Result<Self, String> {
-        if bytes.len() > cordis_contract::budget::MAX_BYTES {
-            return Err("encoded message byte limit exceeded".into());
-        }
         let required = contract.validation();
         Ok(Self {
             body: Body::Encoded {
@@ -258,20 +258,20 @@ impl Message {
             }
         }
     }
-    pub fn encode(&self, limit: usize) -> Result<prost::bytes::Bytes, String> {
+    pub fn encode(&self, limit: Option<usize>) -> Result<prost::bytes::Bytes, String> {
         self.validate(self.required)?;
         let bytes = match &self.body {
             Body::Native(value) => value.encode(limit)?.into(),
             Body::Encoded { bytes, .. } => bytes.clone(),
         };
-        if bytes.len() > limit {
+        if limit.is_some_and(|limit| bytes.len() > limit) {
             return Err("encoded message byte limit exceeded".into());
         }
         Ok(bytes)
     }
     pub fn to_json(&self) -> Result<Value, String> {
         self.validate(self.required)?;
-        let bytes = self.encode(cordis_contract::budget::MAX_BYTES)?;
+        let bytes = self.encode(None)?;
         let dynamic =
             prost_reflect::DynamicMessage::decode(self.contract().resolve()?.clone(), bytes)
                 .map_err(|e| e.to_string())?;

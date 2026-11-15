@@ -24,13 +24,19 @@ test('field plans isolate same-name descriptor identities and mutable values', (
   assert.doesNotThrow(() => validateMessage(ConfigSchema, ordinary, 'contract'));
 });
 
-test('compiled recursive plans preserve byte, node and depth budgets', () => {
+test('compiled plans allow large values and preserve node and depth protection', () => {
   const links = create(LinkASchema, {next: {next: {}}});
   validateMessage(LinkASchema, links, 'audit');
-  const data = create(DataSchema, {int32Value: 0, option: {state: {case:'none', value:0}}, binary: new Uint8Array(1024*1024)});
+  const data = create(DataSchema, {int32Value: 0, option: {state: {case:'none', value:0}}, binary: new Uint8Array(2*1024*1024)});
   validateMessage(DataSchema, data, 'checked');
   data.text = 'x';
-  assert.throws(() => validateMessage(DataSchema, data, 'checked'), /byte limit/);
+  assert.doesNotThrow(() => validateMessage(DataSchema, data, 'checked'));
+  const codec = protobuf(DataSchema);
+  for (const policy of ['contract', 'checked', 'audit'] as const) {
+    const encoded = codec.encode(data, policy);
+    assert.ok(encoded.byteLength > 1024 * 1024);
+    assert.deepEqual(codec.decode(encoded, policy), data);
+  }
   data.binary = new Uint8Array(); data.text = '';
   data.flags = Array(65536).fill(false);
   assert.throws(() => validateMessage(DataSchema, data, 'checked'), /node limit/);
@@ -39,6 +45,21 @@ test('compiled recursive plans preserve byte, node and depth budgets', () => {
   let tree = data.tree;
   for (let i=0;i<64;i++) { const child = {$typeName:'profile.Tree' as const, label:'', children:[]}; tree.children.push(child); tree = child; }
   assert.throws(() => validateMessage(DataSchema, data, 'checked'), /depth\/node limit/);
+});
+
+test('large map keys and string values have no implicit byte quota', () => {
+  const key = 'k'.repeat(1024 * 1024);
+  const name = '中'.repeat(400000);
+  const data = create(DataSchema, {
+    int32Value: 0,
+    option: { state: { case: 'none', value: 0 } },
+    groups: { [key]: { values: [{ id: 1n, name }] } },
+  });
+  const codec = protobuf(DataSchema);
+  for (const policy of ['contract', 'checked', 'audit'] as const) {
+    const decoded = codec.decode(codec.encode(data, policy), policy);
+    assert.equal(decoded.groups[key].values[0].name, name);
+  }
 });
 
 test('fixed strings count Unicode code points and still reject malformed strings', () => {

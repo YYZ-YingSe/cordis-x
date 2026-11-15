@@ -6,6 +6,7 @@ mod dependency;
 mod dependency_resources;
 mod host;
 mod host_failure;
+mod references;
 pub use composition::CompositionLimits;
 #[cfg(feature = "loader")]
 pub mod loader;
@@ -34,10 +35,12 @@ pub use resource::RemoteResource;
 pub(crate) fn json_body(shape: &MessageContract, value: &Value) -> Result<Bytes> {
     use prost::Message;
     let value = shape.parse_json(value).map_err(Error::InvalidInput)?;
-    if value.encoded_len() > cordis_wire::MAX_MESSAGE {
-        return Err(Error::InvalidInput("message too large".into()));
-    }
-    Ok(value.encode_to_vec().into())
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(value.encoded_len())
+        .map_err(|error| Error::InvalidInput(error.to_string()))?;
+    value.encode_raw(&mut bytes);
+    Ok(bytes.into())
 }
 pub(crate) fn body_json(shape: &MessageContract, bytes: &Bytes) -> Result<Value> {
     let message = shape.parse_binary(bytes).map_err(Error::Protocol)?;

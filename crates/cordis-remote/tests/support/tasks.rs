@@ -70,7 +70,7 @@ async fn tasks_outlive_rpc_deadlines_and_stop_before_cleanup_across_sdks_and_end
             let log = Log::new();
             rt.install(log_plugin(log.clone())).unwrap();
             let mut spec = spec(backend, endpoint);
-            spec.timeout = Duration::from_millis(300);
+            spec.execution_timeout = Some(Duration::from_millis(300));
             let provider = rt.install(spec.plugin("tasks", &tasks())).unwrap();
             bounded(provider.ready()).await.unwrap();
             let (owner, handle) = consumer(&rt).await;
@@ -161,8 +161,8 @@ async fn task_stop_grace_is_independent_of_the_ordinary_rpc_deadline() {
         *log.block.lock().unwrap() = Some("run/stopped".into());
         rt.install(log_plugin(log.clone())).unwrap();
         let mut spec = spec(backend, Endpoint::Ipc);
-        spec.timeout = Duration::from_millis(300);
-        spec.task_stop_timeout = Duration::from_secs(2);
+        spec.execution_timeout = Some(Duration::from_millis(300));
+        spec.stop_timeout = Duration::from_secs(2);
         let provider = rt.install(spec.plugin("tasks", &tasks())).unwrap();
         bounded(provider.ready()).await.unwrap();
         let (owner, handle) = consumer(&rt).await;
@@ -342,8 +342,8 @@ fn peer(mode: &str) -> (ProcessSpec, PathBuf) {
         mode.into(),
         trace.display().to_string(),
     ]);
-    spec.timeout = Duration::from_millis(250);
-    spec.task_stop_timeout = Duration::from_millis(250);
+    spec.execution_timeout = Some(Duration::from_millis(250));
+    spec.stop_timeout = Duration::from_millis(250);
     (spec, trace)
 }
 
@@ -414,7 +414,7 @@ async fn task_crash_malformed_reply_and_uncooperative_stop_retain_unknown_effect
     for mode in ["crash", "malformed", "hang", "ack_no_exit"] {
         let rt = Runtime::new();
         let (mut spec, trace) = peer(mode);
-        spec.timeout = Duration::from_secs(2);
+        spec.execution_timeout = Some(Duration::from_secs(2));
         let provider = rt.install(spec.plugin("peer", &probe_service())).unwrap();
         bounded(provider.ready()).await.unwrap();
         let (owner, handle) = probe_consumer(&rt).await;

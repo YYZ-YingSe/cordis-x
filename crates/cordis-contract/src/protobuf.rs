@@ -16,7 +16,8 @@ use std::{
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
-pub use crate::budget::{MAX_BYTES, MAX_DEPTH, MAX_NODES};
+pub use crate::budget::{MAX_DEPTH, MAX_NODES};
+pub const MAX_DESCRIPTOR_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -99,12 +100,9 @@ impl MessageContract {
         self.validate(&message, crate::Validation::Audit)?;
         serde_json::to_value(&message).map_err(|e| e.to_string())
     }
-    /// Receiving-domain validation. Binary size is checked before decoding;
-    /// logical limits are independent of physical protobuf overhead.
+    /// Receiving-domain validation. Structural and declared field constraints
+    /// are independent of the transport's buffer capacity.
     pub fn parse_binary(&self, bytes: &[u8]) -> Result<DynamicMessage, String> {
-        if bytes.len() > MAX_BYTES {
-            return Err("encoded message byte limit exceeded".into());
-        }
         if self.validation.audits() {
             audit_binary(bytes, self.resolve()?)?;
         }
@@ -130,9 +128,6 @@ impl MessageContract {
     /// Check opaque business bytes only when the host requires field checking.
     /// Forwarders in contract mode never materialize the business object.
     pub fn check_binary(&self, bytes: &[u8]) -> Result<(), String> {
-        if bytes.len() > MAX_BYTES {
-            return Err("encoded message byte limit exceeded".into());
-        }
         if self.validation.checks_fields() {
             self.parse_binary(bytes)?;
         }
@@ -180,11 +175,11 @@ impl MessageContract {
     }
 }
 pub fn decode_bytes(text: &str) -> Result<Vec<u8>, String> {
-    if text.len() > MAX_BYTES.div_ceil(3) * 4 {
+    if text.len() > MAX_DESCRIPTOR_BYTES.div_ceil(3) * 4 {
         return Err("protobuf descriptor exceeds byte limit".into());
     }
     let bytes = STANDARD.decode(text).map_err(|e| e.to_string())?;
-    if bytes.len() > MAX_BYTES || STANDARD.encode(&bytes) != text {
+    if bytes.len() > MAX_DESCRIPTOR_BYTES || STANDARD.encode(&bytes) != text {
         return Err("invalid base64 payload".into());
     }
     Ok(bytes)
@@ -433,7 +428,7 @@ pub fn validate_with(
 
 /// Well-known descriptors are supplied by protobuf runtimes, not repeated in every contract.
 pub fn compact_descriptor(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    if bytes.len() > MAX_BYTES {
+    if bytes.len() > MAX_DESCRIPTOR_BYTES {
         return Err("descriptor byte limit exceeded".into());
     }
     let desc = DescriptorPool::global()
@@ -535,30 +530,28 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn logical_bytes_do_not_depend_on_escaping_or_protobuf_overhead() {
+    fn business_strings_have_no_implicit_byte_quota() {
         let shape = MessageContract::standard("google.protobuf.StringValue");
         for character in ["x", "\0"] {
-            let text = character.repeat(MAX_BYTES);
+            let text = character.repeat(2 * 1024 * 1024);
             let message = shape.parse_json(&json!(text)).unwrap();
-            assert!(message.encoded_len() > MAX_BYTES);
-            assert_eq!(
-                shape.parse_json(&json!(text + "x")).unwrap_err(),
-                "message byte limit exceeded"
-            );
+            assert!(message.encoded_len() > 1024 * 1024);
+            assert_eq!(shape.to_json(&message).unwrap(), json!(text));
+            assert!(shape.parse_binary(&message.encode_to_vec()).is_ok());
         }
     }
 
     #[test]
-    fn logical_budget_counts_map_keys_and_all_string_values() {
+    fn business_map_keys_and_values_have_no_implicit_byte_quota() {
         let shape = MessageContract::json_value();
-        let key = "k".repeat(MAX_BYTES / 2);
-        let text = "中".repeat(MAX_BYTES / 6);
+        let key = "k".repeat(1024 * 1024);
+        let text = "中".repeat(1024 * 1024);
         assert!(
             shape
                 .parse_json(&json!({key.clone(): text.clone()}))
                 .is_ok()
         );
-        assert!(shape.parse_json(&json!({key: text + "中文"})).is_err());
+        assert!(shape.parse_json(&json!({key: text + "中文"})).is_ok());
     }
 
     #[test]

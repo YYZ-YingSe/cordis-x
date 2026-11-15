@@ -1,5 +1,6 @@
 use cordis_wire::{
-    Bytes, Identity, Incoming, MAX_MESSAGE, Outcome, Payload, RemoteError, Request, decode, json,
+    Bytes, DEFAULT_FRAME_CAPACITY, Identity, Incoming, Outcome, Payload, RemoteError, Request,
+    decode, json,
 };
 fn request(payload: Payload) -> Request {
     Request {
@@ -20,7 +21,7 @@ fn opaque_bodies_preserve_all_bytes_including_empty_and_are_owned() {
     let mut payload = Payload::with_message(json!({"method":"echo"}), bytes.clone());
     payload.messages.push(Bytes::new());
     let expected = request(payload);
-    let encoded = expected.encode().unwrap();
+    let encoded = expected.encode(DEFAULT_FRAME_CAPACITY).unwrap();
     let Incoming::Request(actual) = decode(encoded.clone()).unwrap() else {
         panic!("request expected")
     };
@@ -39,7 +40,7 @@ fn opaque_bodies_preserve_all_bytes_including_empty_and_are_owned() {
 #[test]
 fn audit_unknown_fields_and_all_grade_physical_errors() {
     let frame = request(Payload::message(Bytes::from_static(b"body")))
-        .encode()
+        .encode(DEFAULT_FRAME_CAPACITY)
         .unwrap();
     let mut unknown = frame.to_vec();
     unknown.extend_from_slice(&[0x78, 1]);
@@ -52,13 +53,46 @@ fn audit_unknown_fields_and_all_grade_physical_errors() {
     assert!(cordis_wire::decode_with(unknown.into(), cordis_contract::Validation::Audit).is_err());
     assert!(decode(Bytes::new()).is_err());
     assert!(decode(frame.slice(..frame.len() - 1)).is_err());
-    assert!(decode(Bytes::from(vec![0; MAX_MESSAGE + 1])).is_err());
+    assert!(decode(Bytes::from(vec![0; DEFAULT_FRAME_CAPACITY + 1])).is_err());
     assert!(
-        request(Payload::message(Bytes::from(vec![0; MAX_MESSAGE])))
-            .encode()
-            .is_err()
+        request(Payload::message(Bytes::from(vec![
+            0;
+            DEFAULT_FRAME_CAPACITY
+        ])))
+        .encode(DEFAULT_FRAME_CAPACITY)
+        .is_err()
     );
     assert!(Payload::decode(Bytes::new()).is_err());
+}
+#[test]
+fn payload_bytes_are_independent_of_session_frame_capacity() {
+    let payload =
+        Payload::with_message(json!({"method":"echo"}), vec![173; 3 * 1024 * 1024].into());
+    for policy in [
+        cordis_wire::Validation::Contract,
+        cordis_wire::Validation::Checked,
+        cordis_wire::Validation::Audit,
+    ] {
+        let bytes = payload.encode().unwrap();
+        let decoded = Payload::decode_with(bytes, policy).unwrap();
+        assert_eq!(decoded, payload);
+    }
+    let frame = request(payload);
+    assert!(frame.encode(DEFAULT_FRAME_CAPACITY).is_err());
+    let encoded = frame.encode(4 * 1024 * 1024).unwrap();
+    for policy in [
+        cordis_wire::Validation::Contract,
+        cordis_wire::Validation::Checked,
+        cordis_wire::Validation::Audit,
+    ] {
+        assert_eq!(
+            cordis_wire::decode_with(encoded.clone(), policy).unwrap(),
+            Incoming::Request(frame.clone())
+        );
+    }
+    let oversized_control =
+        Payload::from(json!("x".repeat(cordis_wire::binary::MAX_CONTROL_BYTES)));
+    assert!(oversized_control.encode().is_err());
 }
 #[test]
 fn response_identity_and_unknown_outcome_do_not_become_rejection() {
@@ -69,7 +103,9 @@ fn response_identity_and_unknown_outcome_do_not_become_rejection() {
             message: "execution may have committed".into(),
         },
     });
-    let Incoming::Response(mut actual) = decode(response.encode().unwrap()).unwrap() else {
+    let Incoming::Response(mut actual) =
+        decode(response.encode(DEFAULT_FRAME_CAPACITY).unwrap()).unwrap()
+    else {
         panic!("response expected")
     };
     request.check(&actual).unwrap();
@@ -97,7 +133,8 @@ fn maximum_control_shapes_fit_standard_decoder_limits() {
             cordis_wire::Validation::Audit,
         ] {
             let Incoming::Request(output) =
-                cordis_wire::decode_with(frame.encode().unwrap(), policy).unwrap()
+                cordis_wire::decode_with(frame.encode(DEFAULT_FRAME_CAPACITY).unwrap(), policy)
+                    .unwrap()
             else {
                 panic!("request")
             };
@@ -109,7 +146,7 @@ fn maximum_control_shapes_fit_standard_decoder_limits() {
             control: json!(null),
             messages: vec![Bytes::new(); 4097]
         })
-        .encode()
+        .encode(DEFAULT_FRAME_CAPACITY)
         .is_err()
     );
     assert!(Payload::from(json!(vec![0; 8192])).encode().is_err());

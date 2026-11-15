@@ -138,18 +138,23 @@ fn receiving_policy_checks_at_consumption_and_audits_unknown_fields() {
 }
 
 #[test]
-fn native_logical_limit_and_foreign_encoded_limit_are_separate() {
+fn generated_messages_preserve_large_values_and_explicit_encoding_budgets() {
     let value = StringValue {
-        value: "\0".repeat(cordis_contract::budget::MAX_BYTES),
+        value: "\0".repeat(2 * 1024 * 1024),
     };
     let message = Message::new(value).unwrap();
-    assert!(message.encode(cordis_contract::budget::MAX_BYTES).is_err());
-    let bytes = message
-        .encode(cordis_contract::budget::MAX_BYTES + 8)
-        .unwrap();
-    assert!(Message::from_bytes(StringValue::contract().clone(), bytes).is_err());
+    assert!(message.encode(Some(1024 * 1024)).is_err());
+    let bytes = message.encode(None).unwrap();
+    let decoded = Message::from_bytes(
+        StringValue::contract().with_validation(Validation::Checked),
+        bytes,
+    )
+    .unwrap()
+    .into_typed::<StringValue>()
+    .unwrap();
     let native: StringValue = message.into_typed().unwrap();
-    assert_eq!(native.value.len(), cordis_contract::budget::MAX_BYTES);
+    assert_eq!(native.value.len(), 2 * 1024 * 1024);
+    assert_eq!(native, decoded);
 }
 
 struct Echo;
