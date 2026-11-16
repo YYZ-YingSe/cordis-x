@@ -1,4 +1,4 @@
-import { Identities, makeRoom, Completion, registration } from './retention.ts';
+import { Identities, makeRoom, Completion, Observation, registration } from './retention.ts';
 import { OperationInbox, RESERVED_CAPACITY } from '../../protocols/session/operations.ts';
 import type { Message } from '../../core/message.ts';
 import { payload, controlOnly, type Payload } from '../../protocols/session/messages.ts';
@@ -35,10 +35,10 @@ export class Dispatch {
     this.dispatch = dispatch;
     this.grant = grant;
   }
-  private completion = new Completion<EventFlow[]>();
-  join(): Promise<EventFlow[]> { return this.completion.observe(() => this.joinOnce()); }
-  private async joinOnce(): Promise<EventFlow[]> {
-    const reply = await this.channel.requestPayload('event_join', payload({ dispatch: this.dispatch, grant: this.grant }));
+  private completion = new Observation<EventFlow[]>();
+  join(signal?: AbortSignal): Promise<EventFlow[]> { return this.completion.observe(() => this.joinOnce(signal)); }
+  private async joinOnce(signal?: AbortSignal): Promise<EventFlow[]> {
+    const reply = await this.channel.requestPayload('event_join', payload({ dispatch: this.dispatch, grant: this.grant }), signal);
     const result = reply.control;
     if (!result || typeof result !== 'object' || Array.isArray(result))
       throw new Refusal('protocol', 'invalid dispatch outcome');
@@ -59,8 +59,8 @@ export class Dispatch {
       throw new EventDispatchError(result.errors);
     throw new Refusal('protocol', 'invalid dispatch outcome');
   }
-  snapshot(): Promise<Value> {
-    return this.channel.request('event_status', { dispatch: this.dispatch, grant: this.grant });
+  snapshot(signal?: AbortSignal): Promise<Value> {
+    return this.channel.request('event_status', { dispatch: this.dispatch, grant: this.grant }, signal);
   }
 }
 type Entry = { callback?: EventCallback; running: number };

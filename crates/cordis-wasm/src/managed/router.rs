@@ -10,6 +10,27 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
+/// The host owns semantic classification; guest payloads cannot mark arbitrary
+/// business calls as cancellable. A protocol command has exactly one lifetime.
+fn is_observation(command: &str) -> bool {
+    matches!(
+        command,
+        "wait"
+            | "info"
+            | "metadata"
+            | "join"
+            | "task-status"
+            | "effect-ready"
+            | "effect-status"
+            | "scope-ready"
+            | "scope-status"
+            | "plugin-ready"
+            | "plugin-settled"
+            | "plugin-status"
+            | "event-join"
+            | "event-status"
+    )
+}
 struct Request {
     result: tokio::sync::watch::Receiver<Option<Result<Payload>>>,
     lane: u8,
@@ -149,7 +170,7 @@ impl Router {
         if command.len() > 128 {
             return Err(Error::InvalidInput("command too long".into()));
         }
-        let (withdraw, mut withdrawn) = if command == "wait" {
+        let (withdraw, mut withdrawn) = if is_observation(&command) {
             let (send, receive) = tokio::sync::watch::channel(false);
             (Some(send), Some(receive))
         } else {
@@ -218,7 +239,7 @@ impl Router {
                 };
                 tokio::select! {
                     biased;
-                    _ = stop => Err(Error::Refused { code:"wait_cancelled".into(), message:"observation was withdrawn".into() }),
+                    _ = stop => Err(Error::Refused { code:"observation_cancelled".into(), message:"observation was withdrawn".into() }),
                     result = router.clone().dispatch_payload(ctx, command, args) => result,
                 }
             } else {
@@ -969,7 +990,7 @@ impl Scope {
         for (mut result, observation) in requests {
             if let Err(error) = wait_result(&mut result).await {
                 if observation
-                    && matches!(&error, Error::Refused { code, .. } if code == "wait_cancelled")
+                    && matches!(&error, Error::Refused { code, .. } if code == "observation_cancelled")
                 {
                     continue;
                 }

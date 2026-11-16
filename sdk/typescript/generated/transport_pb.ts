@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file transport.proto.
  */
 export const file_transport: GenFile = /*@__PURE__*/
-  fileDesc("Cg90cmFuc3BvcnQucHJvdG8SEGNvcmRpcy50cmFuc3BvcnQiRAoHUGF5bG9hZBInCgdjb250cm9sGAEgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlEhAKCG1lc3NhZ2VzGAIgAygMIj0KCElkZW50aXR5EhMKC2luY2FybmF0aW9uGAEgASgJEg0KBWZpYmVyGAIgASgJEg0KBWVwb2NoGAMgASgJIkYKB1JlcXVlc3QSDwoHY29tbWFuZBgBIAEoCRIqCgdwYXlsb2FkGAIgASgLMhkuY29yZGlzLnRyYW5zcG9ydC5QYXlsb2FkIiYKBUVycm9yEgwKBGNvZGUYASABKAkSDwoHbWVzc2FnZRgCIAEoCSLIAQoIUmVzcG9uc2USLAoHc3VjY2VzcxgBIAEoCzIZLmNvcmRpcy50cmFuc3BvcnQuUGF5bG9hZEgAEisKCHJlamVjdGVkGAIgASgLMhcuY29yZGlzLnRyYW5zcG9ydC5FcnJvckgAEioKB3JlZnVzZWQYAyABKAsyFy5jb3JkaXMudHJhbnNwb3J0LkVycm9ySAASKgoHdW5rbm93bhgEIAEoCzIXLmNvcmRpcy50cmFuc3BvcnQuRXJyb3JIAEIJCgdvdXRjb21lIsYBCgVGcmFtZRIPCgdzZXNzaW9uGAEgASgJEi4KCmFjdGl2YXRpb24YAiABKAsyGi5jb3JkaXMudHJhbnNwb3J0LklkZW50aXR5EhEKCW9wZXJhdGlvbhgDIAEoCRIsCgdyZXF1ZXN0GAQgASgLMhkuY29yZGlzLnRyYW5zcG9ydC5SZXF1ZXN0SAASLgoIcmVzcG9uc2UYBSABKAsyGi5jb3JkaXMudHJhbnNwb3J0LlJlc3BvbnNlSABCCwoJZGlyZWN0aW9uYgZwcm90bzM", [file_google_protobuf_struct]);
+  fileDesc("Cg90cmFuc3BvcnQucHJvdG8SEGNvcmRpcy50cmFuc3BvcnQiRAoHUGF5bG9hZBInCgdjb250cm9sGAEgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlEhAKCG1lc3NhZ2VzGAIgAygMIj0KCElkZW50aXR5EhMKC2luY2FybmF0aW9uGAEgASgJEg0KBWZpYmVyGAIgASgJEg0KBWVwb2NoGAMgASgJIkYKB1JlcXVlc3QSDwoHY29tbWFuZBgBIAEoCRIqCgdwYXlsb2FkGAIgASgLMhkuY29yZGlzLnRyYW5zcG9ydC5QYXlsb2FkIiYKBUVycm9yEgwKBGNvZGUYASABKAkSDwoHbWVzc2FnZRgCIAEoCSLIAQoIUmVzcG9uc2USLAoHc3VjY2VzcxgBIAEoCzIZLmNvcmRpcy50cmFuc3BvcnQuUGF5bG9hZEgAEisKCHJlamVjdGVkGAIgASgLMhcuY29yZGlzLnRyYW5zcG9ydC5FcnJvckgAEioKB3JlZnVzZWQYAyABKAsyFy5jb3JkaXMudHJhbnNwb3J0LkVycm9ySAASKgoHdW5rbm93bhgEIAEoCzIXLmNvcmRpcy50cmFuc3BvcnQuRXJyb3JIAEIJCgdvdXRjb21lIuQBCgVGcmFtZRIPCgdzZXNzaW9uGAEgASgJEi4KCmFjdGl2YXRpb24YAiABKAsyGi5jb3JkaXMudHJhbnNwb3J0LklkZW50aXR5EhEKCW9wZXJhdGlvbhgDIAEoCRIsCgdyZXF1ZXN0GAQgASgLMhkuY29yZGlzLnRyYW5zcG9ydC5SZXF1ZXN0SAASLgoIcmVzcG9uc2UYBSABKAsyGi5jb3JkaXMudHJhbnNwb3J0LlJlc3BvbnNlSAASHAoSY2FuY2VsX29ic2VydmF0aW9uGAYgASgISABCCwoJZGlyZWN0aW9uYgZwcm90bzM", [file_google_protobuf_struct]);
 
 /**
  * Control data (configuration, names, handles, flow tags) is separate from
@@ -193,6 +193,16 @@ export type Frame = Message<"cordis.transport.Frame"> & {
      */
     value: Response;
     case: "response";
+  } | {
+    /**
+     * Withdraw only an existing pure observation in this direction. The same
+     * operation identity names the original request; its response is the sole
+     * acknowledgement. No operation slot is allocated for this control frame.
+     *
+     * @generated from field: bool cancel_observation = 6;
+     */
+    value: boolean;
+    case: "cancelObservation";
   } | { case: undefined; value?: undefined };
 };
 

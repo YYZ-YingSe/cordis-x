@@ -6,10 +6,7 @@ extern "C" {
 #endif
 #define CORDIS_ABI_COMPOSITION_VERSION 1u
 #define CORDIS_ABI_CHILD_INSTALL 1u
-#define CORDIS_ABI_CHILD_READY 2u
-#define CORDIS_ABI_CHILD_SETTLED 3u
 #define CORDIS_ABI_CHILD_DISPOSE 4u
-#define CORDIS_ABI_CHILD_STATUS 5u
 #define CORDIS_ABI_PROVIDE 6u
 typedef struct {
   uint32_t version;

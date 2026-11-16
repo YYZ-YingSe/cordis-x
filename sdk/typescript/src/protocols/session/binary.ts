@@ -5,7 +5,7 @@ import { ValueSchema } from '@bufbuild/protobuf/wkt';
 import { reflect, isReflectMessage, isReflectList, isReflectMap, type ReflectMessage } from '@bufbuild/protobuf/reflect';
 import { FrameSchema, PayloadSchema, type Payload as ProtoPayload } from '#cordis-generated/transport';
 import { DEFAULT_FRAME_CAPACITY, type Value } from '../../core/value.ts';
-import type { Payload, Request, Response, Outcome } from './messages.ts';
+import type { Payload, Request, Response, Outcome, CancelObservation } from './messages.ts';
 export const CONTENT_TYPE = 'application/protobuf';
 export const MAX_CONTROL_BYTES = 1024 * 1024;
 function checked(value: ReflectMessage, budget = { nodes: 65536 }): void {
@@ -59,9 +59,10 @@ function decodePayload(value: ProtoPayload | undefined): Payload {
   validateControl(control);
   return { control, messages: value.messages };
 }
-export function encodeFrame(value: Request | Response, capacity = DEFAULT_FRAME_CAPACITY): Uint8Array {
+export function encodeFrame(value: Request | Response | CancelObservation, capacity = DEFAULT_FRAME_CAPACITY): Uint8Array {
   const frame = create(FrameSchema, { session: value.session, activation: value.activation, operation: value.operation });
-  if ('command' in value) frame.direction = { case: 'request', value: { $typeName: 'cordis.transport.Request', command: value.command, payload: encodePayload(value.payload, capacity) } };
+  if ('cancelObservation' in value) frame.direction = { case: 'cancelObservation', value: true };
+  else if ('command' in value) frame.direction = { case: 'request', value: { $typeName: 'cordis.transport.Request', command: value.command, payload: encodePayload(value.payload, capacity) } };
   else {
     const outcome = value.outcome;
     frame.direction = { case: 'response', value: { $typeName: 'cordis.transport.Response', outcome:
@@ -75,7 +76,7 @@ export function encodeFrame(value: Request | Response, capacity = DEFAULT_FRAME_
   if (bytes.byteLength > capacity) throw new Error('frame exceeds transport capacity');
   return bytes;
 }
-export function decodeFrame(bytes: Uint8Array, policy: Validation = 'checked'): Request | Response {
+export function decodeFrame(bytes: Uint8Array, policy: Validation = 'checked'): Request | Response | CancelObservation {
   if (policy === 'audit') auditBinary(FrameSchema, bytes);
   const frame = fromBinary(FrameSchema, bytes, { recursionLimit: 100 });
   checked(reflect(FrameSchema, frame), { nodes: 65536 });
@@ -83,6 +84,10 @@ export function decodeFrame(bytes: Uint8Array, policy: Validation = 'checked'): 
   const base = { session: frame.session, operation: frame.operation, activation: {
     incarnation: frame.activation.incarnation, fiber: frame.activation.fiber, epoch: frame.activation.epoch,
   } };
+  if (frame.direction.case === 'cancelObservation') {
+    if (!frame.direction.value) throw new Error('invalid observation cancellation');
+    return { ...base, cancelObservation: true };
+  }
   if (frame.direction.case === 'request') return { ...base, command: frame.direction.value.command, payload: decodePayload(frame.direction.value.payload) };
   if (frame.direction.case !== 'response') throw new Error('missing frame direction');
   const outcome = frame.direction.value.outcome;

@@ -1,6 +1,6 @@
 use crate::{
     FutureResult, LocalFuture, Message, MessageContract, Value,
-    backend::{Backend, Operation, Reply},
+    backend::{Backend, Observation, Operation, Reply},
 };
 use std::rc::Rc;
 
@@ -30,16 +30,15 @@ impl Context {
             .submit(operation.with_validation(self.backend.validation()))
     }
     pub(crate) fn value(&self, operation: Operation) -> FutureResult {
-        // Terminal observations belong to the public handle. Adapter registries
-        // can retire successful work without retaining its results forever.
+        // Delivered release outcomes belong to the public handle. Adapters
+        // retain real in-flight release responsibility independently, so a
+        // dropped caller cannot trigger a duplicate inverse operation.
         let observation = match &operation {
             Operation::Dispose { effect } => Some((effect.1.clone(), 0)),
             Operation::ResourceDispose { resource } => Some((resource.1.clone(), 0)),
             Operation::ScopeDispose { scope } => Some((scope.1.clone(), 0)),
             Operation::SequenceDispose { sequence } => Some((sequence.1.clone(), 0)),
             Operation::ChildDispose { child } => Some((child.1.clone(), 0)),
-            Operation::TaskJoin { task } => Some((task.1.clone(), 1)),
-            Operation::SequenceReady { sequence } => Some((sequence.1.clone(), 1)),
             _ => None,
         };
         if let Some((cache, key)) = &observation
@@ -59,16 +58,40 @@ impl Context {
             result
         })
     }
+    pub(crate) fn observe(&self, observation: Observation) -> FutureResult {
+        let cache = match &observation {
+            Observation::TaskJoin { task } => Some(task.1.clone()),
+            Observation::SequenceReady { sequence } => Some(sequence.1.clone()),
+            _ => None,
+        };
+        if let Some(cache) = &cache
+            && let Some(result) = cache.borrow().get(&1).cloned()
+        {
+            return Box::pin(async move { result });
+        }
+        let reply = self.backend.observe(observation);
+        Box::pin(async move {
+            let result = reply.await;
+            // Store only a delivered terminal result. Dropping one observer
+            // neither consumes completion nor poisons a later independent wait.
+            if let Some(cache) = cache
+                && !matches!(result, Err(crate::Failure::Refused(_)))
+            {
+                cache.borrow_mut().insert(1, result.clone());
+            }
+            result
+        })
+    }
     pub(crate) fn message(&self, operation: Operation) -> crate::message::FutureResult {
         let reply = self.submit(operation);
         Box::pin(async move { reply.await?.message() })
     }
     pub async fn info(&self) -> crate::Result<Value> {
-        self.value(Operation::Info).await
+        self.observe(Observation::Info).await
     }
     /// Use-side configuration pinned to this callback, not service discovery.
     pub async fn metadata(&self, name: &str, revision: &str) -> crate::Result<Value> {
-        self.value(Operation::Metadata {
+        self.observe(Observation::Metadata {
             name: name.into(),
             revision: revision.into(),
         })

@@ -34,6 +34,14 @@ export class Context {
   get validation() { return this.channel.validation; }
   private open = true;
   private pending = new Set<Promise<unknown>>();
+  private observations = new Set<Promise<unknown>>();
+  private observationScope = new AbortController();
+  private observing<T>(query: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const task = query(signal ? AbortSignal.any([signal, this.observationScope.signal]) : this.observationScope.signal);
+    this.observations.add(task);
+    task.then(() => this.observations.delete(task), () => this.observations.delete(task));
+    return task;
+  }
   private channel: DependencyChannel;
   private token: string;
   private dependencies: Record<string, string>;
@@ -124,10 +132,10 @@ export class Context {
     }));
   }
   /** Configuration revision and layers fixed for the current callback. */
-  metadata(name: string, revision: string): Promise<{ revision: string | null; layers: Value[] }> {
+  metadata(name: string, revision: string, signal?: AbortSignal): Promise<{ revision: string | null; layers: Value[] }> {
     if (!this.open || !this.token) return Promise.reject(new Refusal('closed', 'context expired'));
-    return this.track(
-      this.channel.metadata(this.token, name, revision, this.cleanup).then((value) => {
+    return this.observing((scope) =>
+      this.channel.metadata(this.token, name, revision, this.cleanup, scope).then((value) => {
         if (
           !value ||
           typeof value !== 'object' ||
@@ -140,7 +148,7 @@ export class Context {
         )
           throw new Refusal('protocol', 'invalid metadata snapshot');
         return { revision: value.revision, layers: value.layers };
-      }),
+      }), signal,
     );
   }
   install(factory: string, config: Message): Promise<Child> {
@@ -208,10 +216,10 @@ export class Context {
     return this.track(this.tasks.register(this.channel, this.token, label, callback));
   }
   /** Resolves when this managed task's owner or implementation starts closing. */
-  cancelled(): Promise<void> {
+  cancelled(signal?: AbortSignal): Promise<void> {
     if (!this.open || !this.cancellation)
       return Promise.reject(new Refusal('closed', 'cancellation requires a live task context'));
-    return this.cancellation.promise;
+    return this.observing(scope => this.cancellation!.wait(scope), signal);
   }
   middleware(alias: string, callback: MiddlewareCallback): Promise<MiddlewareRegistration> {
     if (!this.open || !this.token || this.cleanup)
@@ -268,7 +276,8 @@ export class Context {
   }
   async finish() {
     this.open = false;
-    await Promise.allSettled(this.pending);
+    this.observationScope.abort();
+    await Promise.allSettled([...this.observations, ...this.pending]);
   }
 }
 

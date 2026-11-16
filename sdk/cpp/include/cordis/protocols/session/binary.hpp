@@ -50,7 +50,8 @@ struct Outcome {
 struct Response : Header {
   Outcome outcome;
 };
-using Frame = std::variant<Request, Response>;
+struct CancelObservation : Header {};
+using Frame = std::variant<Request, Response, CancelObservation>;
 inline Response response(const Request &request, Outcome outcome) {
   return {static_cast<const Header &>(request), std::move(outcome)};
 }
@@ -224,6 +225,8 @@ inline std::vector<uint8_t> encode(const Frame &frame, std::size_t capacity = de
           auto *request = out.mutable_request();
           request->set_command(value.command);
           payload_to_proto(value.payload, request->mutable_payload());
+        } else if constexpr (std::is_same_v<std::decay_t<decltype(value)>, CancelObservation>) {
+          out.set_cancel_observation(true);
         } else {
           auto *response = out.mutable_response();
           const auto &result = value.outcome;
@@ -264,6 +267,10 @@ inline Frame decode(const uint8_t *data, std::size_t length, Validation policy) 
       throw std::runtime_error("missing payload");
     return Request{std::move(header), value.request().command(),
                    payload_from_proto(std::move(*value.mutable_request()->mutable_payload()))};
+  }
+  if (value.has_cancel_observation()) {
+    if (!value.cancel_observation()) throw std::runtime_error("invalid observation cancellation");
+    return CancelObservation{std::move(header)};
   }
   if (!value.has_response())
     throw std::runtime_error("missing frame direction");

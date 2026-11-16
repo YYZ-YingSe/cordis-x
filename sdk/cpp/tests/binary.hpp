@@ -8,6 +8,7 @@ struct Peer {
   std::mutex mutex;
   std::condition_variable changed;
   std::deque<cordis::session::Request> requests;
+  std::deque<cordis::session::CancelObservation> withdrawals;
   std::shared_ptr<cordis::session::DependencyChannel> channel =
       std::make_shared<cordis::session::DependencyChannel>();
   Peer() {
@@ -15,8 +16,9 @@ struct Peer {
         std::string(32, 'a'), {"1", "2", "3"}, [this](const auto &bytes) {
           auto frame = cordis::session::decode(bytes);
           std::lock_guard lock(mutex);
-          requests.push_back(
-              std::get<cordis::session::Request>(std::move(frame)));
+          if (auto cancelled = std::get_if<cordis::session::CancelObservation>(&frame))
+            withdrawals.push_back(*cancelled);
+          else requests.push_back(std::get<cordis::session::Request>(std::move(frame)));
           changed.notify_all();
         });
   }
@@ -26,6 +28,13 @@ struct Peer {
     auto request = std::move(requests.front());
     requests.pop_front();
     return request;
+  }
+  cordis::session::CancelObservation cancelled() {
+    std::unique_lock lock(mutex);
+    changed.wait(lock, [this] { return !withdrawals.empty(); });
+    auto cancelled = std::move(withdrawals.front());
+    withdrawals.pop_front();
+    return cancelled;
   }
   void reply(const cordis::session::Request &request, cordis::Value value) {
     using namespace cordis::session;

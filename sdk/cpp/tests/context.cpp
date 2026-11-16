@@ -1,5 +1,6 @@
 #include "binary.hpp"
 #include "executor.hpp"
+#include <cordis/adapters/process/task.hpp>
 static void check(bool condition) {
   if (!condition)
     throw std::runtime_error("context regression");
@@ -7,6 +8,24 @@ static void check(bool condition) {
 int main() {
   TestExecutor executor;
   test::Peer peer;
+  // Dropping a join observer emits cancellation but still waits for the
+  // original acknowledgement before destroying foreign callback storage.
+  cordis::process::Task task(peer.channel, "t1", std::string(32, 'c'));
+  auto observing = executor.start([task]() -> cordis::Async<void> {
+    co_await corral::anyOf(task.join(), cordis::native::sleep(std::chrono::milliseconds(1)));
+  });
+  auto original = peer.next();
+  auto withdrawn = peer.cancelled();
+  check(withdrawn.operation == original.operation);
+  check(observing.wait_for(std::chrono::milliseconds(0)) == std::future_status::timeout);
+  peer.channel->receive(cordis::session::response(original,
+    {cordis::session::Outcome::Kind::refused, {}, "observation_cancelled", "withdrawn"}));
+  observing.get();
+  auto again = executor.start([task] { return task.join(); });
+  auto next_join = peer.next();
+  check(next_join.operation != original.operation);
+  peer.reply(next_join, nullptr);
+  again.get();
   cordis::process::Context ctx(peer.channel, std::string(32, 'b'),
                                {{"logger", "1"}});
   try {

@@ -4,7 +4,7 @@ use super::{
 };
 use cordis_sdk_core::{
     LocalFuture, Next,
-    backend::{Backend, Callback, Handle, Operation, Reply},
+    backend::{Backend, Callback, Handle, Observation, Operation, Reply},
 };
 use futures_util::FutureExt;
 use std::{
@@ -75,6 +75,80 @@ impl Native {
         let effect = register().map_err(rejected)?;
         let _ = native.set(effect.downgrade());
         Ok(self.handle(Kind::Effect(cleanup.downgrade(), id)))
+    }
+    async fn observe_state(&self, observation: Observation) -> Result<Value> {
+        let instance = self
+            .instance
+            .upgrade()
+            .ok_or_else(|| refused("closed", "instance retired"))?;
+        let ctx = &self.ctx;
+        Ok(match observation {
+            Observation::Info => {
+                json!({"definition":format!("{:?}",ctx.activation()),"owner":format!("{:?}",ctx.owner()),"caller":ctx.caller().map(|c|format!("{c:?}")),"cleanup":ctx.is_cleanup()})
+            }
+            Observation::Metadata { name, revision } => {
+                let contract = rt::Service::<()>::new(name, revision);
+                let permitted = (contract.contract().name.as_ref() == instance.primary.name
+                    && contract.contract().revision.as_ref() == instance.primary.revision)
+                    || instance
+                        .capabilities
+                        .dependencies
+                        .iter()
+                        .any(|d| d.declaration().contract() == contract.contract())
+                    || instance
+                        .capabilities
+                        .provisions
+                        .iter()
+                        .map(|p| &p.service)
+                        .any(|p| p.contract() == contract.contract());
+                if !permitted {
+                    return Err(refused("undeclared_metadata", contract.contract()));
+                }
+                let layers = ctx.metadata::<_, Value>(&contract).map_err(rejected)?;
+                json!({"revision":ctx.metadata_revision().map(|r| r.to_string()), "layers":layers.iter().map(|v|v.as_ref()).collect::<Vec<_>>()})
+            }
+            Observation::TaskJoin { task } => {
+                let Kind::Task(task) = self.capability(&task)? else {
+                    return Err(refused("invalid_handle", "expected task"));
+                };
+                task.join().await.map_err(unknown)?;
+                Value::Null
+            }
+            Observation::SequenceReady { sequence } => {
+                let Kind::Sequence(sequence) = self.capability(&sequence)? else {
+                    return Err(refused("invalid_handle", "expected sequence"));
+                };
+                json!(format!(
+                    "{:?}",
+                    sequence
+                        .upgrade()
+                        .ok_or_else(|| refused("closed", "sequence retired"))?
+                        .ready()
+                        .await
+                        .map_err(unknown)?
+                ))
+            }
+            Observation::ChildReady { child } => {
+                let Kind::Child(child) = self.capability(&child)? else {
+                    return Err(refused("invalid_handle", "expected child"));
+                };
+                child
+                    .upgrade()
+                    .ok_or_else(|| refused("closed", "child retired"))?
+                    .ready()
+                    .await
+                    .map_err(unknown)?;
+                Value::Null
+            }
+            Observation::Cancellation => {
+                ctx.cancelled().await;
+                Value::Null
+            }
+            Observation::Delay { milliseconds } => {
+                tokio::select! { _ = tokio::time::sleep(Duration::from_millis(milliseconds)) => {}, _ = ctx.cancelled() => {} }
+                Value::Null
+            }
+        })
     }
     async fn execute(self, op: Operation) -> Result<Reply> {
         let instance = self
@@ -163,30 +237,6 @@ impl Native {
                 };
                 resource.dispose().await?;
                 Value::Null
-            }
-            Operation::Info => {
-                json!({"definition":format!("{:?}",ctx.activation()),"owner":format!("{:?}",ctx.owner()),"caller":ctx.caller().map(|c|format!("{c:?}")),"cleanup":ctx.is_cleanup()})
-            }
-            Operation::Metadata { name, revision } => {
-                let contract = rt::Service::<()>::new(name, revision);
-                let permitted = (contract.contract().name.as_ref() == instance.primary.name
-                    && contract.contract().revision.as_ref() == instance.primary.revision)
-                    || instance
-                        .capabilities
-                        .dependencies
-                        .iter()
-                        .any(|d| d.declaration().contract() == contract.contract())
-                    || instance
-                        .capabilities
-                        .provisions
-                        .iter()
-                        .map(|p| &p.service)
-                        .any(|p| p.contract() == contract.contract());
-                if !permitted {
-                    return Err(refused("undeclared_metadata", contract.contract()));
-                }
-                let layers = ctx.metadata::<_, Value>(&contract).map_err(rejected)?;
-                json!({"revision":ctx.metadata_revision().map(|r| r.to_string()), "layers":layers.iter().map(|v|v.as_ref()).collect::<Vec<_>>()})
             }
             Operation::Invoke {
                 dependency,
@@ -301,13 +351,6 @@ impl Native {
                 };
                 return Ok(Reply::Handle(self.handle(Kind::Task(task))));
             }
-            Operation::TaskJoin { task } => {
-                let Kind::Task(task) = self.capability(&task)? else {
-                    return Err(refused("invalid_handle", "expected task"));
-                };
-                task.join().await.map_err(unknown)?;
-                Value::Null
-            }
             Operation::Effect { label, next } => {
                 let weak = self.instance.clone();
                 let callback: Callback = Rc::new(move |ctx, _| {
@@ -380,20 +423,6 @@ impl Native {
                 return Ok(Reply::Handle(
                     self.handle(Kind::Sequence(sequence.downgrade())),
                 ));
-            }
-            Operation::SequenceReady { sequence } => {
-                let Kind::Sequence(sequence) = self.capability(&sequence)? else {
-                    return Err(refused("invalid_handle", "expected sequence"));
-                };
-                json!(format!(
-                    "{:?}",
-                    sequence
-                        .upgrade()
-                        .ok_or_else(|| refused("closed", "sequence retired"))?
-                        .ready()
-                        .await
-                        .map_err(unknown)?
-                ))
             }
             Operation::SequenceDispose { sequence } => {
                 let Kind::Sequence(sequence) = self.capability(&sequence)? else {
@@ -599,18 +628,6 @@ impl Native {
                 })?;
                 return Ok(Reply::Handle(self.handle(Kind::Child(child.downgrade()))));
             }
-            Operation::ChildReady { child } => {
-                let Kind::Child(child) = self.capability(&child)? else {
-                    return Err(refused("invalid_handle", "expected child"));
-                };
-                child
-                    .upgrade()
-                    .ok_or_else(|| refused("closed", "child retired"))?
-                    .ready()
-                    .await
-                    .map_err(unknown)?;
-                Value::Null
-            }
             Operation::ChildDispose { child } => {
                 let Kind::Child(child) = self.capability(&child)? else {
                     return Err(refused("invalid_handle", "expected child"));
@@ -665,31 +682,18 @@ impl Backend for Native {
             receiver.await.map_err(unknown)?
         })
     }
-    fn wait(&self, wait: cordis_sdk_core::backend::Wait) -> LocalFuture<()> {
+    fn observe(&self, observation: Observation) -> cordis_sdk_core::FutureResult {
         let backend = self.clone();
         Box::pin(async move {
-            wait.validate()?;
+            observation.validate()?;
             if !backend.frame.open.get() {
                 return Err(refused("closed", "callback authority expired"));
             }
             let mut closed = backend.frame.closed.subscribe();
-            // This future owns only an observation. Keeping it inline makes
-            // cancellation by select/drop cancel the timer as well. Admitted
-            // operations still use submit's independently owned drain path.
-            let observation = async {
-                match wait {
-                    cordis_sdk_core::backend::Wait::Cancellation => backend.ctx.cancelled().await,
-                    cordis_sdk_core::backend::Wait::Delay { milliseconds } => {
-                        tokio::select! {
-                            _ = tokio::time::sleep(Duration::from_millis(milliseconds)) => {},
-                            _ = backend.ctx.cancelled() => {},
-                        }
-                    }
-                }
-                Ok(())
-            };
+            // The observer owns no task, contribution or initialization. Keep
+            // it inline so losing a race drops the native observation itself.
             tokio::select! {
-                result = observation => result,
+                result = backend.observe_state(observation) => result,
                 _ = closed.changed() => Err(refused("closed", "callback authority expired")),
             }
         })

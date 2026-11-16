@@ -167,6 +167,59 @@ impl Drop for FrameGuard {
     }
 }
 impl Router {
+    /// Waiting for a dispatch does not own its handlers. Withdrawal drops
+    /// this receiver while the emit operation retains execution responsibility.
+    pub(crate) async fn observe_dispatch(&self, snapshot: bool, target: u64) -> Result<Reply> {
+        if !self
+            .instance
+            .upgrade()
+            .is_some_and(|i| i.module.reactive_manifest().is_some())
+        {
+            return Err(Error::Closed);
+        }
+        if crate::context::in_cleanup() && !snapshot {
+            return Err(refused(
+                "cleanup_wait",
+                "blocking dispatch observation during cleanup is unsupported",
+            ));
+        }
+        let mut rx = self
+            .reactive
+            .entries
+            .lock()
+            .unwrap()
+            .dispatches
+            .get(&target)
+            .map(|d| d.result.clone())
+            .ok_or(Error::Closed)?;
+        let value = if snapshot {
+            json!({"outcome":rx.borrow().as_ref().map(outcome)}).into()
+        } else {
+            let _permit = self
+                .reactive
+                .joins
+                .try_acquire()
+                .map_err(|_| Error::Overloaded)?;
+            loop {
+                if let Some(result) = rx.borrow().clone() {
+                    if let Some(dispatch) = self
+                        .reactive
+                        .entries
+                        .lock()
+                        .unwrap()
+                        .dispatches
+                        .get_mut(&target)
+                    {
+                        dispatch.observed = true;
+                    }
+                    break result?;
+                }
+                rx.changed().await.map_err(|_| Error::Closed)?;
+            }
+        };
+        Ok(Reply { value, handle: 0 })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn react(
         self: &Arc<Self>,
@@ -242,7 +295,7 @@ impl Router {
         {
             return Err(Error::Closed);
         }
-        if crate::context::in_cleanup() && operation != 8 {
+        if crate::context::in_cleanup() {
             return Err(refused(
                 "cleanup_wait",
                 "Reactive operations during cleanup are unsupported",
@@ -277,42 +330,6 @@ impl Router {
                     value: Value::Null.into(),
                     handle: self.emit(grant, alias, args)?,
                 });
-            }
-            5 | 8 => {
-                let mut rx = self
-                    .reactive
-                    .entries
-                    .lock()
-                    .unwrap()
-                    .dispatches
-                    .get(&target)
-                    .map(|d| d.result.clone())
-                    .ok_or(Error::Closed)?;
-                if operation == 8 {
-                    json!({"outcome":rx.borrow().as_ref().map(outcome)}).into()
-                } else {
-                    let _permit = self
-                        .reactive
-                        .joins
-                        .try_acquire()
-                        .map_err(|_| Error::Overloaded)?;
-                    loop {
-                        if let Some(result) = rx.borrow().clone() {
-                            if let Some(dispatch) = self
-                                .reactive
-                                .entries
-                                .lock()
-                                .unwrap()
-                                .dispatches
-                                .get_mut(&target)
-                            {
-                                dispatch.observed = true;
-                            }
-                            break result?;
-                        }
-                        rx.changed().await.map_err(|_| Error::Closed)?;
-                    }
-                }
             }
             6 => Payload::message(
                 self.middleware_run(grant, callback, alias, args.one().map_err(invalid_payload)?)

@@ -185,3 +185,28 @@ fn audit_sees_fields_discarded_by_maps_and_overwritten_oneofs() {
         );
     }
 }
+
+/// Withdrawal shares the original slot and generation. It is a direction on
+/// that request, not a new admitted operation that could exhaust control slots.
+#[test]
+fn observation_cancellation_preserves_the_original_identity() {
+    let request = request(json!(null).into());
+    let encoded = request.cancellation(DEFAULT_FRAME_CAPACITY).unwrap();
+    for policy in [
+        cordis_wire::Validation::Contract,
+        cordis_wire::Validation::Checked,
+        cordis_wire::Validation::Audit,
+    ] {
+        let Incoming::CancelObservation {
+            session,
+            activation,
+            operation,
+        } = cordis_wire::decode_with(encoded.clone(), policy).unwrap()
+        else {
+            panic!("observation withdrawal expected");
+        };
+        assert_eq!(session, request.session);
+        assert_eq!(activation, request.activation);
+        assert_eq!(operation, request.operation);
+    }
+}

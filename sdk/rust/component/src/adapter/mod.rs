@@ -7,7 +7,7 @@ mod operations;
 pub(crate) use callbacks::Callbacks;
 use cordis_sdk_core::{
     Context, FutureResult, LocalFuture, Value,
-    backend::{Backend, Operation, Reply},
+    backend::{Backend, Observation, Operation, Reply},
     refused,
 };
 use std::{any::Any, rc::Rc};
@@ -23,19 +23,32 @@ impl ComponentBackend {
     }
 }
 impl Backend for ComponentBackend {
-    fn wait(&self, wait: cordis_sdk_core::backend::Wait) -> LocalFuture<()> {
+    fn observe(&self, observation: Observation) -> FutureResult {
         let backend = self.clone();
         Box::pin(async move {
-            wait.validate()?;
-            let args = match wait {
-                cordis_sdk_core::backend::Wait::Delay { milliseconds } => {
-                    cordis_sdk_core::json!({"kind":"delay", "milliseconds":milliseconds})
+            use cordis_sdk_core::json;
+            observation.validate()?;
+            let (command, args) = match observation {
+                Observation::Info => ("info", Value::Null),
+                Observation::Metadata { name, revision } => {
+                    ("metadata", json!({"name":name,"revision":revision}))
                 }
-                cordis_sdk_core::backend::Wait::Cancellation => {
-                    cordis_sdk_core::json!({"kind":"cancellation"})
+                Observation::Delay { milliseconds } => {
+                    ("wait", json!({"kind":"delay","milliseconds":milliseconds}))
+                }
+                Observation::Cancellation => ("wait", json!({"kind":"cancellation"})),
+                Observation::TaskJoin { task } => {
+                    ("join", json!({"grant":operations::grant(&task)?}))
+                }
+                Observation::SequenceReady { sequence } => (
+                    "effect-ready",
+                    json!({"grant":operations::grant(&sequence)?}),
+                ),
+                Observation::ChildReady { child } => {
+                    ("plugin-ready", json!({"grant":operations::grant(&child)?}))
                 }
             };
-            backend.request("wait", args).await.map(|_| ())
+            backend.request(command, args).await
         })
     }
     fn validation(&self) -> cordis_sdk_core::Validation {

@@ -2,7 +2,7 @@ use super::*;
 use callbacks::{Frame, Registry};
 use cordis_sdk_core::{
     LocalFuture, Next,
-    backend::{Backend, Callback, Handle, Operation, Reply},
+    backend::{Backend, Callback, Handle, Observation, Operation, Reply},
 };
 use ffi::{Call, Host, Reply as HostReply};
 use futures_util::FutureExt;
@@ -257,7 +257,6 @@ impl Abi {
                     ))
                     .await?
             }
-            Operation::Info => return Ok(Reply::Value(json!({"cleanup":self.cleanup}))),
             Operation::Invoke {
                 dependency,
                 method,
@@ -284,9 +283,6 @@ impl Abi {
                 )
                 .map(Reply::Message)
                 .map_err(unknown);
-            }
-            Operation::Metadata { name, revision } => {
-                self.managed(14, 0, 0, name, json!(revision)).await?
             }
             Operation::Defer { label, cleanup } => {
                 return self
@@ -341,16 +337,6 @@ impl Abi {
                     })
                     .await;
             }
-            Operation::TaskJoin { task } => {
-                self.managed(
-                    11,
-                    self.id(&task, Kind::Task)?,
-                    0,
-                    String::new(),
-                    Value::Null,
-                )
-                .await?
-            }
             Operation::Effect { label, next } => {
                 let id = self.registry.sequence(next)?;
                 let result = self.managed(1, 0, numeric(&id), label, Value::Null).await;
@@ -358,24 +344,6 @@ impl Abi {
                     self.registry.remove_sequence(&id);
                 }
                 return Ok(Reply::Handle(self.handle(result?.handle, Kind::Sequence)));
-            }
-            Operation::SequenceReady { sequence } => {
-                let value = self
-                    .managed(
-                        2,
-                        self.id(&sequence, Kind::Sequence)?,
-                        0,
-                        String::new(),
-                        Value::Null,
-                    )
-                    .await?
-                    .value;
-                let result = match value.control_only().map_err(unknown)?["completion"].as_str() {
-                    Some("completed") => "Completed",
-                    Some("stopped") => "Stopped",
-                    _ => return Err(unknown("invalid completion")),
-                };
-                return Ok(Reply::Value(json!(result)));
             }
             Operation::SequenceDispose { sequence } => {
                 self.managed(
@@ -446,9 +414,9 @@ impl Abi {
                     .await?
                     .handle;
                 let payload = self
-                    .reactive(5, id, 0, String::new(), Value::Null)
-                    .await?
-                    .value;
+                    .host
+                    .observe(7, id, Value::Null, std::future::pending())
+                    .await?;
                 let tags = payload
                     .control
                     .as_array()
@@ -589,16 +557,6 @@ impl Abi {
                     ),
                 ));
             }
-            Operation::ChildReady { child } => {
-                self.host
-                    .call(Call::Composition(
-                        2,
-                        self.id(&child, Kind::Child)?,
-                        String::new(),
-                        Value::Null.into(),
-                    ))
-                    .await?
-            }
             Operation::ChildDispose { child } => {
                 self.host
                     .call(Call::Composition(
@@ -627,36 +585,66 @@ impl Abi {
     }
 }
 impl Backend for Abi {
-    fn wait(&self, wait: cordis_sdk_core::backend::Wait) -> LocalFuture<()> {
+    fn observe(&self, observation: Observation) -> cordis_sdk_core::FutureResult {
         let backend = self.clone();
         Box::pin(async move {
-            wait.validate()?;
+            observation.validate()?;
             if !backend.frame.open.get() {
                 return Err(refused("closed", "callback authority expired"));
             }
-            if matches!(wait, cordis_sdk_core::backend::Wait::Cancellation) && !backend.task {
-                return Err(refused("closed", "not a task context"));
-            }
+            let sequence = matches!(&observation, Observation::SequenceReady { .. });
+            let (kind, target, args) = match observation {
+                Observation::Info => return Ok(json!({"cleanup":backend.cleanup})),
+                Observation::Metadata { name, revision } => {
+                    (13, 0, json!({"name":name,"revision":revision}))
+                }
+                Observation::Delay { milliseconds } => (0, 0, json!(milliseconds)),
+                Observation::Cancellation => {
+                    if !backend.task {
+                        return Err(refused("closed", "not a task context"));
+                    }
+                    (1, 0, Value::Null)
+                }
+                Observation::TaskJoin { task } => (2, backend.id(&task, Kind::Task)?, Value::Null),
+                Observation::SequenceReady { sequence } => {
+                    (3, backend.id(&sequence, Kind::Sequence)?, Value::Null)
+                }
+                Observation::ChildReady { child } => {
+                    (5, backend.id(&child, Kind::Child)?, Value::Null)
+                }
+            };
             let caller = worker::CALLER
                 .try_with(|caller| *caller)
-                .map_err(|_| refused("closed", "ABI wait requires a callback"))?;
+                .map_err(|_| refused("closed", "observation requires a callback"))?;
             let frame = backend.frame.clone();
             let mut closed = frame.closed.subscribe();
             let (mut send, receive) = tokio::sync::oneshot::channel();
             frame.pending.set(frame.pending.get() + 1);
-            // The bridge owns the foreign acknowledgement, not the business
-            // waiter. Dropping receive signals withdrawal; the bridge cancels
-            // the host wait and drains its one completion before leaving Frame.
+            // Only the acknowledgement bridge survives waiter cancellation.
+            // It withdraws the query, not the observed task or resource, and
+            // releases callback storage after the original completion arrives.
             tokio::task::spawn_local(worker::CALLER.scope(caller, async move {
                 let abandoned = async {
-                    tokio::select! { _ = send.closed() => {}, _ = closed.changed() => {} }
+                    tokio::select! { _ = send.closed()=>{}, _ = closed.changed()=>{} }
                 };
-                let result = backend.host.wait(wait, abandoned).await;
+                let result = backend
+                    .host
+                    .observe(kind, target, args, abandoned)
+                    .await
+                    .and_then(|p| p.control_only().map_err(unknown));
                 frame.pending.set(frame.pending.get() - 1);
                 frame.changed.notify_one();
                 let _ = send.send(result);
             }));
-            receive.await.map_err(unknown)?
+            let value = receive.await.map_err(unknown)??;
+            if sequence {
+                return match value["completion"].as_str() {
+                    Some("completed") => Ok(json!("Completed")),
+                    Some("stopped") => Ok(json!("Stopped")),
+                    _ => Err(unknown("invalid sequence completion")),
+                };
+            }
+            Ok(value)
         })
     }
     fn validation(&self) -> cordis_sdk_core::Validation {

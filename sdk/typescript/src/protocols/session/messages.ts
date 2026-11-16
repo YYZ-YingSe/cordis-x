@@ -6,6 +6,7 @@ export type Payload = { control: Value; messages: Message[] };
 export type Request = Envelope & { command: string; payload: Payload };
 export type Outcome = { kind: 'success'; value: Payload } |
   { kind: 'failure' | 'refused' | 'unknown'; error: { code: string; message: string } };
+export type CancelObservation = Envelope & { cancelObservation: true };
 export type Response = Envelope & { outcome: Outcome };
 export const payload = (control: Value = null, message?: Message): Payload =>
   ({ control, messages: message === undefined ? [] : [message] });

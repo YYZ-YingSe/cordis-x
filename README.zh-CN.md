@@ -8,9 +8,9 @@ Cordis-X 是用 Rust 编写的可嵌入插件运行时，负责服务依赖、�
 
 项目仍处于开发阶段，API、协议和生成代码会随设计一同调整。目前通过源码工作区接入，Rust crate 和 npm 包尚未配置为公开发布。
 
-等待与真实操作的生命周期分别处理：Rust SDK 的 `Backend::wait(Wait)` 用于计时器/取消通知，`submit(Operation)` 用于实际操作。包装 SDK 的应用必须分别转发。Native、Process 在本地撤销落败的等待；ABI 撤销后仍接收原完成回调；Wasm 撤销宿主等待并归还请求槽。真实 RPC、资源获取、释放及失败责任继续排空，不会因丢弃结果而提前清理。此次为未发布接口直接替换，宿主与 guest SDK 需要一起重新构建。
+纯观察与实际操作分开：计时器、取消通知、join、ready 和状态查询可以退出等待，原任务、初始化和贡献不受影响。Rust 所有适配器必须显式实现 `Backend::observe(Observation)` 与 `submit(Operation)`，没有默认空实现或旧接口回退。Native 直接观察运行时状态；ABI 在基础 Context 提供 observe/cancel_observation 并保留原完成回调；Process 使用原请求身份撤销观察、不另占操作槽；Wasm 撤销标准导入并归还请求槽。C++ 各渠道共同迁移，TypeScript 用 AbortSignal 显式退出观察且只缓存已交付终态。真实 RPC、资源获取、释放及失败责任继续排空。宿主与 guest SDK 必须一起重建。
 
-针对性验证：`cargo test -p cordis-wasm --test waits --locked` 自动构建当前 Native/ABI/Process/Wasm 探针，要求开发环境已有 Wasm target 和链接器；`cargo test -p cordis-sdk-runtime --test resources --locked` 验证资源所有权、迟到获取、在途排空与一次释放。
+针对性验证：`cargo test -p cordis-wasm --test waits --locked` 自动构建当前 Native/ABI/Process/Wasm 探针，还会运行 C++ Wasm 取消探针，要求开发环境已有 Rust Wasm target、链接器和 C++ WASI 工具；`cargo test -p cordis-sdk-runtime --test resources --locked` 验证资源所有权、迟到获取、在途排空与一次释放。
 
 ## 插件的生命周期
 

@@ -1346,6 +1346,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED Frame final : public ::google::prot
   enum DirectionCase {
     kRequest = 4,
     kResponse = 5,
+    kCancelObservation = 6,
     DIRECTION_NOT_SET = 0,
   };
   static constexpr int kIndexInFileMessages = 5;
@@ -1443,6 +1444,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED Frame final : public ::google::prot
     kActivationFieldNumber = 2,
     kRequestFieldNumber = 4,
     kResponseFieldNumber = 5,
+    kCancelObservationFieldNumber = 6,
   };
   // string session = 1;
   void clear_session() ;
@@ -1530,6 +1532,18 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED Frame final : public ::google::prot
   ::cordis::transport::Response* PROTOBUF_NONNULL _internal_mutable_response();
 
   public:
+  // bool cancel_observation = 6;
+  [[nodiscard]] bool has_cancel_observation()
+      const;
+  void clear_cancel_observation() ;
+  [[nodiscard]] bool cancel_observation() const;
+  void set_cancel_observation(bool value);
+
+  private:
+  bool _internal_cancel_observation() const;
+  void _internal_set_cancel_observation(bool value);
+
+  public:
   void clear_direction();
   DirectionCase direction_case() const;
   // @@protoc_insertion_point(class_scope:cordis.transport.Frame)
@@ -1537,10 +1551,11 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED Frame final : public ::google::prot
   class _Internal;
   void set_has_request();
   void set_has_response();
+  void set_has_cancel_observation();
   [[nodiscard]] inline bool has_direction() const;
   inline void clear_has_direction();
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<2, 5,
+  static const ::google::protobuf::internal::TcParseTable<2, 6,
                                    3, 47,
                                    2>
       _table_;
@@ -1572,6 +1587,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED Frame final : public ::google::prot
       ::google::protobuf::internal::ConstantInitialized _constinit_;
       ::cordis::transport::Request* PROTOBUF_NULLABLE request_;
       ::cordis::transport::Response* PROTOBUF_NULLABLE response_;
+      bool cancel_observation_;
     } direction_;
     ::uint32_t _oneof_case_[1];
     PROTOBUF_TSAN_DECLARE_MEMBER
@@ -3000,6 +3016,39 @@ inline ::cordis::transport::Response* PROTOBUF_NONNULL Frame::mutable_response()
   ::cordis::transport::Response* _msg = _internal_mutable_response();
   // @@protoc_insertion_point(field_mutable:cordis.transport.Frame.response)
   return _msg;
+}
+
+// bool cancel_observation = 6;
+inline bool Frame::has_cancel_observation() const {
+  return direction_case() == kCancelObservation;
+}
+inline void Frame::set_has_cancel_observation() {
+  _impl_._oneof_case_[0] = kCancelObservation;
+}
+inline void Frame::clear_cancel_observation() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (direction_case() == kCancelObservation) {
+    _impl_.direction_.cancel_observation_ = false;
+    clear_has_direction();
+  }
+}
+inline bool Frame::cancel_observation() const {
+  // @@protoc_insertion_point(field_get:cordis.transport.Frame.cancel_observation)
+  return _internal_cancel_observation();
+}
+inline void Frame::set_cancel_observation(bool value) {
+  if (direction_case() != kCancelObservation) {
+    clear_direction();
+    set_has_cancel_observation();
+  }
+  _impl_.direction_.cancel_observation_ = value;
+  // @@protoc_insertion_point(field_set:cordis.transport.Frame.cancel_observation)
+}
+inline bool Frame::_internal_cancel_observation() const {
+  if (direction_case() == kCancelObservation) {
+    return _impl_.direction_.cancel_observation_;
+  }
+  return false;
 }
 
 inline bool Frame::has_direction() const {

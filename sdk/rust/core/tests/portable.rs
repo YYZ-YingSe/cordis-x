@@ -1,6 +1,6 @@
 //! Exercise the public SDK through an adapter with no component dependencies.
 use cordis_sdk_core::{
-    backend::{Backend, Callback, Handle, Operation, Reply},
+    backend::{Backend, Callback, Handle, Observation, Operation, Reply},
     *,
 };
 use std::{
@@ -28,19 +28,31 @@ struct Adapter {
     cleanup: Rc<RefCell<Option<Callback>>>,
 }
 impl Backend for Adapter {
-    fn submit(&self, operation: Operation) -> LocalFuture<Reply> {
+    fn observe(&self, observation: Observation) -> FutureResult {
         let active = self.active.clone();
         let phase = self.phase;
+        Box::pin(async move {
+            if !active.get() {
+                return Err(refused("expired_context", "callback ended"));
+            }
+            match observation {
+                Observation::Metadata { name, revision } => {
+                    assert_eq!((name.as_str(), revision.as_str()), ("logger", "1"));
+                    Ok(json!({"phase":phase}))
+                }
+                _ => Err(refused("unsupported_observation", "test adapter")),
+            }
+        })
+    }
+
+    fn submit(&self, operation: Operation) -> LocalFuture<Reply> {
+        let active = self.active.clone();
         let cleanup = self.cleanup.clone();
         Box::pin(async move {
             if !active.get() {
                 return Err(refused("expired_context", "callback ended"));
             }
             match operation {
-                Operation::Metadata { name, revision } => {
-                    assert_eq!((name.as_str(), revision.as_str()), ("logger", "1"));
-                    Ok(Reply::Value(json!({"phase": phase})))
-                }
                 Operation::Invoke {
                     dependency,
                     method,

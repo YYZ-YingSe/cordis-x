@@ -17,11 +17,11 @@ export class EffectSequence {
     this.sequence = sequence;
     this.grant = grant;
   }
-  private request(command: string) {
-    return this.channel.request(command, { sequence: this.sequence, grant: this.grant });
+  private request(command: string, signal?: AbortSignal) {
+    return this.channel.request(command, { sequence: this.sequence, grant: this.grant }, signal);
   }
-  async ready(): Promise<EffectCompletion> {
-    const reply = await this.request('sequence_ready');
+  async ready(signal?: AbortSignal): Promise<EffectCompletion> {
+    const reply = await this.request('sequence_ready', signal);
     if (
       !reply ||
       typeof reply !== 'object' ||
@@ -35,8 +35,8 @@ export class EffectSequence {
   dispose(): Promise<void> {
     return this.disposeCompletion.observe(async () => { await this.request('sequence_dispose'); });
   }
-  snapshot(): Promise<Value> {
-    return this.request('sequence_status');
+  snapshot(signal?: AbortSignal): Promise<Value> {
+    return this.request('sequence_status', signal);
   }
 }
 

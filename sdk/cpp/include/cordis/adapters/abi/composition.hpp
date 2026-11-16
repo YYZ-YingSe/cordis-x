@@ -14,6 +14,12 @@ class Child {
   Child(uint64_t host, uint64_t id, const CordisAbiHostApi *base,
         const CordisAbiCompositionHostApi *api)
       : host_(host), id_(id), base_(base), api_(api) {}
+  Async<Value> observe(uint32_t kind) const {
+    return cordis::detail::invoke_owned([*this](uint32_t kind) -> Async<Value> {
+      if (!base_) throw Refusal("closed", "empty child");
+      co_return (co_await detail::observe(CordisAbiContext{host_, 0, base_}, kind, id_)).first.control_only();
+    }, kind);
+  }
   Async<Value> call(uint32_t operation) const {
     return cordis::detail::invoke_owned(
         [*this](uint32_t operation) -> Async<Value> {
@@ -37,17 +43,17 @@ public:
   Child() = default;
   Async<Value> ready() const {
     return cordis::detail::invoke_owned([*this]() -> Async<Value> {
-      co_return (co_await call(CORDIS_ABI_CHILD_READY));
+      co_return (co_await observe(CORDIS_ABI_OBSERVE_CHILD_READY));
     });
   }
   Async<Value> settled() const {
     return cordis::detail::invoke_owned([*this]() -> Async<Value> {
-      co_return (co_await call(CORDIS_ABI_CHILD_SETTLED));
+      co_return (co_await observe(CORDIS_ABI_OBSERVE_CHILD_SETTLED));
     });
   }
   Async<Value> status() const {
     return cordis::detail::invoke_owned([*this]() -> Async<Value> {
-      co_return (co_await call(CORDIS_ABI_CHILD_STATUS));
+      co_return (co_await observe(CORDIS_ABI_OBSERVE_CHILD_STATUS));
     });
   }
   Async<void> dispose() const {

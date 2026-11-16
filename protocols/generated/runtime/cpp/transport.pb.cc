@@ -266,16 +266,18 @@ const ::uint32_t
         0x085, // bitmap
         PROTOBUF_FIELD_OFFSET(::cordis::transport::Frame, _impl_._has_bits_),
         PROTOBUF_FIELD_OFFSET(::cordis::transport::Frame, _impl_._oneof_case_[0]),
-        10, // hasbit index offset
+        11, // hasbit index offset
         PROTOBUF_FIELD_OFFSET(::cordis::transport::Frame, _impl_.session_),
         PROTOBUF_FIELD_OFFSET(::cordis::transport::Frame, _impl_.activation_),
         PROTOBUF_FIELD_OFFSET(::cordis::transport::Frame, _impl_.operation_),
         PROTOBUF_FIELD_OFFSET(::cordis::transport::Frame, _impl_.direction_),
         PROTOBUF_FIELD_OFFSET(::cordis::transport::Frame, _impl_.direction_),
         PROTOBUF_FIELD_OFFSET(::cordis::transport::Frame, _impl_.direction_),
+        PROTOBUF_FIELD_OFFSET(::cordis::transport::Frame, _impl_.direction_),
         0,
         2,
         1,
+        ~0u,
         ~0u,
         ~0u,
 };
@@ -311,13 +313,13 @@ const char descriptor_table_protodef_transport_2eproto[] ABSL_ATTRIBUTE_SECTION_
     "PayloadH\000\022+\n\010rejected\030\002 \001(\0132\027.cordis.tra"
     "nsport.ErrorH\000\022*\n\007refused\030\003 \001(\0132\027.cordis"
     ".transport.ErrorH\000\022*\n\007unknown\030\004 \001(\0132\027.co"
-    "rdis.transport.ErrorH\000B\t\n\007outcome\"\306\001\n\005Fr"
+    "rdis.transport.ErrorH\000B\t\n\007outcome\"\344\001\n\005Fr"
     "ame\022\017\n\007session\030\001 \001(\t\022.\n\nactivation\030\002 \001(\013"
     "2\032.cordis.transport.Identity\022\021\n\toperatio"
     "n\030\003 \001(\t\022,\n\007request\030\004 \001(\0132\031.cordis.transp"
     "ort.RequestH\000\022.\n\010response\030\005 \001(\0132\032.cordis"
-    ".transport.ResponseH\000B\013\n\tdirectionb\006prot"
-    "o3"
+    ".transport.ResponseH\000\022\034\n\022cancel_observat"
+    "ion\030\006 \001(\010H\000B\013\n\tdirectionb\006proto3"
 };
 static const ::_pbi::DescriptorTable* PROTOBUF_NONNULL const
     descriptor_table_transport_2eproto_deps[1] = {
@@ -327,7 +329,7 @@ static ::absl::once_flag descriptor_table_transport_2eproto_once;
 PROTOBUF_CONSTINIT const ::_pbi::DescriptorTable descriptor_table_transport_2eproto = {
     false,
     false,
-    722,
+    752,
     descriptor_table_protodef_transport_2eproto,
     "transport.proto",
     &descriptor_table_transport_2eproto_once,
@@ -2235,6 +2237,9 @@ Frame::Frame(
       case kResponse:
         _impl_.direction_.response_ = ::google::protobuf::Message::CopyConstruct(arena, *from._impl_.direction_.response_);
         break;
+      case kCancelObservation:
+        _impl_.direction_.cancel_observation_ = from._impl_.direction_.cancel_observation_;
+        break;
   }
 
   // @@protoc_insertion_point(copy_constructor:cordis.transport.Frame)
@@ -2292,6 +2297,10 @@ void Frame::clear_direction() {
       }
       break;
     }
+    case kCancelObservation: {
+      // No need to clear
+      break;
+    }
     case DIRECTION_NOT_SET: {
       break;
     }
@@ -2342,16 +2351,16 @@ Frame::GetClassData() const {
   return Frame_class_data_.base();
 }
 PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1
-const ::_pbi::TcParseTable<2, 5, 3, 47, 2>
+const ::_pbi::TcParseTable<2, 6, 3, 47, 2>
 Frame::_table_ = {
   {
     PROTOBUF_FIELD_OFFSET(Frame, _impl_._has_bits_),
     0, // no _extensions_
-    5, 24,  // max_field_number, fast_idx_mask
+    6, 24,  // max_field_number, fast_idx_mask
     offsetof(decltype(_table_), field_lookup_table),
-    4294967264,  // skipmap
+    4294967232,  // skipmap
     offsetof(decltype(_table_), field_entries),
-    5,  // num_field_entries
+    6,  // num_field_entries
     3,  // num_aux_entries
     offsetof(decltype(_table_), aux_entries),
     Frame_class_data_.base(),
@@ -2387,6 +2396,8 @@ Frame::_table_ = {
     {PROTOBUF_FIELD_OFFSET(Frame, _impl_.direction_.request_), _Internal::kOneofCaseOffset + 0, 1, (0 | ::_fl::kFcOneof | ::_fl::kMessage | ::_fl::kTvTable)},
     // .cordis.transport.Response response = 5;
     {PROTOBUF_FIELD_OFFSET(Frame, _impl_.direction_.response_), _Internal::kOneofCaseOffset + 0, 2, (0 | ::_fl::kFcOneof | ::_fl::kMessage | ::_fl::kTvTable)},
+    // bool cancel_observation = 6;
+    {PROTOBUF_FIELD_OFFSET(Frame, _impl_.direction_.cancel_observation_), _Internal::kOneofCaseOffset + 0, 0, (0 | ::_fl::kFcOneof | ::_fl::kBool)},
   }},
   {{
       {::_pbi::TcParser::GetTable<::cordis::transport::Identity>()},
@@ -2484,6 +2495,12 @@ PROTOBUF_NOINLINE void Frame::Clear() {
           stream);
       break;
     }
+    case kCancelObservation: {
+      target = stream->EnsureSpace(target);
+      target = ::_pbi::WireFormatLite::WriteBoolToArray(
+          6, this_._internal_cancel_observation(), target);
+      break;
+    }
     default:
       break;
   }
@@ -2544,6 +2561,11 @@ PROTOBUF_NOINLINE void Frame::Clear() {
     case kResponse: {
       total_size += 1 +
                     ::google::protobuf::internal::WireFormatLite::MessageSize(*this_._impl_.direction_.response_);
+      break;
+    }
+    // bool cancel_observation = 6;
+    case kCancelObservation: {
+      total_size += 2;
       break;
     }
     case DIRECTION_NOT_SET: {
@@ -2624,6 +2646,10 @@ void Frame::MergeImpl(::google::protobuf::MessageLite& to_msg,
         } else {
           _this->_impl_.direction_.response_->MergeFrom(*from._impl_.direction_.response_);
         }
+        break;
+      }
+      case kCancelObservation: {
+        _this->_impl_.direction_.cancel_observation_ = from._impl_.direction_.cancel_observation_;
         break;
       }
       case DIRECTION_NOT_SET:

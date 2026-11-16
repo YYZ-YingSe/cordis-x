@@ -3,6 +3,27 @@
 //! Receivers retain one generation per slot, not every operation ever seen.
 use std::sync::{Arc, Mutex};
 
+/// Reverse protocol queries have no business effect. The host uses this
+/// classification, never a caller-supplied flag, to decide whether withdrawal
+/// can stop a dispatcher. Slots and responses still follow normal identity rules.
+pub fn is_observation(command: &str) -> bool {
+    matches!(
+        command,
+        "context_metadata"
+            | "cleanup_metadata"
+            | "sequence_ready"
+            | "sequence_status"
+            | "scope_ready"
+            | "scope_status"
+            | "task_join"
+            | "task_status"
+            | "event_join"
+            | "event_status"
+            | "child_ready"
+            | "child_settled"
+            | "child_status"
+    )
+}
 pub const RESERVED_CAPACITY: usize = 16;
 pub const REVERSE_LANES: [usize; 14] = [RESERVED_CAPACITY; 14];
 

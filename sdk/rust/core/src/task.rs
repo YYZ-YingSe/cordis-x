@@ -1,6 +1,6 @@
 use crate::{
     Context, Result, Value,
-    backend::{Callback, Handle, Operation, Wait},
+    backend::{Callback, Handle, Observation, Operation},
 };
 use std::{future::Future, rc::Rc};
 
@@ -8,7 +8,7 @@ use std::{future::Future, rc::Rc};
 pub struct Task(Handle);
 impl Task {
     pub async fn join(&self, ctx: &Context) -> Result<()> {
-        ctx.value(Operation::TaskJoin {
+        ctx.observe(Observation::TaskJoin {
             task: self.0.clone(),
         })
         .await
@@ -21,14 +21,16 @@ impl Context {
     /// Callback shutdown settles any foreign acknowledgement before releasing
     /// callback storage, without waiting for an unused cancellation signal.
     pub async fn cancelled(&self) -> Result<()> {
-        self.backend().wait(Wait::Cancellation).await
+        self.observe(Observation::Cancellation).await.map(|_| ())
     }
     /// Wait for at most 60,000 milliseconds, or return early on owner cancellation.
     /// A losing select branch releases its timer rather than delaying callback
     /// completion. Already admitted calls and resource operations still drain
     /// independently, even when their response futures are dropped.
     pub async fn sleep(&self, milliseconds: u64) -> Result<()> {
-        self.backend().wait(Wait::Delay { milliseconds }).await
+        self.observe(Observation::Delay { milliseconds })
+            .await
+            .map(|_| ())
     }
     pub async fn spawn<F, Fut>(&self, label: &str, task: F) -> Result<Task>
     where

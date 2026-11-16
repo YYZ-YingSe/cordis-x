@@ -184,6 +184,10 @@ impl Session {
         tokio::spawn(async move {
             let _code = worker_code;
             let mut pending: BTreeMap<String, Pending> = BTreeMap::new();
+            let observations = Arc::new(std::sync::Mutex::new(BTreeMap::<
+                String,
+                watch::Sender<bool>,
+            >::new()));
             let mut callbacks = JoinSet::new();
             let mut disposals = JoinSet::new();
             let mut sequence_waits = JoinSet::new();
@@ -228,6 +232,17 @@ impl Session {
                     },
                     received = reads.recv() => match received {
                         Some(Ok(incoming)) => {
+                            if let Incoming::CancelObservation { session, activation, operation } = &incoming {
+                                if session != &callback_session || activation != &callback_activation
+                                    || cordis_wire::operations::Id::parse(operation).is_none() {
+                                    break Err(Error::Protocol("invalid observation withdrawal identity".into()));
+                                }
+                                // Registration occurs in this reader before it accepts
+                                // another frame, so withdrawal cannot overtake admission.
+                                // A business request ID is never in this registry.
+                                if let Some(signal) = observations.lock().unwrap().get(operation) { signal.send_replace(true); }
+                                continue;
+                            }
                             if let Incoming::Request(request) = incoming {
                                 if request.session != callback_session || request.activation != callback_activation
                                     || !matches!(request.command.as_str(), "reference_export" | "reference_invoke" | "reference_dispose" | "dependency_resource_acquire" | "dependency_resource_call" | "dependency_resource_dispose" | "cleanup_resource_call" | "context_metadata" | "cleanup_metadata" | "dependency_call" | "effect_register" | "effect_dispose" | "sequence_register" | "sequence_ready" | "sequence_dispose" | "sequence_status" | "scope_register" | "scope_ready" | "scope_run" | "scope_dispose" | "scope_status" | "task_register" | "task_join" | "task_status" | "cleanup_call" | "event_register" | "event_emit" | "event_join" | "event_status" | "event_dispose" | "middleware_register" | "middleware_run" | "middleware_next" | "middleware_dispose" | "child_install" | "child_ready" | "child_settled" | "child_status" | "child_dispose" | "value_provide")
@@ -241,9 +256,26 @@ impl Session {
                                     let response = match reverse_response(&request, Err(Error::Overloaded), frame_capacity) { Ok(bytes) => bytes, Err(error) => break Err(error) };
                                     if writes.try_send(response).is_err() { break Err(Error::HostLost("session response queue exhausted".into())); }
                                 } else {
+                                    let withdrawal = if cordis_wire::operations::is_observation(&request.command) {
+                                        let (send, receive) = watch::channel(false);
+                                        observations.lock().unwrap().insert(request.operation.clone(), send);
+                                        Some(receive)
+                                    } else { None };
+                                    let observations = observations.clone();
                                     workers.spawn(async move {
                                         let _admission = admission;
-                                        let result = router.invoke_payload(&request.command, request.payload.clone()).await;
+                                        let result = if let Some(mut signal) = withdrawal {
+                                            let stop = async { while !*signal.borrow_and_update() {
+                                                if signal.changed().await.is_err() { break; }
+                                            } };
+                                            let result = tokio::select! {
+                                                biased;
+                                                _ = stop => Err(Error::Refused { code: "observation_cancelled".into(), message: "observation was withdrawn".into() }),
+                                                result = router.invoke_payload(&request.command, request.payload.clone()) => result,
+                                            };
+                                            observations.lock().unwrap().remove(&request.operation);
+                                            result
+                                        } else { router.invoke_payload(&request.command, request.payload.clone()).await };
                                         // A checked dependency result violated its declaration
                                         // after business execution. Do not encode it as rejection.
                                         if let Err(error @ Error::Protocol(_)) = result { return Err(error); }
@@ -377,6 +409,10 @@ impl Session {
             // They must stop before joining reverse workers; native ownership
             // and admitted install/provide operations still drain normally.
             peer_stopped_tx.send_replace(true);
+            // Peer loss withdraws observations, not admitted business work.
+            for signal in observations.lock().unwrap().values() {
+                signal.send_replace(true);
+            }
             commands.close();
             worker_cleanup_capacity.close();
             // Withdraw a lost host promptly. Pending calls still wait for native

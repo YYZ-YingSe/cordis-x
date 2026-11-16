@@ -102,6 +102,57 @@ impl Drop for Reservation {
     }
 }
 impl Router {
+    fn child_handle(&self, target: u64) -> Result<cordis_runtime::PluginHandle> {
+        self.composition
+            .children
+            .lock()
+            .unwrap()
+            .get(&target)
+            .and_then(Option::as_ref)
+            .and_then(WeakPluginHandle::upgrade)
+            .ok_or(Error::Closed)
+    }
+    /// Child observation borrows its existing handle. Cancellation does not
+    /// dispose the plugin or roll back its initialization contributions.
+    pub(crate) async fn observe_child(&self, kind: u32, target: u64) -> Result<Reply> {
+        let instance = self.instance.upgrade().ok_or(Error::Closed)?;
+        if instance.module.composition_manifest().is_none() {
+            return Err(Error::Closed);
+        }
+        if crate::context::in_cleanup() && kind != 11 {
+            return Err(Error::Refused {
+                code: "cleanup_wait".into(),
+                message: "blocking child observations during cleanup are unsupported".into(),
+            });
+        }
+        let child = self.child_handle(target)?;
+        let snapshot = if kind == 11 {
+            child.snapshot()
+        } else {
+            let _permit = self
+                .composition
+                .waits
+                .try_acquire()
+                .map_err(|_| Error::Overloaded)?;
+            if kind == 5 {
+                child.ready().await?
+            } else {
+                child.settled().await?
+            }
+        };
+        let state = match snapshot.state {
+            cordis_kernel::Lifecycle::Inactive => "inactive",
+            cordis_kernel::Lifecycle::Loading => "loading",
+            cordis_kernel::Lifecycle::Active => "active",
+            cordis_kernel::Lifecycle::Unloading => "unloading",
+        };
+        let value = json!({"state":state,"retired":snapshot.retired,"outcome":snapshot.outcome.map(|o| format!("{o:?}"))});
+        Ok(Reply {
+            value: value.into(),
+            handle: 0,
+        })
+    }
+
     pub async fn compose(
         self: &Arc<Self>,
         grant: u64,
@@ -114,7 +165,7 @@ impl Router {
         if instance.module.composition_manifest().is_none() {
             return Err(Error::Closed);
         }
-        if crate::context::in_cleanup() && operation != 5 {
+        if crate::context::in_cleanup() {
             return Err(Error::Refused {
                 code: "cleanup_wait".into(),
                 message: "Composition operations during cleanup are unsupported".into(),
@@ -193,47 +244,15 @@ impl Router {
                     value: Value::Null.into(),
                 });
             }
-            2..=5 => {
-                let child = self
+            4 => {
+                let child = self.child_handle(target)?;
+                let _permit = self
                     .composition
-                    .children
-                    .lock()
-                    .unwrap()
-                    .get(&target)
-                    .and_then(Option::as_ref)
-                    .and_then(WeakPluginHandle::upgrade)
-                    .ok_or(Error::Closed)?;
-                if operation == 4 {
-                    let _permit = self
-                        .composition
-                        .disposals
-                        .try_acquire()
-                        .map_err(|_| Error::Overloaded)?;
-                    child.dispose().await?;
-                    Value::Null
-                } else {
-                    let snapshot = if operation == 5 {
-                        child.snapshot()
-                    } else {
-                        let _permit = self
-                            .composition
-                            .waits
-                            .try_acquire()
-                            .map_err(|_| Error::Overloaded)?;
-                        if operation == 2 {
-                            child.ready().await?
-                        } else {
-                            child.settled().await?
-                        }
-                    };
-                    let state = match snapshot.state {
-                        cordis_kernel::Lifecycle::Inactive => "inactive",
-                        cordis_kernel::Lifecycle::Loading => "loading",
-                        cordis_kernel::Lifecycle::Active => "active",
-                        cordis_kernel::Lifecycle::Unloading => "unloading",
-                    };
-                    json!({"state":state,"retired":snapshot.retired,"outcome":snapshot.outcome.map(|o| format!("{o:?}"))})
-                }
+                    .disposals
+                    .try_acquire()
+                    .map_err(|_| Error::Overloaded)?;
+                child.dispose().await?;
+                Value::Null
             }
             6 => {
                 let ctx = self.context(grant)?;

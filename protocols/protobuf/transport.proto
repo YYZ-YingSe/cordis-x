@@ -48,5 +48,9 @@ message Frame {
   oneof direction {
     Request request = 4;
     Response response = 5;
+    // Withdraw only an existing pure observation in this direction. The same
+    // operation identity names the original request; its response is the sole
+    // acknowledgement. No operation slot is allocated for this control frame.
+    bool cancel_observation = 6;
   }
 }

@@ -7,8 +7,10 @@ import { RpcError } from '../../core/error.ts';
 import { DEFAULT_FRAME_CAPACITY, type Value } from '../../core/value.ts';
 import type { Identity } from './messages.ts';
 export type { Identity, Envelope } from './messages.ts';
-type Pending = { command: string; resolve(value: Payload): void; reject(error: Error): void };
+type Pending = { removeAbort?: () => void; command: string; resolve(value: Payload): void; reject(error: Error): void };
 
+/** Protocol-owned classification; callers cannot make business work cancellable. */
+const observations = new Set(["context_metadata", "cleanup_metadata", "sequence_ready", "sequence_status", "scope_ready", "scope_status", "task_join", "task_status", "event_join", "event_status", "child_ready", "child_settled", "child_status"]);
 export class DependencyChannel {
   frameCapacity = DEFAULT_FRAME_CAPACITY;
   validation: import('../../core/validation.ts').Validation = 'checked';
@@ -32,14 +34,14 @@ export class DependencyChannel {
   enableMetadata(enabled: boolean) {
     this.metadataEnabled = enabled;
   }
-  metadata(context: string, name: string, revision: string, cleanup: boolean): Promise<Value> {
+  metadata(context: string, name: string, revision: string, cleanup: boolean, signal?: AbortSignal): Promise<Value> {
     if (!this.metadataEnabled)
       return Promise.reject(new Refusal('unsupported_metadata', 'metadata not negotiated'));
     return this.request(cleanup ? 'cleanup_metadata' : 'context_metadata', {
       context,
       name,
       revision,
-    });
+    }, signal);
   }
   reserveCleanup(enabled: boolean) {
     this.cleanupCalls = enabled;
@@ -54,10 +56,12 @@ export class DependencyChannel {
   async invoke(context: string, dependency: string, method: string, args: Message, cleanup = false): Promise<Message> {
     return one(await this.requestPayload(cleanup && this.cleanupCalls ? 'cleanup_call' : 'dependency_call', payload({ context, dependency, method }, args)));
   }
-  async request(command: string, control: Value): Promise<Value> {
-    return controlOnly(await this.requestPayload(command, payload(control)));
+  async request(command: string, control: Value, signal?: AbortSignal): Promise<Value> {
+    return controlOnly(await this.requestPayload(command, payload(control), signal));
   }
-  requestPayload(command: string, payload: Payload): Promise<Payload> {
+  requestPayload(command: string, payload: Payload, signal?: AbortSignal): Promise<Payload> {
+    if (signal && !observations.has(command)) return Promise.reject(new Refusal('invalid_observation', 'business operations cannot be withdrawn'));
+    if (signal?.aborted) return Promise.reject(new Refusal('observation_cancelled', 'observation was withdrawn'));
     if (!this.output) return Promise.reject(new Refusal('closed', 'dependency channel closed'));
     const lane =
       command === 'dependency_resource_call' || command === 'reference_invoke'
@@ -106,11 +110,20 @@ export class DependencyChannel {
         payload,
       }, this.frameCapacity); } catch (error) { this.operations.complete(operation); return Promise.reject(new Refusal('invalid_argument', String(error))); }
     return new Promise((resolve, reject) => {
-      this.pending.set(operation, { command, resolve, reject });
+      const withdraw = () => {
+        // Original response is the sole acknowledgement. Do not reject early or
+        // retire the slot while the host may still be completing the observer.
+        if (!this.pending.has(operation) || !this.output) return;
+        this.output(encodeFrame({ session: this.session, activation: this.activation!, operation, cancelObservation: true }, this.frameCapacity)).catch(() => this.close());
+      };
+      const removeAbort = signal ? () => signal.removeEventListener('abort', withdraw) : undefined;
+      this.pending.set(operation, { command, resolve, reject, removeAbort });
       this.output!(bytes).catch((error) => {
         this.close();
         reject(error);
       });
+      signal?.addEventListener('abort', withdraw, { once: true });
+      if (signal?.aborted) withdraw();
     });
   }
   receive(response: Response) {
@@ -121,6 +134,7 @@ export class DependencyChannel {
     const entry = this.pending.get(response.operation);
     if (!entry) throw new Error('unsolicited dependency response');
     const outcome = response.outcome;
+    entry.removeAbort?.();
     this.pending.delete(response.operation);
     this.operations.complete(response.operation);
     if (outcome.kind === 'success') entry.resolve(outcome.value);
@@ -133,8 +147,10 @@ export class DependencyChannel {
   }
   close() {
     this.output = undefined;
-    for (const entry of this.pending.values())
+    for (const entry of this.pending.values()) {
+      entry.removeAbort?.();
       entry.reject(Object.assign(new Error('dependency result lost with channel'), { code: 'closed' }));
+    }
     this.pending.clear();
   }
 }

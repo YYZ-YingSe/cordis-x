@@ -54,33 +54,69 @@ void Frame::complete(managed_plugin_event_t event) {
     std::terminate();
   resume.resume();
 }
+// Only these host-defined queries may withdraw an import. Business imports
+// keep their canonical task and callback storage until actual completion.
+static bool observation_command(const std::string &command) {
+  return command == "wait" || command == "info" || command == "metadata" ||
+    command == "join" || command == "task-status" || command == "effect-ready" ||
+    command == "effect-status" || command == "scope-ready" || command == "scope-status" ||
+    command == "plugin-ready" || command == "plugin-settled" || command == "plugin-status" ||
+    command == "event-join" || command == "event-status";
+}
 struct Import final : Waiter {
   cordis_plugin_host_call_args_t args;
   cordis_plugin_host_result_payload_failure_t result{};
+  Frame *frame = nullptr;
+  uint32_t handle = 0;
+  bool observation = false, returned = false;
+  ~Import() {
+    // A cancellation can race with a normal return. The awaiter owns any
+    // returned allocation even when Corral suppresses await_resume().
+    if (returned) cordis_plugin_host_result_payload_failure_free(&result);
+  }
   bool await_ready() const noexcept { return false; }
+  bool terminal(uint32_t state) {
+    if (state == MANAGED_PLUGIN_SUBTASK_RETURNED) returned = true;
+    else if (state != MANAGED_PLUGIN_SUBTASK_STARTED_CANCELLED &&
+             state != MANAGED_PLUGIN_SUBTASK_RETURNED_CANCELLED) return false;
+    if (handle) managed_plugin_subtask_drop(handle);
+    handle = 0;
+    return true;
+  }
   bool await_suspend(std::coroutine_handle<> h) {
     continuation = h;
-    auto frame = current();
-    if (!frame)
-      throw Refusal("closed", "operation requires a live component call");
+    frame = current();
+    if (!frame) throw Refusal("closed", "operation requires a live component call");
     auto status = cordis_plugin_host_call(&args, &result);
-    auto handle = MANAGED_PLUGIN_SUBTASK_HANDLE(status);
-    if (MANAGED_PLUGIN_SUBTASK_STATE(status) ==
-        MANAGED_PLUGIN_SUBTASK_RETURNED) {
-      if (handle)
-        managed_plugin_subtask_drop(handle);
-      return false;
-    }
+    handle = MANAGED_PLUGIN_SUBTASK_HANDLE(status);
+    if (terminal(MANAGED_PLUGIN_SUBTASK_STATE(status))) return false;
     frame->attach(handle, *this);
     return true;
   }
-  void await_resume() {}
-  bool complete(managed_plugin_event_t event) override {
-    if (event.event != MANAGED_PLUGIN_EVENT_SUBTASK ||
-        event.code != MANAGED_PLUGIN_SUBTASK_RETURNED)
+  bool await_early_cancel() const noexcept { return observation; }
+  bool await_cancel(std::coroutine_handle<>) noexcept {
+    if (!observation) return false;
+    // Canonical cancellation polls the subtask synchronously. Remove it from
+    // the wait set first; otherwise the Component Model rejects concurrent
+    // synchronous and asynchronous observation of the same waitable.
+    managed_plugin_waitable_join(handle, 0);
+    auto status = managed_plugin_subtask_cancel(handle);
+    auto state = MANAGED_PLUGIN_SUBTASK_STATE(status);
+    if (state != MANAGED_PLUGIN_SUBTASK_RETURNED &&
+        state != MANAGED_PLUGIN_SUBTASK_STARTED_CANCELLED &&
+        state != MANAGED_PLUGIN_SUBTASK_RETURNED_CANCELLED) {
+      managed_plugin_waitable_join(handle, frame->waitset);
       return false;
-    managed_plugin_subtask_drop(event.waitable);
-    return true;
+    }
+    frame->waits.erase(handle);
+    return terminal(state);
+  }
+  bool await_must_resume() const noexcept { return !observation; }
+  void await_resume() {
+    if (!returned) throw Refusal("observation_cancelled", "observation was withdrawn");
+  }
+  bool complete(managed_plugin_event_t event) override {
+    return event.event == MANAGED_PLUGIN_EVENT_SUBTASK && terminal(event.code);
   }
 };
 Async<Value> request(std::shared_ptr<Frame> authority, std::string command,
@@ -95,26 +131,22 @@ Async<Payload> request_payload(std::shared_ptr<Frame> authority,
     throw Refusal("closed", "Context expired");
   Buffer buffer(args);
   Import operation;
+  operation.observation = observation_command(command);
   operation.args = {borrowed(authority->token), borrowed(command),
                     buffer.view()};
   co_await operation;
   auto &result = operation.result;
-  if (result.is_err)
+  if (result.is_err) {
+    operation.returned = false; // raise consumes this owned error value.
     raise(result.val.err);
+  }
   try {
-    Payload value;
-    try {
-      value = decode(result.val.ok, authority->validation);
-    } catch (const std::exception &e) {
-      throw Unknown(e.what());
-    }
-    cordis_plugin_types_payload_free(&result.val.ok);
-    co_return value;
-  } catch (...) {
-    cordis_plugin_types_payload_free(&result.val.ok);
-    throw;
+    co_return decode(result.val.ok, authority->validation);
+  } catch (const std::exception &e) {
+    throw Unknown(e.what());
   }
 }
+
 Async<void> execute(std::shared_ptr<Frame> frame,
                     std::function<Async<Payload>()> run) {
   try {

@@ -22,6 +22,15 @@ struct Capture {
     next_calls: Rc<Cell<usize>>,
 }
 impl Backend for Capture {
+    fn observe(&self, _: cordis_sdk_core::backend::Observation) -> cordis_sdk_core::FutureResult {
+        Box::pin(async {
+            Err(cordis_sdk_core::refused(
+                "unsupported_observation",
+                "this fixture implements no observations",
+            ))
+        })
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

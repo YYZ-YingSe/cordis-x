@@ -1,4 +1,4 @@
-import { Identities, makeRoom, Completion, registration } from './retention.ts';
+import { Identities, makeRoom, Observation, registration } from './retention.ts';
 import { Refusal } from '../../core/error.ts';
 import { RpcError } from './context.ts';
 import type { Context, DependencyChannel } from './context.ts';
@@ -16,26 +16,32 @@ export class Task {
     this.task = task;
     this.grant = grant;
   }
-  private joinCompletion = new Completion<void>();
-  join(): Promise<void> {
-    return this.joinCompletion.observe(async () => { await this.channel.request('task_join', { task: this.task, grant: this.grant }); });
+  private joinCompletion = new Observation<void>();
+  join(signal?: AbortSignal): Promise<void> {
+    return this.joinCompletion.observe(async () => { await this.channel.request('task_join', { task: this.task, grant: this.grant }, signal); });
   }
-  snapshot(): Promise<Value> {
-    return this.channel.request('task_status', { task: this.task, grant: this.grant });
+  snapshot(signal?: AbortSignal): Promise<Value> {
+    return this.channel.request('task_status', { task: this.task, grant: this.grant }, signal);
   }
 }
 
 export class TaskCancellation {
-  readonly promise: Promise<void>;
-  private resolve!: () => void;
-  constructor() {
-    this.promise = new Promise<void>((resolve) => {
-      this.resolve = resolve;
+  private cancellation = new AbortController();
+  wait(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return Promise.reject(new Refusal('observation_cancelled', 'observation was withdrawn'));
+    if (this.cancellation.signal.aborted) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        this.cancellation.signal.removeEventListener('abort', complete);
+        signal?.removeEventListener('abort', withdraw);
+      };
+      const complete = () => { cleanup(); resolve(); };
+      const withdraw = () => { cleanup(); reject(new Refusal('observation_cancelled', 'observation was withdrawn')); };
+      this.cancellation.signal.addEventListener('abort', complete, { once: true });
+      signal?.addEventListener('abort', withdraw, { once: true });
     });
   }
-  cancel() {
-    this.resolve();
-  }
+  cancel() { this.cancellation.abort(); }
 }
 type Entry = {
   callback?: TaskCallback;

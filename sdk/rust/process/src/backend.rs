@@ -5,7 +5,7 @@ use super::{
 };
 use cordis_sdk_core::{
     LocalFuture, Next,
-    backend::{Backend, Callback, Handle, Operation, Reply},
+    backend::{Backend, Callback, Handle, Observation, Operation, Reply},
 };
 use futures_util::FutureExt;
 use std::{any::Any, rc::Weak, time::Duration};
@@ -220,15 +220,6 @@ impl Process {
                 )
                 .map(Reply::Value);
             }
-            Operation::Info => return Ok(Reply::Value(json!({"cleanup":self.cleanup}))),
-            Operation::Metadata { name, revision } => (
-                if self.cleanup {
-                    "cleanup_metadata"
-                } else {
-                    "context_metadata"
-                },
-                json!({"name":name,"revision":revision}),
-            ),
             Operation::Invoke {
                 dependency,
                 method,
@@ -314,7 +305,6 @@ impl Process {
                     .register("task_register", "task", 't', json!({"label":label}), task)
                     .await;
             }
-            Operation::TaskJoin { task } => ("task_join", self.args(&task, "task")?),
             Operation::Effect { label, next } => {
                 let id = self.registry.sequence(next)?;
                 let result = self
@@ -332,18 +322,6 @@ impl Process {
                     "sequence",
                     Some(&id),
                 )?));
-            }
-            Operation::SequenceReady { sequence } => {
-                let reply = self
-                    .channel
-                    .request("sequence_ready", self.args(&sequence, "sequence")?)
-                    .await?;
-                let completion = match text(&reply, "completion")? {
-                    "completed" => "Completed",
-                    "stopped" => "Stopped",
-                    _ => return Err(unknown("invalid sequence completion")),
-                };
-                return Ok(Reply::Value(json!(completion)));
             }
             Operation::SequenceDispose { sequence } => {
                 ("sequence_dispose", self.args(&sequence, "sequence")?)
@@ -416,7 +394,11 @@ impl Process {
                 let cap = self.capability(reply, "dispatch", Some(&id))?;
                 let result = self
                     .channel
-                    .request_payload("event_join", self.args(&cap, "dispatch")?.into())
+                    .observe(
+                        "event_join",
+                        self.args(&cap, "dispatch")?.into(),
+                        std::future::pending(),
+                    )
                     .await?;
                 if result.control["kind"] != "success" {
                     if matches!(
@@ -580,7 +562,6 @@ impl Process {
                     None,
                 )?));
             }
-            Operation::ChildReady { child } => ("child_ready", self.args(&child, "child")?),
             Operation::ChildDispose { child } => ("child_dispose", self.args(&child, "child")?),
             Operation::Provide { service, value } => {
                 let value = value
@@ -678,50 +659,91 @@ impl Backend for Process {
             receive.await.map_err(unknown)?
         })
     }
-    fn wait(&self, wait: cordis_sdk_core::backend::Wait) -> LocalFuture<()> {
+    fn observe(&self, observation: Observation) -> cordis_sdk_core::FutureResult {
         let backend = self.clone();
         Box::pin(async move {
-            wait.validate()?;
+            observation.validate()?;
             if !backend.frame.open.get() {
                 return Err(refused("closed", "callback authority expired"));
             }
             let mut closed = backend.frame.closed.subscribe();
-            // This future owns only an observation. Keeping it inline makes
-            // cancellation by select/drop cancel the timer as well. Admitted
-            // operations still use submit's independently owned drain path.
-            let observation = async {
-                let cancellation = async {
-                    match backend.frame.cancellation.clone() {
-                        Some(mut receiver) => {
+            let sequence = matches!(&observation, Observation::SequenceReady { .. });
+            let (command, mut args) = match observation {
+                Observation::Info => return Ok(json!({"cleanup":backend.cleanup})),
+                Observation::Delay { .. } | Observation::Cancellation => {
+                    let cancellation = async {
+                        if let Some(mut receiver) = backend.frame.cancellation.clone() {
                             while !*receiver.borrow_and_update() {
                                 if receiver.changed().await.is_err() {
                                     break;
                                 }
                             }
+                        } else {
+                            std::future::pending::<()>().await;
                         }
-                        None => std::future::pending::<()>().await,
-                    }
-                };
-                match wait {
-                    cordis_sdk_core::backend::Wait::Cancellation => {
-                        if backend.frame.cancellation.is_none() {
-                            return Err(refused("closed", "not a task context"));
+                    };
+                    let query = async {
+                        match observation {
+                            Observation::Cancellation => {
+                                if backend.frame.cancellation.is_none() {
+                                    return Err(refused("closed", "not a task context"));
+                                }
+                                cancellation.await;
+                            }
+                            Observation::Delay { milliseconds } => {
+                                tokio::select! {
+                                    _ = cancellation => {}, _ = tokio::time::sleep(Duration::from_millis(milliseconds)) => {},
+                                }
+                            }
+                            _ => unreachable!(),
                         }
-                        cancellation.await;
-                    }
-                    cordis_sdk_core::backend::Wait::Delay { milliseconds } => {
-                        tokio::select! {
-                            _ = tokio::time::sleep(Duration::from_millis(milliseconds)) => {},
-                            _ = cancellation => {},
-                        }
-                    }
+                        Ok(Value::Null)
+                    };
+                    return tokio::select! { result = query => result,
+                    _ = closed.changed() => Err(refused("closed", "callback authority expired")) };
                 }
-                Ok(())
+                Observation::Metadata { name, revision } => (
+                    if backend.cleanup {
+                        "cleanup_metadata"
+                    } else {
+                        "context_metadata"
+                    },
+                    json!({"name":name,"revision":revision}),
+                ),
+                Observation::TaskJoin { task } => ("task_join", backend.args(&task, "task")?),
+                Observation::SequenceReady { sequence } => {
+                    ("sequence_ready", backend.args(&sequence, "sequence")?)
+                }
+                Observation::ChildReady { child } => {
+                    ("child_ready", backend.args(&child, "child")?)
+                }
             };
-            tokio::select! {
-                result = observation => result,
-                _ = closed.changed() => Err(refused("closed", "callback authority expired")),
+            args["context"] = json!(backend.token);
+            let (mut send, receive) = tokio::sync::oneshot::channel();
+            let frame = backend.frame.clone();
+            frame.pending.set(frame.pending.get() + 1);
+            tokio::task::spawn_local(async move {
+                let abandoned = async {
+                    tokio::select! { _=send.closed()=>{}, _=closed.changed()=>{} }
+                };
+                let result = backend
+                    .channel
+                    .observe(command, args.into(), abandoned)
+                    .await
+                    .and_then(|p| p.control_only().map_err(unknown));
+                frame.pending.set(frame.pending.get() - 1);
+                frame.changed.notify_one();
+                let _ = send.send(result);
+            });
+            let value = receive.await.map_err(unknown)??;
+            if sequence {
+                return match text(&value, "completion")? {
+                    "completed" => Ok(json!("Completed")),
+                    "stopped" => Ok(json!("Stopped")),
+                    _ => Err(unknown("invalid completion")),
+                };
             }
+            Ok(value)
         })
     }
     fn as_any(&self) -> &dyn Any {

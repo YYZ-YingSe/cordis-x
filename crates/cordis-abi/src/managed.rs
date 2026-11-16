@@ -125,6 +125,30 @@ struct Task {
 }
 
 impl Router {
+    /// Observe managed state without entering the mutation dispatcher. Query
+    /// capacity and self-wait rules still apply; dropping this future releases
+    /// only its observation permit, never the underlying lifecycle handle.
+    pub(crate) async fn observe_managed(&self, kind: u32, target: u64) -> Result<Reply> {
+        if !self.instance.upgrade().is_some_and(|i| i.module.managed()) {
+            return Err(Error::Closed);
+        }
+        if crate::context::in_cleanup() && matches!(kind, 2..=4) {
+            return Err(Error::Refused {
+                code: "cleanup_wait".into(),
+                message: "blocking managed observations during cleanup are unsupported".into(),
+            });
+        }
+        let value = match kind {
+            2 | 10 => self.task_observe(kind == 10, target).await?,
+            3 | 8 => self.sequence_observe(kind == 8, target).await?,
+            4 | 9 => self.scope_observe(kind == 9, target).await?,
+            _ => return Err(Error::InvalidInput("unknown managed observation".into())),
+        };
+        Ok(Reply {
+            value: value.into(),
+            handle: 0,
+        })
+    }
     #[allow(clippy::too_many_arguments)]
     pub async fn manage(
         self: &Arc<Self>,
@@ -133,12 +157,12 @@ impl Router {
         target: u64,
         callback: u64,
         label: String,
-        args: Value,
+        _args: Value,
     ) -> Result<Reply> {
         if !self.instance.upgrade().is_some_and(|i| i.module.managed()) {
             return Err(Error::Closed);
         }
-        if crate::context::in_cleanup() && matches!(operation, 2 | 3 | 6 | 7 | 8 | 11) {
+        if crate::context::in_cleanup() && matches!(operation, 3 | 7 | 8) {
             return Err(Error::Refused {
                 code: "cleanup_wait".into(),
                 message: "blocking managed operations during cleanup are unsupported".into(),
@@ -148,41 +172,6 @@ impl Router {
             return Err(Error::InvalidInput("managed label too long".into()));
         }
         let result = match operation {
-            14 => {
-                let ctx = self.context(grant)?.snapshot();
-                let revision = args
-                    .as_str()
-                    .filter(|s| !s.is_empty() && s.len() <= 1024)
-                    .ok_or_else(|| Error::InvalidInput("invalid metadata revision".into()))?;
-                if label.is_empty() || target != 0 || callback != 0 {
-                    return Err(Error::InvalidInput("invalid metadata request".into()));
-                }
-                let service = cordis_runtime::Service::<()>::new(label, revision);
-                let contract = service.contract();
-                let instance = self.instance.upgrade().ok_or(Error::Closed)?;
-                if &instance.module.contract != contract
-                    && !self
-                        .capabilities
-                        .bindings
-                        .dependencies
-                        .iter()
-                        .any(|d| d.contract() == contract)
-                    && !self
-                        .capabilities
-                        .bindings
-                        .provisions
-                        .iter()
-                        .any(|p| p.service.contract() == contract)
-                {
-                    return Err(Error::Refused {
-                        code: "undeclared_metadata".into(),
-                        message: contract.to_string(),
-                    });
-                }
-                let layers = ctx.metadata::<_, Value>(&service)?;
-                json!({"revision":ctx.metadata_revision().map(|r|r.to_string()),
-                    "layers":layers.iter().map(|v|v.as_ref()).collect::<Vec<_>>()})
-            }
             1 => {
                 return Ok(Reply {
                     value: Value::Null.into(),
@@ -201,9 +190,8 @@ impl Router {
                     handle: self.task_spawn(grant, callback, label)?,
                 });
             }
-            2..=4 => self.sequence_action(operation, target).await?,
-            6..=9 => self.scope_action(operation, target, callback).await?,
-            11 | 12 => self.task_action(operation, target).await?,
+            3 => self.sequence_dispose(target).await?,
+            7 | 8 => self.scope_action(operation, target, callback).await?,
             _ => return Err(Error::InvalidInput("unknown managed operation".into())),
         };
         Ok(Reply {
@@ -284,17 +272,19 @@ impl Router {
         entries.sequences.insert(id, entry);
         Ok(id)
     }
-    async fn sequence_action(&self, operation: u32, id: u64) -> Result<Value> {
-        let entry = self
-            .managed
+    fn sequence(&self, id: u64) -> Result<Arc<Sequence>> {
+        self.managed
             .entries
             .lock()
             .unwrap()
             .sequences
             .get(&id)
             .cloned()
-            .ok_or(Error::Closed)?;
-        if operation == 4 {
+            .ok_or(Error::Closed)
+    }
+    async fn sequence_observe(&self, snapshot: bool, id: u64) -> Result<Value> {
+        let entry = self.sequence(id)?;
+        if snapshot {
             let native = entry.handle.get().and_then(WeakEffectSequence::upgrade);
             let status = native
                 .as_ref()
@@ -325,21 +315,27 @@ impl Router {
             );
         }
         self_wait(8, entry.callback)?;
-        let capacity = if operation == 2 {
-            &self.managed.waits
-        } else {
-            &self.managed.disposals
-        };
-        let _wait = capacity.try_acquire().map_err(|_| Error::Overloaded)?;
-        if operation == 2 {
-            let mut rx = entry.forward.subscribe();
-            loop {
-                if let Some(result) = rx.borrow().clone() {
-                    return result;
-                }
-                rx.changed().await.map_err(|_| Error::Closed)?;
+        let _wait = self
+            .managed
+            .waits
+            .try_acquire()
+            .map_err(|_| Error::Overloaded)?;
+        let mut rx = entry.forward.subscribe();
+        loop {
+            if let Some(result) = rx.borrow().clone() {
+                return result;
             }
+            rx.changed().await.map_err(|_| Error::Closed)?;
         }
+    }
+    async fn sequence_dispose(&self, id: u64) -> Result<Value> {
+        let entry = self.sequence(id)?;
+        self_wait(8, entry.callback)?;
+        let _wait = self
+            .managed
+            .disposals
+            .try_acquire()
+            .map_err(|_| Error::Overloaded)?;
         if let Some(handle) = entry.handle.get().and_then(WeakEffectSequence::upgrade) {
             if let Err(error) = handle.dispose().await {
                 return Err(entry
@@ -384,27 +380,51 @@ impl Router {
         entries.scopes.insert(id, handle.downgrade());
         Ok(id)
     }
-    async fn scope_action(
-        self: &Arc<Self>,
-        operation: u32,
-        id: u64,
-        callback: u64,
-    ) -> Result<Value> {
-        let handle = self
-            .managed
+    fn scope_handle(&self, id: u64) -> Result<cordis_runtime::ScopeHandle> {
+        self.managed
             .entries
             .lock()
             .unwrap()
             .scopes
             .get(&id)
             .and_then(WeakScopeHandle::upgrade)
-            .ok_or(Error::Closed)?;
-        if operation == 9 {
+            .ok_or(Error::Closed)
+    }
+    fn check_scope_wait(&self, id: u64) -> Result<()> {
+        if let Some((11, running)) = active()
+            && self.managed.entries.lock().unwrap().runs.get(&running) == Some(&id)
+        {
+            return Err(Error::Refused {
+                code: "self_wait".into(),
+                message: "scope cannot close itself from run".into(),
+            });
+        }
+        Ok(())
+    }
+    async fn scope_observe(&self, snapshot: bool, id: u64) -> Result<Value> {
+        let handle = self.scope_handle(id)?;
+        if snapshot {
             let snapshot = handle.snapshot();
             return Ok(
                 json!({"state":format!("{:?}",snapshot.state).to_lowercase(),"retired":snapshot.retired,"error":snapshot.outcome.map(|e|format!("{e:?}")),"effects":handle.effects().into_iter().map(|e|json!({"label":e.label,"state":effect_status(e.status)})).collect::<Vec<_>>()}),
             );
         }
+        self.check_scope_wait(id)?;
+        let _wait = self
+            .managed
+            .waits
+            .try_acquire()
+            .map_err(|_| Error::Overloaded)?;
+        handle.ready().await?;
+        Ok(Value::Null)
+    }
+    async fn scope_action(
+        self: &Arc<Self>,
+        operation: u32,
+        id: u64,
+        callback: u64,
+    ) -> Result<Value> {
+        let handle = self.scope_handle(id)?;
         if operation == 7 {
             let permit = self
                 .managed
@@ -450,25 +470,13 @@ impl Router {
             }
             return result?;
         }
-        if let Some((11, running)) = active()
-            && self.managed.entries.lock().unwrap().runs.get(&running) == Some(&id)
-        {
-            return Err(Error::Refused {
-                code: "self_wait".into(),
-                message: "scope cannot close itself from run".into(),
-            });
-        }
-        let capacity = if operation == 6 {
-            &self.managed.waits
-        } else {
-            &self.managed.disposals
-        };
-        let _wait = capacity.try_acquire().map_err(|_| Error::Overloaded)?;
-        if operation == 6 {
-            handle.ready().await?;
-        } else {
-            handle.dispose().await?;
-        }
+        self.check_scope_wait(id)?;
+        let _wait = self
+            .managed
+            .disposals
+            .try_acquire()
+            .map_err(|_| Error::Overloaded)?;
+        handle.dispose().await?;
         Ok(Value::Null)
     }
     fn task_spawn(&self, grant: u64, callback: u64, label: String) -> Result<u64> {
@@ -535,7 +543,7 @@ impl Router {
         entries.tasks.insert(id, entry);
         Ok(id)
     }
-    async fn task_action(&self, operation: u32, id: u64) -> Result<Value> {
+    async fn task_observe(&self, snapshot: bool, id: u64) -> Result<Value> {
         let entry = self
             .managed
             .entries
@@ -545,7 +553,7 @@ impl Router {
             .get(&id)
             .cloned()
             .ok_or(Error::Closed)?;
-        if operation == 12 {
+        if snapshot {
             let result = entry.outcome.lock().unwrap();
             return Ok(
                 json!({"state":match result.as_ref() { None=>"running", Some(Err(Error::Unknown(_)))=>"unknown", Some(Err(Error::Closed|Error::Overloaded|Error::InvalidInput(_)))=>"not_executed", _=>"completed" },"outcome":result.as_ref().map(outcome)}),

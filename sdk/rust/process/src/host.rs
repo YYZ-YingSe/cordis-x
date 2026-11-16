@@ -596,6 +596,9 @@ pub async fn serve<P: Plugin>(options: Options) -> Result<()> {
             tokio::select! { biased; _=stopping.changed()=>{break stopping.borrow().clone().unwrap_or_else(||Err(unknown("host stopped")));}, value=stdio::read(&mut input, host.channel.carrier_validation(), host.channel.frame_capacity.get())=>value }
         };
         let request = match received {
+            Ok(Incoming::CancelObservation { .. }) => {
+                break Err(unknown("unexpected forward observation withdrawal"));
+            }
             Ok(Incoming::Request(request)) => request,
             Ok(Incoming::Response(response)) => {
                 if let Err(e) = channel.receive(response) {

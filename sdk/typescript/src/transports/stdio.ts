@@ -1,6 +1,6 @@
 import type { Readable, Writable } from 'node:stream';
 import { decodeFrame } from '../protocols/session/binary.ts';
-import type { Request, Response } from '../protocols/session/messages.ts';
+import type { Request, Response, CancelObservation } from '../protocols/session/messages.ts';
 import { DEFAULT_FRAME_CAPACITY } from '../core/value.ts';
 import type { Validation } from '../core/validation.ts';
 
@@ -12,7 +12,7 @@ export async function writeFrame(output: Writable, body: Uint8Array): Promise<vo
   frame.set(body, 4);
   await new Promise<void>((resolve, reject) => output.write(frame, error => error ? reject(error) : resolve()));
 }
-export async function* readFrames(input: Readable, validation: () => Validation = () => 'checked', capacity: () => number = () => DEFAULT_FRAME_CAPACITY): AsyncGenerator<Request | Response> {
+export async function* readFrames(input: Readable, validation: () => Validation = () => 'checked', capacity: () => number = () => DEFAULT_FRAME_CAPACITY): AsyncGenerator<Request | Response | CancelObservation> {
   const header = Buffer.allocUnsafe(4);
   let headerBytes = 0, body: Buffer | undefined, bodyBytes = 0;
   for await (const chunk of input) {

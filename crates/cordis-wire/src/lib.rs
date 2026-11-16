@@ -65,8 +65,24 @@ pub enum Outcome {
 pub enum Incoming {
     Request(Request),
     Response(Response),
+    CancelObservation {
+        session: String,
+        activation: Identity,
+        operation: String,
+    },
 }
 impl Request {
+    /// Withdrawal reuses this request identity and receives no separate reply.
+    /// The receiver only acts on IDs already registered as pure observations.
+    pub fn cancellation(&self, capacity: usize) -> Result<Bytes> {
+        binary::Frame {
+            session: self.session.clone(),
+            activation: self.activation.clone(),
+            operation: self.operation.clone(),
+            direction: binary::Direction::CancelObservation,
+        }
+        .encode(capacity)
+    }
     pub fn encode(&self, capacity: usize) -> Result<Bytes> {
         binary::Frame {
             session: self.session.clone(),
@@ -122,6 +138,11 @@ pub fn decode(bytes: Bytes) -> Result<Incoming> {
 pub fn decode_with(bytes: Bytes, validation: cordis_contract::Validation) -> Result<Incoming> {
     let frame = binary::Frame::decode_with(bytes, validation)?;
     Ok(match frame.direction {
+        binary::Direction::CancelObservation => Incoming::CancelObservation {
+            session: frame.session,
+            activation: frame.activation,
+            operation: frame.operation,
+        },
         binary::Direction::Request { command, payload } => Incoming::Request(Request {
             session: frame.session,
             activation: frame.activation,

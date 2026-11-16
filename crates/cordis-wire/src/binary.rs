@@ -103,6 +103,7 @@ pub struct Frame {
 pub enum Direction {
     Request { command: String, payload: Payload },
     Response(Outcome),
+    CancelObservation,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Outcome {
@@ -115,6 +116,7 @@ impl Frame {
     pub fn encode(&self, capacity: usize) -> Result<Bytes> {
         use proto::{frame::Direction as D, response::Outcome as O};
         let direction = match &self.direction {
+            Direction::CancelObservation => D::CancelObservation(true),
             Direction::Request { command, payload } => D::Request(proto::Request {
                 command: command.clone(),
                 payload: Some(payload.to_proto()?),
@@ -157,6 +159,8 @@ impl Frame {
             .direction
             .ok_or_else(|| invalid("missing frame direction"))?
         {
+            D::CancelObservation(true) => Direction::CancelObservation,
+            D::CancelObservation(false) => return Err(invalid("invalid observation cancellation")),
             D::Request(request) => Direction::Request {
                 command: request.command,
                 payload: Payload::from_proto(

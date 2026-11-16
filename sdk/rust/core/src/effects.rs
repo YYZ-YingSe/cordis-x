@@ -1,6 +1,6 @@
 use crate::{
     Context, Result, Value,
-    backend::{Callback, Handle, Operation},
+    backend::{Callback, Handle, Observation, Operation},
 };
 use std::{future::Future, rc::Rc};
 
@@ -65,7 +65,7 @@ impl Step {
 pub struct Sequence(Handle);
 impl Sequence {
     pub async fn ready(&self, ctx: &Context) -> Result<Value> {
-        ctx.value(Operation::SequenceReady {
+        ctx.observe(Observation::SequenceReady {
             sequence: self.0.clone(),
         })
         .await

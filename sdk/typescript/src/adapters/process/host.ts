@@ -518,6 +518,7 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
   let acknowledged = false;
   try {
     for await (const value of readFrames(process.stdin, () => session ? channel.validation : 'audit', () => channel.frameCapacity)) {
+      if ('cancelObservation' in value) throw new Error('unexpected forward observation withdrawal');
       if ('outcome' in value) { channel.receive(value); continue; }
       const request = value;
       if (request.command === 'hello') {

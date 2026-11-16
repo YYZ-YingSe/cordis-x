@@ -34,3 +34,22 @@ export async function registration<T>(pending: Promise<T>, refused: () => void):
   try { return await pending; }
   catch (error) { if (error instanceof Refusal) refused(); throw error; }
 }
+
+/** Independent cancellable observers share only a delivered terminal outcome. */
+export class Observation<T> {
+  private terminal?: { value: T } | { error: unknown };
+  async observe(run: () => Promise<T>): Promise<T> {
+    if (this.terminal) {
+      if ('error' in this.terminal) throw this.terminal.error;
+      return this.terminal.value;
+    }
+    try {
+      const value = await run();
+      this.terminal = { value };
+      return value;
+    } catch (error) {
+      if (!(error instanceof Refusal)) this.terminal = { error };
+      throw error;
+    }
+  }
+}

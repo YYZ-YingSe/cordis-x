@@ -14,6 +14,26 @@ extern "C" {
 #define CORDIS_ABI_RESOURCE_RELEASE 6u
 #define CORDIS_ABI_EFFECT_RELEASE 7u
 
+/* Pure observations share one cancellable submission contract. Cancellation
+ * withdraws only this observer. The original completion still occurs exactly
+ * once, possibly racing with withdrawal; retain callback storage until it runs.
+ * target identifies an existing handle. args is a duration for timer/cancel
+ * observations (null means no deadline for cancellation), or query parameters. */
+#define CORDIS_ABI_OBSERVE_DELAY 0u
+#define CORDIS_ABI_OBSERVE_CANCELLATION 1u
+#define CORDIS_ABI_OBSERVE_TASK_JOIN 2u
+#define CORDIS_ABI_OBSERVE_SEQUENCE_READY 3u
+#define CORDIS_ABI_OBSERVE_SCOPE_READY 4u
+#define CORDIS_ABI_OBSERVE_CHILD_READY 5u
+#define CORDIS_ABI_OBSERVE_CHILD_SETTLED 6u
+#define CORDIS_ABI_OBSERVE_DISPATCH_JOIN 7u
+#define CORDIS_ABI_OBSERVE_SEQUENCE_STATUS 8u
+#define CORDIS_ABI_OBSERVE_SCOPE_STATUS 9u
+#define CORDIS_ABI_OBSERVE_TASK_STATUS 10u
+#define CORDIS_ABI_OBSERVE_CHILD_STATUS 11u
+#define CORDIS_ABI_OBSERVE_DISPATCH_STATUS 12u
+#define CORDIS_ABI_OBSERVE_METADATA 13u
+
 /* Context capability table.
  * Host functions/result releaser remain valid for the host process lifetime.
  * IDs are host-issued, non-reused tokens, never pointers to a borrowed Context.
@@ -35,6 +55,10 @@ typedef struct {
   void (*dispose)(uint64_t host, uint64_t effect, uint64_t caller,
                   CordisAbiCompletion completion);
   void (*release_result)(CordisAbiResult *result);
+  void (*observe)(uint64_t host, uint64_t grant, uint64_t id, uint32_t kind,
+                  uint64_t target, const CordisAbiBuffer *args,
+                  uint64_t caller, CordisAbiCompletion completion);
+  void (*cancel_observation)(uint64_t host, uint64_t caller, uint64_t id);
 } CordisAbiHostApi;
 
 typedef struct {

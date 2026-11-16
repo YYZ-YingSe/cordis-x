@@ -80,6 +80,27 @@ fn finish(done: CordisAbiCompletion, raw: CordisAbiResult) {
         done.complete.unwrap()(done.user_data, raw);
     }
 }
+unsafe extern "C" fn observe(
+    _: u64,
+    _: u64,
+    _: u64,
+    _: u32,
+    _: u64,
+    _: *const CordisAbiBuffer,
+    _: u64,
+    done: CordisAbiCompletion,
+) {
+    finish(
+        done,
+        CordisAbiResult {
+            status: 3,
+            code: slice("unsupported_observation"),
+            message: slice("resource-only fixture"),
+            ..Default::default()
+        },
+    );
+}
+unsafe extern "C" fn cancel_observation(_: u64, _: u64, _: u64) {}
 static HOST: CordisAbiHostApi = CordisAbiHostApi {
     version: 1,
     struct_size: mem::size_of::<CordisAbiHostApi>() as u32,
@@ -87,6 +108,8 @@ static HOST: CordisAbiHostApi = CordisAbiHostApi {
     defer: Some(defer),
     dispose: Some(dispose),
     release_result: Some(release_host),
+    observe: Some(observe),
+    cancel_observation: Some(cancel_observation),
 };
 static RESOURCES: CordisAbiResourceHostApi = CordisAbiResourceHostApi {
     version: 1,

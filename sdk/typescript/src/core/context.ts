@@ -25,12 +25,12 @@ export interface Context {
   readonly validation: import('./validation.ts').Validation;
   acquire(dependency: string, kind: string, args: Message): Promise<ResourceHandle>;
   invoke(dependency: string, method: string, args: Message): Promise<Message>;
-  metadata(name: string, revision: string): Promise<{ revision: string | null; layers: Value[] }>;
+  metadata(name: string, revision: string, signal?: AbortSignal): Promise<{ revision: string | null; layers: Value[] }>;
   defer(label: string, cleanup: (ctx: Context) => void | Promise<void>): Promise<Effect>;
   effect(label: string, producer: EffectProducer): Promise<EffectSequence>;
   scope(label: string): Promise<Scope>;
   spawn(label: string, callback: TaskCallback): Promise<Task>;
-  cancelled(): Promise<void>;
+  cancelled(signal?: AbortSignal): Promise<void>;
   on(event: string, callback: EventCallback): Promise<Subscription>;
   emit(event: string, args: Message): Promise<Dispatch>;
   parallel(event: string, args: Message): Promise<import('./events.ts').EventFlow[]>;

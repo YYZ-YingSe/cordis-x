@@ -25,17 +25,17 @@ export class Child {
     this.child = reply.child;
     this.grant = reply.grant;
   }
-  private call(command: string): Promise<Value> {
-    return this.channel.request(command, { child: this.child, grant: this.grant });
+  private call(command: string, signal?: AbortSignal): Promise<Value> {
+    return this.channel.request(command, { child: this.child, grant: this.grant }, signal);
   }
-  ready(): Promise<Value> {
-    return this.call('child_ready');
+  ready(signal?: AbortSignal): Promise<Value> {
+    return this.call('child_ready', signal);
   }
-  settled(): Promise<Value> {
-    return this.call('child_settled');
+  settled(signal?: AbortSignal): Promise<Value> {
+    return this.call('child_settled', signal);
   }
-  status(): Promise<Value> {
-    return this.call('child_status');
+  status(signal?: AbortSignal): Promise<Value> {
+    return this.call('child_status', signal);
   }
   private disposeCompletion = new Completion<void>();
   dispose(): Promise<void> {

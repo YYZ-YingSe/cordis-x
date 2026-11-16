@@ -19,18 +19,18 @@ export class Scope {
     this.scope = scope;
     this.grant = grant;
   }
-  private request(command: string) {
-    return this.channel.request(command, { scope: this.scope, grant: this.grant });
+  private request(command: string, signal?: AbortSignal) {
+    return this.channel.request(command, { scope: this.scope, grant: this.grant }, signal);
   }
-  async ready(): Promise<void> {
-    await this.request('scope_ready');
+  async ready(signal?: AbortSignal): Promise<void> {
+    await this.request('scope_ready', signal);
   }
   private disposeCompletion = new Completion<void>();
   dispose(): Promise<void> {
     return this.disposeCompletion.observe(async () => { await this.request('scope_dispose'); });
   }
-  snapshot(): Promise<Value> {
-    return this.request('scope_status');
+  snapshot(signal?: AbortSignal): Promise<Value> {
+    return this.request('scope_status', signal);
   }
   run(callback: ScopeCallback): Promise<Value> {
     return this.registry.run(this.channel, this.scope, this.grant, callback);

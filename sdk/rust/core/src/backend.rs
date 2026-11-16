@@ -77,11 +77,6 @@ pub enum Operation {
     ReferenceDispose {
         key: String,
     },
-    Info,
-    Metadata {
-        name: String,
-        revision: String,
-    },
     Invoke {
         dependency: String,
         method: String,
@@ -157,22 +152,13 @@ pub enum Operation {
     ScopeDispose {
         scope: Handle,
     },
-    TaskJoin {
-        task: Handle,
-    },
     Next {
         next: Handle,
         args: Message,
         result: MessageContract,
     },
-    SequenceReady {
-        sequence: Handle,
-    },
     SequenceDispose {
         sequence: Handle,
-    },
-    ChildReady {
-        child: Handle,
     },
     ChildDispose {
         child: Handle,
@@ -185,31 +171,33 @@ pub trait Backend: Any {
         crate::Validation::Checked
     }
     fn submit(&self, operation: Operation) -> LocalFuture<Reply>;
-    /// Observe time or owner cancellation without admitting business work.
-    /// Dropping this future withdraws the observation. Adapters must cancel
-    /// any timer or foreign wait and settle its completion storage; an unused
-    /// observation must never delay the enclosing callback until its deadline.
-    /// This does not cancel tasks, RPCs, acquisitions or disposal operations.
-    fn wait(&self, _wait: Wait) -> LocalFuture<()> {
-        Box::pin(async { Err(refused("unsupported_wait", "adapter has no wait support")) })
-    }
+    /// Observe existing state without starting or stopping business work.
+    /// Each adapter must explicitly implement this path. Dropping its future
+    /// withdraws that observer; foreign completion storage must still settle.
+    /// A discarded observer cannot keep the enclosing callback open until the
+    /// observed task or plugin completes. Ownership of that work is unchanged.
+    fn observe(&self, observation: Observation) -> FutureResult;
     fn as_any(&self) -> &dyn Any;
 }
 
-/// Intrinsic observations have a different lifetime from admitted operations.
-/// The distinction belongs to the SDK, never to a plugin configuration flag.
-#[derive(Clone, Copy, Debug)]
-pub enum Wait {
-    /// Finish at the deadline or when the owning task is cancelled.
+/// Queries and lifecycle observations never own the operation being observed.
+/// The adapter translates these semantic requests to its physical protocol;
+/// business calls and release actions remain in Operation even if they return
+/// no value. Status reads must not be used as a substitute for release.
+#[derive(Clone)]
+pub enum Observation {
+    Info,
+    Metadata { name: String, revision: String },
     Delay { milliseconds: u64 },
-    /// Observe cancellation of the owning task without cancelling that task.
     Cancellation,
+    TaskJoin { task: Handle },
+    SequenceReady { sequence: Handle },
+    ChildReady { child: Handle },
 }
-impl Wait {
+impl Observation {
     /// Keep the portable timer bound independent of the physical adapter.
-    /// This is a clock representation/resource contract, not message validation.
-    pub fn validate(self) -> crate::Result<()> {
-        if matches!(self, Self::Delay { milliseconds } if milliseconds > 60_000) {
+    pub fn validate(&self) -> crate::Result<()> {
+        if matches!(self, Self::Delay { milliseconds } if *milliseconds > 60_000) {
             return Err(refused("invalid_argument", "sleep must be 0..60000 ms"));
         }
         Ok(())

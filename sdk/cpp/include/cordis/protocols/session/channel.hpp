@@ -87,10 +87,11 @@ public:
         co_await request_payload(std::move(command), Payload(std::move(value))))
         .control_only();
   }
-  Async<Payload> request_payload(std::string command, Payload payload) {
-    return native::completed<Payload>(
-        [this, command = std::move(command), payload = std::move(payload)](
-            std::function<void(native::Outcome<Payload>)> reply) {
+  static bool is_observation(const std::string &command) {
+    return command == "context_metadata" || command == "cleanup_metadata" || command == "sequence_ready" || command == "sequence_status" || command == "scope_ready" || command == "scope_status" || command == "task_join" || command == "task_status" || command == "event_join" || command == "event_status" || command == "child_ready" || command == "child_settled" || command == "child_status";
+  }
+  std::string submit(std::string command, Payload payload,
+      std::function<void(native::Outcome<Payload>)> reply) {
           std::function<void(std::vector<uint8_t>)> output;
           std::vector<uint8_t> bytes;
           std::string operation;
@@ -141,7 +142,29 @@ public:
             close(); // Submission may have partially written: retain unknown
                      // outcome.
           }
-        });
+    return operation;
+  }
+  void withdraw(const std::string &operation) noexcept {
+    try {
+      std::function<void(std::vector<uint8_t>)> output;
+      std::vector<uint8_t> bytes;
+      {
+        std::lock_guard lock(mutex);
+        if (closed || !pending.contains(operation)) return;
+        bytes = encode(Frame(CancelObservation{Header{session, activation, operation}}), frame_capacity);
+        output = write;
+      }
+      output(std::move(bytes));
+    } catch (...) { close(); }
+  }
+  Async<Payload> request_payload(std::string command, Payload payload) {
+    std::string operation;
+    auto start = [&](auto done) { operation = submit(command, payload, std::move(done)); };
+    // Corral cancellation withdraws only a query. Both paths retain the same
+    // completion storage and operation slot until the original response arrives.
+    if (is_observation(command))
+      co_return co_await native::observed<Payload>(start, [&]() noexcept { withdraw(operation); });
+    co_return co_await native::completed<Payload>(start);
   }
   void receive(const Response &response) {
     std::function<void(native::Outcome<Payload>)> complete;

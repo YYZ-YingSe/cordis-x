@@ -2,14 +2,18 @@ import { request, answer, body, jsonBody, payload, type Request, type FixtureOut
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Context, DependencyChannel, RpcError } from '../src/adapters/process/context.ts';
+import { decodeFrame } from '../src/protocols/session/binary.ts';
 import { Refusal } from '../src/index.ts';
 import type { Value } from '../src/core/value.ts';
 
 function setup() {
   const sent: Request[] = [];
+  const withdrawn: string[] = [];
   const channel = new DependencyChannel();
   const identity = { incarnation: '1', fiber: '2', epoch: '3' };
   channel.configure('a'.repeat(32), identity, async (value) => {
+    const frame = decodeFrame(value);
+    if ('cancelObservation' in frame) { withdrawn.push(frame.operation); return; }
     sent.push(request(value));
   });
   const context = new Context(channel, 'b'.repeat(32), { logger: '1' });
@@ -17,11 +21,11 @@ function setup() {
     const { session, activation, operation } = sent[index];
     return { session, activation, operation, outcome: outcome.kind === 'success' ? {kind:'success' as const,value:answer(sent[index],outcome.value)} : outcome };
   };
-  return { sent, channel, context, response };
+  return { sent, channel, context, response, withdrawn };
 }
 
-test('metadata requires negotiation, drains the callback and expires with its Context', async () => {
-  const { sent, channel, context, response } = setup();
+test('metadata requires negotiation; closing its Context withdraws the query and drains acknowledgement', async () => {
+  const { sent, channel, context, response, withdrawn } = setup();
   await assert.rejects(context.metadata('logger', '1'), { code: 'unsupported_metadata' });
   assert.equal(sent.length, 0);
   channel.enableMetadata(true);
@@ -34,9 +38,10 @@ test('metadata requires negotiation, drains the callback and expires with its Co
   });
   await Promise.resolve();
   assert.equal(done, false);
-  const value = { revision: '18446744073709551615', layers: [{ timeout: 3000 }] };
-  channel.receive(response(0, { kind: 'success', value }));
-  assert.deepEqual(await read, value);
+  assert.deepEqual(withdrawn, [sent[0].operation]);
+  const rejected = assert.rejects(read, { code: 'observation_cancelled' });
+  channel.receive(response(0, { kind: 'refused', error: { code: 'observation_cancelled', message: 'withdrawn' } }));
+  await rejected;
   await finish;
   await assert.rejects(context.metadata('logger', '1'), { code: 'closed' });
 });

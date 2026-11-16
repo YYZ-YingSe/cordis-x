@@ -55,6 +55,46 @@ impl Channel {
             .map_err(unknown)
     }
     pub async fn request_payload(&self, command: &str, payload: Payload) -> Result<Payload> {
+        if cordis_wire::operations::is_observation(command) {
+            return Err(refused(
+                "observation_required",
+                "query requires observation submission",
+            ));
+        }
+        self.submit(command, payload)?.1.await.map_err(unknown)?
+    }
+    /// The callback bridge owns acknowledgement; its abandonment signal only
+    /// withdraws the server observer. The original response retires the slot.
+    pub async fn observe(
+        &self,
+        command: &str,
+        payload: Payload,
+        abandoned: impl std::future::Future<Output = ()>,
+    ) -> Result<Payload> {
+        if !cordis_wire::operations::is_observation(command) {
+            return Err(refused(
+                "invalid_observation",
+                "business operations cannot be withdrawn",
+            ));
+        }
+        let (request, mut receive) = self.submit(command, payload)?;
+        let result = tokio::select! {
+            result = &mut receive => result,
+            _ = abandoned => {
+                let bytes = request.cancellation(self.frame_capacity.get()).map_err(unknown)?;
+                // This control frame consumes no operation slot. Backpressure
+                // waits for the writer instead of losing cancellation at capacity.
+                self.output.send(bytes).await.map_err(unknown)?;
+                receive.await
+            }
+        };
+        result.map_err(unknown)?
+    }
+    fn submit(
+        &self,
+        command: &str,
+        payload: Payload,
+    ) -> Result<(Request, oneshot::Receiver<Result<Payload>>)> {
         if self.closed.get() {
             return Err(refused("closed", "Session closed"));
         }
@@ -121,12 +161,16 @@ impl Channel {
             .encode(self.frame_capacity.get())
             .map_err(|e| refused("invalid_value", e))?;
         let (reply, receive) = oneshot::channel();
-        self.pending
-            .borrow_mut()
-            .insert(operation.clone(), Pending { request, reply });
+        self.pending.borrow_mut().insert(
+            operation.clone(),
+            Pending {
+                request: request.clone(),
+                reply,
+            },
+        );
         permit.send(encoded);
         reservation.1.take();
-        receive.await.map_err(unknown)?
+        Ok((request, receive))
     }
     pub fn receive(&self, response: Response) -> Result<()> {
         let pending = self

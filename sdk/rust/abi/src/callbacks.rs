@@ -312,6 +312,18 @@ mod tests {
     };
     struct Unused;
     impl Backend for Unused {
+        fn observe(
+            &self,
+            _: cordis_sdk_core::backend::Observation,
+        ) -> cordis_sdk_core::FutureResult {
+            Box::pin(async {
+                Err(cordis_sdk_core::refused(
+                    "unsupported_observation",
+                    "this fixture implements no observations",
+                ))
+            })
+        }
+
         fn submit(&self, _: Operation) -> LocalFuture<Reply> {
             Box::pin(async { Err(refused("unused", "no host calls expected")) })
         }

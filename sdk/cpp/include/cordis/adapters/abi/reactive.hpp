@@ -50,6 +50,11 @@ struct ReactiveHandle {
       : context(context), api(api), id(id) {
     this->context.grant = 0;
   }
+  Async<Payload> observe(uint32_t kind) const {
+    return cordis::detail::invoke_owned([*this](uint32_t kind) -> Async<Payload> {
+      co_return (co_await detail::observe(context, kind, id)).first;
+    }, kind);
+  }
   Async<Payload> call(uint32_t op) const {
     return cordis::detail::invoke_owned(
         [*this](uint32_t op) -> Async<Payload> {
@@ -82,12 +87,12 @@ public:
   Dispatch() = default;
   Async<std::vector<Flow>> join() const {
     return completion.observe([*this]() -> Async<std::vector<Flow>> {
-      co_return detail::flows(co_await call(CORDIS_ABI_DISPATCH_JOIN));
+      co_return detail::flows(co_await observe(CORDIS_ABI_OBSERVE_DISPATCH_JOIN));
     });
   }
   Async<Value> snapshot() const {
     return cordis::detail::invoke_owned([*this]() -> Async<Value> {
-      co_return (co_await call(CORDIS_ABI_DISPATCH_STATUS)).control_only();
+      co_return (co_await observe(CORDIS_ABI_OBSERVE_DISPATCH_STATUS)).control_only();
     });
   }
 };

@@ -193,11 +193,18 @@ async fn scenario(backend: Backend) {
         backend,
         HostBindings {
             dependencies: vec![binding],
+            factories: vec![cordis_host::FactoryBinding::new("delayed-child", |_| {
+                Ok(rt::Plugin::new("delayed-child", |_| async {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    Ok(())
+                }))
+            })],
             ..Default::default()
         },
     );
     let implementation = runtime.install(plugin).unwrap();
     implementation.ready().await.unwrap();
+    let completed_writes = writes.clone();
     let consumer = runtime
         .install(dependency.declare(rt::Plugin::new("consumer", {
             let dependency = dependency.clone();
@@ -205,7 +212,20 @@ async fn scenario(backend: Backend) {
                 let dependency = dependency.clone();
                 let writes = writes.clone();
                 async move {
-                    for method in ["race", "cancel-race", "invalid-wait", "work", "start-task"] {
+                    for method in [
+                        "race",
+                        "cancel-race",
+                        "invalid-wait",
+                        "work",
+                        "join-race",
+                        "join-again",
+                        "ready-race",
+                        "ready-again",
+                        "child-race",
+                        "child-again",
+                        "independent",
+                        "start-task",
+                    ] {
                         let before = Instant::now();
                         let input = sdk::Message::from_json(
                             sdk::MessageContract::json_value(),
@@ -227,7 +247,12 @@ async fn scenario(backend: Backend) {
                         let elapsed = before.elapsed();
                         eprintln!("{backend:?} {method}: {elapsed:?}");
                         assert!(
-                            elapsed < Duration::from_secs(1),
+                            elapsed
+                                < Duration::from_secs(if method.ends_with("-again") {
+                                    4
+                                } else {
+                                    1
+                                }),
                             "{method} waited for an abandoned observation: {elapsed:?}"
                         );
                         if method == "work" {
@@ -247,7 +272,7 @@ async fn scenario(backend: Backend) {
             }
         })))
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(8), consumer.ready())
+    tokio::time::timeout(Duration::from_secs(15), consumer.ready())
         .await
         .expect("wait probe stalled")
         .unwrap();
@@ -255,6 +280,11 @@ async fn scenario(backend: Backend) {
         .await
         .expect("task cancellation did not settle")
         .unwrap();
+    assert_eq!(
+        completed_writes.load(Ordering::SeqCst),
+        2,
+        "late inverse was lost or released twice"
+    );
     implementation.dispose().await.unwrap();
     source.dispose().await.unwrap();
 }
@@ -273,4 +303,95 @@ async fn process_waits_and_work_have_distinct_lifetimes() {
 #[tokio::test]
 async fn wasm_waits_and_work_have_distinct_lifetimes() {
     scenario(Backend::Wasm).await;
+}
+
+/// Exercise the C++ canonical awaiter as well as the Rust guest runtime. The
+/// external WASI SDK and libraries are supplied by the development environment.
+#[tokio::test]
+async fn cpp_component_withdraws_join_and_preserves_task() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = root.join("build/wasm/observations/probe.wasm");
+    let built = std::process::Command::new(
+        std::env::var_os("PYTHON")
+            .unwrap_or_else(|| if cfg!(windows) { "python" } else { "python3" }.into()),
+    )
+    .current_dir(&root)
+    .args([
+        "sdk/cpp/tools/build-component.py",
+        "--sdk-source",
+        "sdk/cpp",
+        "--core",
+        "sdk/cpp/tests/component/observations.cpp",
+    ])
+    .arg(&output)
+    .output()
+    .unwrap();
+    assert!(
+        built.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&built.stdout),
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let core = std::fs::read(output).unwrap();
+    let bytes = wit_component::ComponentEncoder::default()
+        .module(&core)
+        .unwrap()
+        .adapter(
+            "wasi_snapshot_preview1",
+            wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
+        )
+        .unwrap()
+        .validate(true)
+        .encode()
+        .unwrap();
+    let module = cordis_wasm::ContextComponent::from_bytes(
+        &bytes,
+        Default::default(),
+        cordis_wasm::Capabilities {
+            wasi: Some(Default::default()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let service = rt::Service::<cordis_wasm::ContextService>::new("test.cpp.observations", "1")
+        .with_descriptor(module.descriptor().clone());
+    let runtime = rt::Runtime::new();
+    let provider = runtime
+        .install(module.plugin("cpp", &service, json!({})).unwrap())
+        .unwrap();
+    provider.ready().await.unwrap();
+    let dependency = Dependency::new(&service).unwrap();
+    let consumer = runtime
+        .install(
+            dependency
+                .clone()
+                .declare(rt::Plugin::new("consumer", move |ctx| {
+                    let dependency = dependency.clone();
+                    async move {
+                        for method in ["race", "again"] {
+                            let before = Instant::now();
+                            let input = sdk::Message::from_json(
+                                sdk::MessageContract::json_value(),
+                                &json!(null),
+                            )
+                            .unwrap();
+                            dependency
+                                .invoke(ctx.clone(), method.into(), input.into())
+                                .await
+                                .map_err(|e| rt::Error::Message(e.to_string()))?;
+                            if method == "race" {
+                                assert!(before.elapsed() < Duration::from_secs(1));
+                            }
+                        }
+                        Ok(())
+                    }
+                })),
+        )
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), consumer.ready())
+        .await
+        .unwrap()
+        .unwrap();
+    consumer.dispose().await.unwrap();
+    provider.dispose().await.unwrap();
 }

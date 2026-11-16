@@ -1,13 +1,13 @@
 use crate::{
     Context, Message, Result,
-    backend::{Handle, Operation},
+    backend::{Handle, Observation, Operation},
 };
 
 #[derive(Clone)]
 pub struct Child(Handle);
 impl Child {
     pub async fn ready(&self, ctx: &Context) -> Result<()> {
-        ctx.value(Operation::ChildReady {
+        ctx.observe(Observation::ChildReady {
             child: self.0.clone(),
         })
         .await

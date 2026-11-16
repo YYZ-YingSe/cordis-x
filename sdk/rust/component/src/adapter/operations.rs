@@ -18,7 +18,7 @@ fn resource_grant(handle: &Handle) -> Result<&str> {
         .map(|h| h.0.as_str())
         .ok_or_else(|| refused("invalid_handle", "not a component resource"))
 }
-fn grant(handle: &Handle) -> Result<&str> {
+pub(super) fn grant(handle: &Handle) -> Result<&str> {
     handle
         .downcast_ref::<ComponentHandle>()
         .map(|h| h.0.as_str())
@@ -191,8 +191,6 @@ impl ComponentBackend {
                 "dependency-resource-dispose",
                 json!({"grant":resource_grant(&resource)?}),
             ),
-            Info => ("info", Value::Null),
-            Metadata { name, revision } => ("metadata", json!({"name":name,"revision":revision})),
             Invoke {
                 dependency,
                 method,
@@ -401,7 +399,6 @@ impl ComponentBackend {
                     .await;
             }
             ScopeDispose { scope } => ("scope-dispose", json!({"grant":grant(&scope)?})),
-            TaskJoin { task } => ("join", json!({"grant":grant(&task)?})),
             Next { next, args, result } => {
                 let args = args.encode(None).map_err(invalid)?;
                 let value = self
@@ -417,9 +414,7 @@ impl ComponentBackend {
                 .map(Reply::Message)
                 .map_err(violation);
             }
-            SequenceReady { sequence } => ("effect-ready", json!({"grant":grant(&sequence)?})),
             SequenceDispose { sequence } => ("effect-dispose", json!({"grant":grant(&sequence)?})),
-            ChildReady { child } => ("plugin-ready", json!({"grant":grant(&child)?})),
             ChildDispose { child } => ("plugin-dispose", json!({"grant":grant(&child)?})),
         };
         self.request(command, args).await.map(Reply::Value)

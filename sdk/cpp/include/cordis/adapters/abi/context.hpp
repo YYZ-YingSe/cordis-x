@@ -1,5 +1,6 @@
 #pragma once
 #include <chrono>
+#include <atomic>
 #include <cordis/abi_composition.h>
 #include <cordis/abi_context.h>
 #include <cordis/abi_reactive.h>
@@ -125,6 +126,41 @@ Async<HostReply> receive(const CordisAbiHostApi *api, uint64_t host,
     submit(caller.grant, completion);
   });
 }
+// Wait IDs are scoped by the host to the actual calling grant. The host copies
+// and registers the submission synchronously, so a cancellation cannot race
+// ahead of registration. No callback capture is destroyed before completion.
+inline Async<HostReply> observe(CordisAbiContext ctx, uint32_t kind,
+                                 uint64_t target = 0, Value args = nullptr) {
+  Output input;
+  auto raw = input.build(args);
+  static std::atomic<uint64_t> next{1};
+  auto id = next.load(std::memory_order_relaxed);
+  do {
+    if (id == std::numeric_limits<uint64_t>::max())
+      throw Refusal("exhausted", "wait ID space exhausted");
+  } while (!next.compare_exchange_weak(id, id + 1, std::memory_order_relaxed));
+  auto caller = co_await current_caller(ctx.host);
+  auto result = co_await native::observed<HostReply>(
+      [&](auto resume) {
+        struct Pending {
+          const CordisAbiHostApi *api;
+          Validation validation;
+          std::function<void(native::Outcome<HostReply>)> resume;
+          static void finish(void *data, CordisAbiResult raw) noexcept {
+            std::unique_ptr<Pending> pending(static_cast<Pending *>(data));
+            native::Outcome<HostReply> result;
+            try { result = consume(pending->api, raw, false, pending->validation); }
+            catch (...) { result = std::current_exception(); }
+            pending->resume(std::move(result));
+          }
+        };
+        auto pending = std::make_unique<Pending>(Pending{ctx.api, caller.validation, std::move(resume)});
+        CordisAbiCompletion completion{pending.release(), Pending::finish};
+        ctx.api->observe(ctx.host, ctx.grant, id, kind, target, &raw, caller.grant, completion);
+      },
+      [&]() noexcept { ctx.api->cancel_observation(ctx.host, caller.grant, id); });
+  co_return result;
+}
 } // namespace detail
 
 // Copyable, independent of the originating Context grant. Explicit disposal
@@ -197,11 +233,11 @@ public:
     if (!raw.api || raw.api->version != CORDIS_ABI_CONTEXT_VERSION ||
         raw.api->struct_size != sizeof(CordisAbiHostApi) || !raw.host ||
         !raw.grant || !raw.api->invoke || !raw.api->defer ||
-        !raw.api->dispose || !raw.api->release_result)
+        !raw.api->dispose || !raw.api->release_result || !raw.api->observe || !raw.api->cancel_observation)
       throw Refusal("context", "unsupported host Context");
     if (managed && (managed->version != 1 ||
                     managed->struct_size != sizeof(CordisAbiManagedHostApi) ||
-                    !managed->call || !managed->wait || !managed->cancel_wait))
+                    !managed->call))
       throw Refusal("context", "unsupported Managed host");
     if (reactive &&
         (reactive->version != 1 ||
