@@ -113,10 +113,6 @@ pub enum Operation {
     Scope {
         label: String,
     },
-    Cancelled,
-    Sleep {
-        milliseconds: u64,
-    },
     Spawn {
         label: String,
         task: Callback,
@@ -189,7 +185,35 @@ pub trait Backend: Any {
         crate::Validation::Checked
     }
     fn submit(&self, operation: Operation) -> LocalFuture<Reply>;
+    /// Observe time or owner cancellation without admitting business work.
+    /// Dropping this future withdraws the observation. Adapters must cancel
+    /// any timer or foreign wait and settle its completion storage; an unused
+    /// observation must never delay the enclosing callback until its deadline.
+    /// This does not cancel tasks, RPCs, acquisitions or disposal operations.
+    fn wait(&self, _wait: Wait) -> LocalFuture<()> {
+        Box::pin(async { Err(refused("unsupported_wait", "adapter has no wait support")) })
+    }
     fn as_any(&self) -> &dyn Any;
+}
+
+/// Intrinsic observations have a different lifetime from admitted operations.
+/// The distinction belongs to the SDK, never to a plugin configuration flag.
+#[derive(Clone, Copy, Debug)]
+pub enum Wait {
+    /// Finish at the deadline or when the owning task is cancelled.
+    Delay { milliseconds: u64 },
+    /// Observe cancellation of the owning task without cancelling that task.
+    Cancellation,
+}
+impl Wait {
+    /// Keep the portable timer bound independent of the physical adapter.
+    /// This is a clock representation/resource contract, not message validation.
+    pub fn validate(self) -> crate::Result<()> {
+        if matches!(self, Self::Delay { milliseconds } if milliseconds > 60_000) {
+            return Err(refused("invalid_argument", "sleep must be 0..60000 ms"));
+        }
+        Ok(())
+    }
 }
 impl Operation {
     /// Bind message policy once per semantic operation, outside field loops.

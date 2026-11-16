@@ -48,6 +48,19 @@ int main() {
               }),
           cordis::native::sleep(std::chrono::milliseconds(1)));
       assert(entered && cancelled_cleanup);
+      // A losing observation asks its transport to cancel, then waits for the
+      // original acknowledgement before destroying the callback capture.
+      bool withdrew = false, acknowledged = false;
+      std::function<void(cordis::native::Outcome<int>)> settle;
+      co_await corral::anyOf(
+          cordis::native::observed<int>(
+              [&](auto done) { settle = std::move(done); },
+              [&]() noexcept {
+                withdrew = true;
+                runtime.post([&] { acknowledged = true; settle(7); });
+              }),
+          cordis::native::sleep(std::chrono::milliseconds(1)));
+      assert(withdrew && acknowledged);
     } catch (...) {
       failure = std::current_exception();
     }

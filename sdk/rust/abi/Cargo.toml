@@ -70,3 +70,7 @@ crate-type = ["cdylib"]
 [[example]]
 name = "abi_adder"
 crate-type = ["cdylib"]
+
+[[example]]
+name = "abi_waits"
+crate-type = ["cdylib"]

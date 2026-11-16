@@ -12,7 +12,6 @@ use cordis_runtime::{
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{Arc, Mutex, OnceLock, atomic::Ordering},
-    time::Duration,
 };
 use tokio::sync::{Semaphore, watch};
 
@@ -139,7 +138,7 @@ impl Router {
         if !self.instance.upgrade().is_some_and(|i| i.module.managed()) {
             return Err(Error::Closed);
         }
-        if crate::context::in_cleanup() && matches!(operation, 2 | 3 | 6 | 7 | 8 | 11 | 13) {
+        if crate::context::in_cleanup() && matches!(operation, 2 | 3 | 6 | 7 | 8 | 11) {
             return Err(Error::Refused {
                 code: "cleanup_wait".into(),
                 message: "blocking managed operations during cleanup are unsupported".into(),
@@ -205,23 +204,6 @@ impl Router {
             2..=4 => self.sequence_action(operation, target).await?,
             6..=9 => self.scope_action(operation, target, callback).await?,
             11 | 12 => self.task_action(operation, target).await?,
-            13 => {
-                let ctx = self.task_context(grant)?;
-                if args.is_null() {
-                    ctx.cancelled().await;
-                    json!(true)
-                } else {
-                    let millis = args
-                        .as_u64()
-                        .filter(|n| *n <= 86_400_000)
-                        .ok_or_else(|| Error::InvalidInput("invalid cancellation wait".into()))?;
-                    json!(
-                        tokio::time::timeout(Duration::from_millis(millis), ctx.cancelled())
-                            .await
-                            .is_ok()
-                    )
-                }
-            }
             _ => return Err(Error::InvalidInput("unknown managed operation".into())),
         };
         Ok(Reply {

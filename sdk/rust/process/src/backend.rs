@@ -315,29 +315,6 @@ impl Process {
                     .await;
             }
             Operation::TaskJoin { task } => ("task_join", self.args(&task, "task")?),
-            Operation::Cancelled => {
-                let mut cancel = self
-                    .frame
-                    .cancellation
-                    .clone()
-                    .ok_or_else(|| refused("closed", "not a task context"))?;
-                while !*cancel.borrow_and_update() {
-                    cancel.changed().await.map_err(unknown)?;
-                }
-                return Ok(Reply::Value(Value::Null));
-            }
-            Operation::Sleep { milliseconds } => {
-                if milliseconds > 60_000 {
-                    return Err(refused("invalid_argument", "sleep must be 0..60000 ms"));
-                }
-                let delay = tokio::time::sleep(Duration::from_millis(milliseconds));
-                if let Some(mut cancel) = self.frame.cancellation.clone() {
-                    tokio::select! { _=delay=>{}, _=async { while !*cancel.borrow_and_update() { if cancel.changed().await.is_err() {break;} } }=>{} }
-                } else {
-                    delay.await;
-                }
-                return Ok(Reply::Value(Value::Null));
-            }
             Operation::Effect { label, next } => {
                 let id = self.registry.sequence(next)?;
                 let result = self
@@ -699,6 +676,52 @@ impl Backend for Process {
                 let _ = send.send(result);
             });
             receive.await.map_err(unknown)?
+        })
+    }
+    fn wait(&self, wait: cordis_sdk_core::backend::Wait) -> LocalFuture<()> {
+        let backend = self.clone();
+        Box::pin(async move {
+            wait.validate()?;
+            if !backend.frame.open.get() {
+                return Err(refused("closed", "callback authority expired"));
+            }
+            let mut closed = backend.frame.closed.subscribe();
+            // This future owns only an observation. Keeping it inline makes
+            // cancellation by select/drop cancel the timer as well. Admitted
+            // operations still use submit's independently owned drain path.
+            let observation = async {
+                let cancellation = async {
+                    match backend.frame.cancellation.clone() {
+                        Some(mut receiver) => {
+                            while !*receiver.borrow_and_update() {
+                                if receiver.changed().await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        None => std::future::pending::<()>().await,
+                    }
+                };
+                match wait {
+                    cordis_sdk_core::backend::Wait::Cancellation => {
+                        if backend.frame.cancellation.is_none() {
+                            return Err(refused("closed", "not a task context"));
+                        }
+                        cancellation.await;
+                    }
+                    cordis_sdk_core::backend::Wait::Delay { milliseconds } => {
+                        tokio::select! {
+                            _ = tokio::time::sleep(Duration::from_millis(milliseconds)) => {},
+                            _ = cancellation => {},
+                        }
+                    }
+                }
+                Ok(())
+            };
+            tokio::select! {
+                result = observation => result,
+                _ = closed.changed() => Err(refused("closed", "callback authority expired")),
+            }
         })
     }
     fn as_any(&self) -> &dyn Any {

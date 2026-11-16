@@ -9,6 +9,7 @@ use tokio::sync::Notify;
 pub struct Frame {
     pub open: Cell<bool>,
     pub pending: Cell<usize>,
+    pub closed: tokio::sync::watch::Sender<bool>,
     pub changed: Notify,
 }
 impl Frame {
@@ -16,11 +17,14 @@ impl Frame {
         Rc::new(Self {
             open: Cell::new(true),
             pending: Cell::new(0),
+            closed: tokio::sync::watch::channel(false).0,
             changed: Notify::new(),
         })
     }
     pub async fn finish(&self) {
         self.open.set(false);
+        // Stop observations before draining operations that retain real responsibility.
+        self.closed.send_replace(true);
         while self.pending.get() > 0 {
             self.changed.notified().await;
         }

@@ -65,6 +65,8 @@ pub(crate) struct Host {
     dispose: unsafe extern "C" fn(u64, u64, u64, CordisAbiCompletion),
     release: unsafe extern "C" fn(*mut CordisAbiResult),
     managed: Option<HostCall>,
+    wait: Option<unsafe extern "C" fn(u64, u64, u64, u32, u64, u64, CordisAbiCompletion)>,
+    cancel_wait: Option<unsafe extern "C" fn(u64, u64, u64)>,
     reactive: Option<HostCall>,
     composition: Option<CompositionCall>,
     resources: Option<ResourceCall>,
@@ -92,6 +94,57 @@ impl Reply {
     }
 }
 impl Host {
+    /// Withdrawal requests cancellation but still consumes the original FFI
+    /// completion. Guest callback storage and the host's code lease therefore
+    /// remain valid until the acknowledgement has actually returned.
+    pub async fn wait(
+        self,
+        wait: cordis_sdk_core::backend::Wait,
+        abandoned: impl std::future::Future<Output = ()>,
+    ) -> Result<()> {
+        let submit = self
+            .wait
+            .ok_or_else(|| refused("unsupported_wait", "wait capability unavailable"))?;
+        let cancel = self
+            .cancel_wait
+            .ok_or_else(|| refused("unsupported_wait", "wait capability unavailable"))?;
+        let caller = worker::CALLER
+            .try_with(|(host, grant)| {
+                if *host == self.host {
+                    Ok(*grant)
+                } else {
+                    Err(refused("invalid_handle", "foreign ABI instance"))
+                }
+            })
+            .map_err(|_| refused("closed", "ABI wait requires a callback"))??;
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let id = NEXT
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+            .map_err(|_| refused("exhausted", "wait ID space exhausted"))?;
+        let (kind, milliseconds) = match wait {
+            cordis_sdk_core::backend::Wait::Delay { milliseconds } => (0, milliseconds),
+            cordis_sdk_core::backend::Wait::Cancellation => (1, u64::MAX),
+        };
+        let mut receive = submit_host(self.release, false, self.validation, |done| {
+            // SAFETY: the host registers the ID before returning and retains
+            // this completion exactly once, including after withdrawal.
+            unsafe {
+                submit(self.host, self.grant, id, kind, milliseconds, caller, done);
+            }
+            Ok(())
+        })?;
+        let result = tokio::select! {
+            result = &mut receive => result,
+            _ = abandoned => {
+                // SAFETY: this token belongs to the live submission above.
+                unsafe { cancel(self.host, caller, id); }
+                receive.await
+            }
+        };
+        result
+            .map_err(|_| unknown("host abandoned wait completion"))?
+            .map(|_| ())
+    }
     unsafe fn read(ctx: CordisAbiCompositionContext) -> Result<Self> {
         // SAFETY: the trusted host promises tables readable for their size.
         let api = unsafe { ctx.base.api.as_ref() }
@@ -138,6 +191,20 @@ impl Host {
                 .release_result
                 .ok_or_else(|| refused("invalid_context", "missing releaser"))?,
             managed: extension!(ctx.managed, CordisAbiManagedHostApi),
+            wait: match unsafe { ctx.managed.as_ref() } {
+                Some(api) => Some(
+                    api.wait
+                        .ok_or_else(|| refused("invalid_context", "missing wait"))?,
+                ),
+                None => None,
+            },
+            cancel_wait: match unsafe { ctx.managed.as_ref() } {
+                Some(api) => Some(
+                    api.cancel_wait
+                        .ok_or_else(|| refused("invalid_context", "missing wait cancellation"))?,
+                ),
+                None => None,
+            },
             reactive: extension!(ctx.reactive, CordisAbiReactiveHostApi),
             composition: extension!(ctx.composition, CordisAbiCompositionHostApi),
             resources: None,

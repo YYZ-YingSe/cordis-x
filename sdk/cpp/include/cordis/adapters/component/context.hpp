@@ -309,10 +309,12 @@ inline Context context(std::shared_ptr<Frame> frame,
                    [id] { return control("task-status", id); });
   };
   ops.cancelled_for = [req](std::chrono::milliseconds duration) -> Async<bool> {
-    co_return (co_await req("cancelled-for", duration.count())).get<bool>();
+    Value args = {{"kind", "cancellation"}, {"milliseconds", duration.count()}};
+    co_return (co_await req("wait", std::move(args))).get<bool>();
   };
   ops.cancelled = [req]() -> Async<void> {
-    co_await req("cancelled", nullptr);
+    Value args = {{"kind", "cancellation"}};
+    co_await req("wait", std::move(args));
   };
   ops.on =
       [registration](

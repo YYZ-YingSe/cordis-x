@@ -450,6 +450,8 @@ struct ManagedHostApi {
     version: u32,
     size: u32,
     call: unsafe extern "C" fn(u64, u64, u32, u64, u64, Slice, *const RawBuffer, u64, Completion),
+    wait: unsafe extern "C" fn(u64, u64, u64, u32, u64, u64, Completion),
+    cancel_wait: unsafe extern "C" fn(u64, u64, u64),
 }
 #[repr(C)]
 struct ManagedContext {
@@ -496,7 +498,32 @@ static MANAGED_HOST: ManagedHostApi = ManagedHostApi {
     version: 1,
     size: mem::size_of::<ManagedHostApi>() as u32,
     call: managed_call,
+    wait,
+    cancel_wait,
 };
+unsafe extern "C" fn wait(
+    host: u64,
+    grant: u64,
+    id: u64,
+    kind: u32,
+    milliseconds: u64,
+    caller: u64,
+    completion: Completion,
+) {
+    launch(host, caller, completion, |router| {
+        let wait = router.begin_wait(caller, id)?;
+        Ok(wait.run(grant, kind, milliseconds))
+    });
+}
+unsafe extern "C" fn cancel_wait(host: u64, caller: u64, id: u64) {
+    // This synchronous control path only signals a registered observation. It
+    // neither calls guest code nor discards a completion or a code lease.
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        if let Ok(router) = Router::get(host) {
+            router.cancel_wait(caller, id);
+        }
+    }));
+}
 unsafe extern "C" fn managed_call(
     host: u64,
     grant: u64,

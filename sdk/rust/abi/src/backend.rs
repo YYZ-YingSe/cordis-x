@@ -6,7 +6,7 @@ use cordis_sdk_core::{
 };
 use ffi::{Call, Host, Reply as HostReply};
 use futures_util::FutureExt;
-use std::{any::Any, rc::Weak, time::Duration};
+use std::{any::Any, rc::Weak};
 #[derive(Clone)]
 pub(crate) struct Abi {
     pub validation: cordis_sdk_core::Validation,
@@ -351,25 +351,6 @@ impl Abi {
                 )
                 .await?
             }
-            Operation::Cancelled => {
-                if !self.task {
-                    return Err(refused("closed", "not a task context"));
-                }
-                self.managed(13, 0, 0, String::new(), Value::Null).await?;
-                return Ok(Reply::Value(Value::Null));
-            }
-            Operation::Sleep { milliseconds } => {
-                if milliseconds > 60_000 {
-                    return Err(refused("invalid_argument", "sleep must be 0..60000 ms"));
-                }
-                if self.task {
-                    self.managed(13, 0, 0, String::new(), json!(milliseconds))
-                        .await?;
-                } else {
-                    tokio::time::sleep(Duration::from_millis(milliseconds)).await;
-                }
-                return Ok(Reply::Value(Value::Null));
-            }
             Operation::Effect { label, next } => {
                 let id = self.registry.sequence(next)?;
                 let result = self.managed(1, 0, numeric(&id), label, Value::Null).await;
@@ -646,6 +627,38 @@ impl Abi {
     }
 }
 impl Backend for Abi {
+    fn wait(&self, wait: cordis_sdk_core::backend::Wait) -> LocalFuture<()> {
+        let backend = self.clone();
+        Box::pin(async move {
+            wait.validate()?;
+            if !backend.frame.open.get() {
+                return Err(refused("closed", "callback authority expired"));
+            }
+            if matches!(wait, cordis_sdk_core::backend::Wait::Cancellation) && !backend.task {
+                return Err(refused("closed", "not a task context"));
+            }
+            let caller = worker::CALLER
+                .try_with(|caller| *caller)
+                .map_err(|_| refused("closed", "ABI wait requires a callback"))?;
+            let frame = backend.frame.clone();
+            let mut closed = frame.closed.subscribe();
+            let (mut send, receive) = tokio::sync::oneshot::channel();
+            frame.pending.set(frame.pending.get() + 1);
+            // The bridge owns the foreign acknowledgement, not the business
+            // waiter. Dropping receive signals withdrawal; the bridge cancels
+            // the host wait and drains its one completion before leaving Frame.
+            tokio::task::spawn_local(worker::CALLER.scope(caller, async move {
+                let abandoned = async {
+                    tokio::select! { _ = send.closed() => {}, _ = closed.changed() => {} }
+                };
+                let result = backend.host.wait(wait, abandoned).await;
+                frame.pending.set(frame.pending.get() - 1);
+                frame.changed.notify_one();
+                let _ = send.send(result);
+            }));
+            receive.await.map_err(unknown)?
+        })
+    }
     fn validation(&self) -> cordis_sdk_core::Validation {
         self.validation
     }

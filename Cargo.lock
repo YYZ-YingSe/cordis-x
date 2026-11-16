@@ -299,6 +299,7 @@ dependencies = [
  "cordis-component",
  "cordis-portable-example",
  "cordis-sdk-core",
+ "cordis-test-contracts",
  "futures-util",
  "wit-bindgen 0.61.1",
 ]
@@ -477,6 +478,7 @@ name = "cordis-test-contracts"
 version = "0.1.0"
 dependencies = [
  "cordis-sdk-core",
+ "futures-util",
  "prost",
 ]
 

@@ -2,6 +2,8 @@
 #include <cordis/core/observation.hpp>
 #include <cordis/adapters/abi/context.hpp>
 #include <optional>
+#include <atomic>
+#include <limits>
 
 namespace cordis::abi {
 inline Async<Value> Context::metadata(std::string name,
@@ -281,23 +283,54 @@ Context::spawn(std::string label,
       },
       std::move(label), std::move(run));
 }
+namespace detail {
+// Wait IDs are scoped by the host to the actual calling grant. The host copies
+// and registers the submission synchronously, so a cancellation cannot race
+// ahead of registration. No callback capture is destroyed before completion.
+inline Async<bool> wait(CordisAbiContext ctx, const CordisAbiManagedHostApi *api,
+                        uint64_t milliseconds) {
+  if (!api) throw Refusal("unsupported", "Managed extension unavailable");
+  static std::atomic<uint64_t> next{1};
+  auto id = next.load(std::memory_order_relaxed);
+  do {
+    if (id == std::numeric_limits<uint64_t>::max())
+      throw Refusal("exhausted", "wait ID space exhausted");
+  } while (!next.compare_exchange_weak(id, id + 1, std::memory_order_relaxed));
+  auto caller = co_await current_caller(ctx.host);
+  auto result = co_await native::observed<HostReply>(
+      [&](auto resume) {
+        struct Pending {
+          const CordisAbiHostApi *api;
+          Validation validation;
+          std::function<void(native::Outcome<HostReply>)> resume;
+          static void finish(void *data, CordisAbiResult raw) noexcept {
+            std::unique_ptr<Pending> pending(static_cast<Pending *>(data));
+            native::Outcome<HostReply> result;
+            try { result = consume(pending->api, raw, false, pending->validation); }
+            catch (...) { result = std::current_exception(); }
+            pending->resume(std::move(result));
+          }
+        };
+        auto pending = std::make_unique<Pending>(Pending{ctx.api, caller.validation, std::move(resume)});
+        CordisAbiCompletion completion{pending.release(), Pending::finish};
+        api->wait(ctx.host, ctx.grant, id, CORDIS_ABI_WAIT_CANCELLATION,
+                  milliseconds, caller.grant, completion);
+      },
+      [&]() noexcept { api->cancel_wait(ctx.host, caller.grant, id); });
+  co_return result.first.control_only().get<bool>();
+}
+} // namespace detail
 inline Async<void> Context::cancelled() const {
   return cordis::detail::invoke_owned([*this]() -> Async<void> {
-    (co_await detail::managed_call(raw_, managed_, CORDIS_ABI_TASK_CANCELLED));
-
-    co_return;
+    co_await detail::wait(raw_, managed_, std::numeric_limits<uint64_t>::max());
   });
 }
 inline Async<bool>
 Context::cancelled_for(std::chrono::milliseconds duration) const {
   return cordis::detail::invoke_owned(
       [*this](std::chrono::milliseconds duration) -> Async<bool> {
-        co_return (co_await detail::managed_call(raw_, managed_,
-                                                 CORDIS_ABI_TASK_CANCELLED, 0,
-                                                 0, {}, duration.count()))
-            .first.control_only()
-            .get<bool>();
-      },
-      std::move(duration));
+        if (duration.count() < 0) throw Refusal("invalid_wait", "negative wait duration");
+        co_return co_await detail::wait(raw_, managed_, static_cast<uint64_t>(duration.count()));
+      }, duration);
 }
 } // namespace cordis::abi

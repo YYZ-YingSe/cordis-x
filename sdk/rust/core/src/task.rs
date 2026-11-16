@@ -1,6 +1,6 @@
 use crate::{
     Context, Result, Value,
-    backend::{Callback, Handle, Operation},
+    backend::{Callback, Handle, Operation, Wait},
 };
 use std::{future::Future, rc::Rc};
 
@@ -16,13 +16,19 @@ impl Task {
     }
 }
 impl Context {
+    /// Observe cooperative cancellation from a managed task callback. Dropping
+    /// this future withdraws only the observation; it does not stop the task.
+    /// Callback shutdown settles any foreign acknowledgement before releasing
+    /// callback storage, without waiting for an unused cancellation signal.
     pub async fn cancelled(&self) -> Result<()> {
-        self.value(Operation::Cancelled).await.map(|_| ())
+        self.backend().wait(Wait::Cancellation).await
     }
+    /// Wait for at most 60,000 milliseconds, or return early on owner cancellation.
+    /// A losing select branch releases its timer rather than delaying callback
+    /// completion. Already admitted calls and resource operations still drain
+    /// independently, even when their response futures are dropped.
     pub async fn sleep(&self, milliseconds: u64) -> Result<()> {
-        self.value(Operation::Sleep { milliseconds })
-            .await
-            .map(|_| ())
+        self.backend().wait(Wait::Delay { milliseconds }).await
     }
     pub async fn spawn<F, Fut>(&self, label: &str, task: F) -> Result<Task>
     where

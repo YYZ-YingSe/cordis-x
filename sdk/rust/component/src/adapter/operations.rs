@@ -235,8 +235,6 @@ impl ComponentBackend {
                 return self.register("effect", json!({"label":label}), next).await;
             }
             Scope { label } => return handle(self.request("scope", json!({"label":label})).await?),
-            Cancelled => ("cancelled", Value::Null),
-            Sleep { milliseconds } => ("sleep", json!(milliseconds)),
             Spawn { label, task } => {
                 return self.register("spawn", json!({"label":label}), task).await;
             }

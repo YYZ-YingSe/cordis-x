@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 cordis-sdk-core.workspace = true
 prost.workspace = true
+futures-util.workspace = true
 
 [lints]
 workspace = true

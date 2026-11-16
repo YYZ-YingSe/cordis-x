@@ -89,6 +89,45 @@ template <class T, class Submit> Async<T> completed(Submit submit) {
     std::rethrow_exception(*failure);
   co_return std::move(std::get<T>(result));
 }
+
+// An observation may be withdrawn, but its foreign completion still owns
+// callback storage. Cancellation asks the transport to stop and then keeps the
+// coroutine alive until the one completion arrives. Ordinary completed() calls
+// retain their stronger admitted-work semantics.
+template <class T, class Submit, class Cancel> class ObservationCompletion {
+  Runtime &runtime_ = Runtime::current();
+  Submit submit_;
+  Cancel cancel_;
+  std::optional<Outcome<T>> result_;
+public:
+  ObservationCompletion(Submit submit, Cancel cancel)
+      : submit_(std::move(submit)), cancel_(std::move(cancel)) {}
+  bool await_ready() const noexcept { return false; }
+  void await_suspend(std::coroutine_handle<> continuation) {
+    submit_([this, continuation](Outcome<T> result) {
+      runtime_.post([this, continuation, result = std::move(result)]() mutable {
+        result_.emplace(std::move(result));
+        continuation.resume();
+      });
+    });
+  }
+  std::true_type await_early_cancel() const noexcept { return {}; }
+  bool await_cancel(std::coroutine_handle<>) noexcept {
+    cancel_();
+    return false;
+  }
+  bool await_must_resume() const noexcept { return false; }
+  T await_resume() {
+    if (auto failure = std::get_if<std::exception_ptr>(&*result_))
+      std::rethrow_exception(*failure);
+    return std::move(std::get<T>(*result_));
+  }
+};
+template <class T, class Submit, class Cancel>
+Async<T> observed(Submit submit, Cancel cancel) {
+  co_return co_await ObservationCompletion<T, Submit, Cancel>(
+      std::move(submit), std::move(cancel));
+}
 inline auto sleep(std::chrono::milliseconds duration) {
   return corral::sleepFor(Runtime::current().io(), duration);
 }

@@ -33,6 +33,9 @@ fn lane(command: &str) -> u8 {
     }
 }
 type Reply = oneshot::Sender<Result<Payload>>;
+// Requests are the common case in this bounded queue. Keep their admission
+// lease inline rather than allocating once more for every ordinary call.
+#[allow(clippy::large_enum_variant)]
 enum CommandMessage {
     Request(Operation, Bytes, Reply),
     Abort(Error),
@@ -94,7 +97,7 @@ impl Session {
             })?;
         if spec.io_timeout.as_millis() == 0
             || spec.io_timeout.as_millis() > i32::MAX as u128
-            || spec.io_timeout.subsec_nanos() % 1_000_000 != 0
+            || !spec.io_timeout.subsec_nanos().is_multiple_of(1_000_000)
         {
             return Err(Error::InvalidInput(
                 "I/O timeout must be positive and representable in milliseconds".into(),

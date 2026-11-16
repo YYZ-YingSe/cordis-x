@@ -201,7 +201,7 @@ public:
       throw Refusal("context", "unsupported host Context");
     if (managed && (managed->version != 1 ||
                     managed->struct_size != sizeof(CordisAbiManagedHostApi) ||
-                    !managed->call))
+                    !managed->call || !managed->wait || !managed->cancel_wait))
       throw Refusal("context", "unsupported Managed host");
     if (reactive &&
         (reactive->version != 1 ||

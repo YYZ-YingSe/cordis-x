@@ -24,9 +24,14 @@ extern "C" {
 #define CORDIS_ABI_TASK_SPAWN 10u
 #define CORDIS_ABI_TASK_JOIN 11u
 #define CORDIS_ABI_TASK_STATUS 12u
-#define CORDIS_ABI_TASK_CANCELLED 13u
 /* Read pinned use configuration: label=name, args=contract revision. */
 #define CORDIS_ABI_CONTEXT_METADATA 14u
+/* Observations are cancellable independently of admitted work. A wait ID is
+ * unique within its caller grant. UINT64_MAX means no deadline for cancellation
+ * observation. Completion still runs exactly once after cancel_wait returns;
+ * callers retain callback storage until that acknowledgement is delivered. */
+#define CORDIS_ABI_WAIT_DELAY 0u
+#define CORDIS_ABI_WAIT_CANCELLATION 1u
 typedef struct {
   uint32_t version;
   uint32_t struct_size;
@@ -34,6 +39,10 @@ typedef struct {
                uint64_t target, uint64_t callback, CordisAbiSlice label,
                const CordisAbiBuffer *args, uint64_t caller,
                CordisAbiCompletion completion);
+  void (*wait)(uint64_t host, uint64_t grant, uint64_t id, uint32_t kind,
+               uint64_t milliseconds, uint64_t caller,
+               CordisAbiCompletion completion);
+  void (*cancel_wait)(uint64_t host, uint64_t caller, uint64_t id);
 } CordisAbiManagedHostApi;
 typedef struct {
   CordisAbiContext base;

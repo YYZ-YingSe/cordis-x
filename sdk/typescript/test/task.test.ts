@@ -115,3 +115,17 @@ test('sixteen join waiters do not consume registration or dependency capacity', 
   waits.forEach((_, i) => reply(i, null));
   await Promise.all(waits);
 });
+
+
+test('a losing cancellation observation does not keep a completed task callback open', async () => {
+  const { registry, ctx, reply } = setup();
+  const registering = ctx().spawn('observer', async (worker) => {
+    // This promise observes a signal; unlike invoke(), it admits no host work.
+    // Promise.race cannot cancel its loser, so finish must not drain that loser.
+    await Promise.race([worker.cancelled(), Promise.resolve()]);
+  });
+  reply(0, { task: 't1', grant: 'f'.repeat(32) });
+  await registering;
+  assert.deepEqual(await registry.invoke('t1', ctx('t1')), { kind: 'success', value: null });
+  assert.equal(registry.idle, true);
+});

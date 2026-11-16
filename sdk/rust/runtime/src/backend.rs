@@ -308,17 +308,6 @@ impl Native {
                 task.join().await.map_err(unknown)?;
                 Value::Null
             }
-            Operation::Cancelled => {
-                ctx.cancelled().await;
-                Value::Null
-            }
-            Operation::Sleep { milliseconds } => {
-                if milliseconds > 60_000 {
-                    return Err(refused("invalid_argument", "sleep must be 0..60000 ms"));
-                }
-                tokio::select! { _ = tokio::time::sleep(Duration::from_millis(milliseconds)) => {}, _ = ctx.cancelled() => {} }
-                Value::Null
-            }
             Operation::Effect { label, next } => {
                 let weak = self.instance.clone();
                 let callback: Callback = Rc::new(move |ctx, _| {
@@ -674,6 +663,35 @@ impl Backend for Native {
                 let _ = sender.send(result);
             });
             receiver.await.map_err(unknown)?
+        })
+    }
+    fn wait(&self, wait: cordis_sdk_core::backend::Wait) -> LocalFuture<()> {
+        let backend = self.clone();
+        Box::pin(async move {
+            wait.validate()?;
+            if !backend.frame.open.get() {
+                return Err(refused("closed", "callback authority expired"));
+            }
+            let mut closed = backend.frame.closed.subscribe();
+            // This future owns only an observation. Keeping it inline makes
+            // cancellation by select/drop cancel the timer as well. Admitted
+            // operations still use submit's independently owned drain path.
+            let observation = async {
+                match wait {
+                    cordis_sdk_core::backend::Wait::Cancellation => backend.ctx.cancelled().await,
+                    cordis_sdk_core::backend::Wait::Delay { milliseconds } => {
+                        tokio::select! {
+                            _ = tokio::time::sleep(Duration::from_millis(milliseconds)) => {},
+                            _ = backend.ctx.cancelled() => {},
+                        }
+                    }
+                }
+                Ok(())
+            };
+            tokio::select! {
+                result = observation => result,
+                _ = closed.changed() => Err(refused("closed", "callback authority expired")),
+            }
         })
     }
     fn as_any(&self) -> &dyn Any {

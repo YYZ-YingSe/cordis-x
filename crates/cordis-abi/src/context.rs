@@ -1,4 +1,5 @@
 use crate::{Bytes, Error, Instance, Payload, Result, Value, ffi::Op};
+mod waits;
 use cordis_runtime::{Context, Plugin, WeakEffectHandle};
 use cordis_wire::local::Envelope;
 use std::{
@@ -165,6 +166,7 @@ pub(crate) struct Router {
     pub(crate) composition: crate::composition::Composition,
     pub(crate) resources: crate::resource_dependencies::Resources,
     effects: Mutex<BTreeMap<u64, Arc<Entry>>>,
+    pub(crate) waits: Mutex<BTreeMap<(u64, u64), tokio::sync::watch::Sender<bool>>>,
     calls: Semaphore,
     cleanup_calls: Semaphore,
     disposals: Semaphore,
@@ -204,6 +206,7 @@ impl Router {
             composition,
             resources,
             effects: Mutex::default(),
+            waits: Mutex::default(),
         });
         registry()
             .lock()
@@ -475,6 +478,7 @@ impl Scope {
             .cloned()
             .expect("live scope");
         scope.state.lock().unwrap().open = false;
+        self.router.cancel_waits(self.grant);
         loop {
             let ready = scope.drained.notified();
             tokio::pin!(ready);

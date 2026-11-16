@@ -15,6 +15,7 @@ wit-bindgen = { version = "=0.61.1", default-features = false, features = ["macr
 
 [dev-dependencies]
 cordis-portable-example = { path = "../examples/portable" }
+cordis-test-contracts.workspace = true
 
 [[example]]
 name = "wasm_forward"
@@ -61,4 +62,8 @@ crate-type = ["cdylib"]
 
 [[example]]
 name = "wasm_adder"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "wasm_waits"
 crate-type = ["cdylib"]

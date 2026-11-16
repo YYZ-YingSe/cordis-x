@@ -13,6 +13,24 @@ use std::sync::{
 struct Request {
     result: tokio::sync::watch::Receiver<Option<Result<Payload>>>,
     lane: u8,
+    withdraw: Option<tokio::sync::watch::Sender<bool>>,
+}
+/// Only observation requests can be withdrawn. An abandoned business import
+/// remains owned by the router and still settles before its scope is released.
+struct ObservationGuard {
+    router: Arc<Router>,
+    context: String,
+    id: u64,
+    withdraw: tokio::sync::watch::Sender<bool>,
+}
+impl Drop for ObservationGuard {
+    fn drop(&mut self) {
+        self.withdraw.send_replace(true);
+        // Completion may already have been published when the import is
+        // dropped, before its receiver gets polled. Both transitions retire
+        // through the same gate so neither ordering can strand a request slot.
+        self.router.retire_observation(&self.context, self.id);
+    }
 }
 struct Entry {
     context: Context,
@@ -131,6 +149,12 @@ impl Router {
         if command.len() > 128 {
             return Err(Error::InvalidInput("command too long".into()));
         }
+        let (withdraw, mut withdrawn) = if command == "wait" {
+            let (send, receive) = tokio::sync::watch::channel(false);
+            (Some(send), Some(receive))
+        } else {
+            (None, None)
+        };
         let (ctx, id, send, mut receive) = {
             let mut entries = self.entries.lock().unwrap();
             let ctx = entries
@@ -166,28 +190,74 @@ impl Router {
                 Request {
                     result: receive.clone(),
                     lane,
+                    withdraw: withdraw.clone(),
                 },
             );
             (ctx, id, send, receive)
         };
+        let _observation = withdraw.map(|withdraw| ObservationGuard {
+            router: self.clone(),
+            context: key.to_owned(),
+            id,
+            withdraw,
+        });
         let router = self.clone();
-        // The admitted operation owns its responsibility even if the native
-        // component task traps or its import future is subsequently dropped.
+        let context_key = key.to_owned();
+        // Business imports retain their independently owned operation. A wait
+        // owns no effect and must remain cancellable rather than spawning a
+        // second admitted operation behind the cancellation boundary.
         tokio::spawn(async move {
-            let result = ctx
-                .operation(move |ctx| async move {
-                    Ok(router.dispatch_payload(ctx, command, args).await)
+            let is_wait = withdrawn.is_some();
+            let result = if let Some(ref mut signal) = withdrawn {
+                let stop = async {
+                    while !*signal.borrow_and_update() {
+                        if signal.changed().await.is_err() {
+                            break;
+                        }
+                    }
+                };
+                tokio::select! {
+                    biased;
+                    _ = stop => Err(Error::Refused { code:"wait_cancelled".into(), message:"observation was withdrawn".into() }),
+                    result = router.clone().dispatch_payload(ctx, command, args) => result,
+                }
+            } else {
+                let dispatch = router.clone();
+                ctx.operation(move |ctx| async move {
+                    Ok(dispatch.dispatch_payload(ctx, command, args).await)
                 })
                 .await
                 .map_err(Error::from)
-                .and_then(|result| result);
+                .and_then(|result| result)
+            };
             send.send_replace(Some(result));
+            // A dropped import has no reader left to remove its slot. Release
+            // it only after withdrawal settled; Scope can still await a cloned
+            // completion receiver while it closes.
+            if is_wait {
+                router.retire_observation(&context_key, id);
+            }
         });
         let result = wait_result(&mut receive).await;
         if let Some(entry) = self.entries.lock().unwrap().get_mut(key) {
             entry.requests.remove(&id);
         }
         result
+    }
+    fn retire_observation(&self, context: &str, id: u64) {
+        let mut entries = self.entries.lock().unwrap();
+        if let Some(entry) = entries.get_mut(context) {
+            let retired = entry.requests.get(&id).is_some_and(|request| {
+                request
+                    .withdraw
+                    .as_ref()
+                    .is_some_and(|signal| *signal.borrow())
+                    && request.result.borrow().is_some()
+            });
+            if retired {
+                entry.requests.remove(&id);
+            }
+        }
     }
     fn reserve(&self) -> Result<Reservation<'_>> {
         let instance = self.instance.upgrade().ok_or(Error::Closed)?;
@@ -763,28 +833,32 @@ impl Router {
                 }
                 Ok(Value::Null)
             }
-            "cancelled-for" => {
-                let ms = args
-                    .as_u64()
-                    .filter(|ms| *ms <= 60_000)
-                    .ok_or_else(|| Error::InvalidInput("wait must be 0..60000 ms".into()))?;
+            "wait" => {
+                let kind = text(&args, "kind")?;
+                if !matches!(kind, "delay" | "cancellation") {
+                    return Err(Error::InvalidInput("unknown wait kind".into()));
+                }
+                let timeout = args
+                    .get("milliseconds")
+                    .map(|v| {
+                        v.as_u64()
+                            .filter(|ms| *ms <= 86_400_000)
+                            .ok_or_else(|| Error::InvalidInput("invalid wait duration".into()))
+                    })
+                    .transpose()?;
+                if kind == "delay" && timeout.is_none() {
+                    return Err(Error::InvalidInput("delay requires a duration".into()));
+                }
+                let deadline = async {
+                    if let Some(ms) = timeout {
+                        tokio::time::sleep(Duration::from_millis(ms)).await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                };
                 Ok(json!(
-                    tokio::time::timeout(Duration::from_millis(ms), ctx.cancelled())
-                        .await
-                        .is_ok()
+                    tokio::select! { _ = ctx.cancelled() => true, _ = deadline => false }
                 ))
-            }
-            "cancelled" => {
-                ctx.cancelled().await;
-                Ok(Value::Null)
-            }
-            "sleep" => {
-                let ms = args
-                    .as_u64()
-                    .filter(|ms| *ms <= 60_000)
-                    .ok_or_else(|| Error::InvalidInput("sleep must be 0..60000 ms".into()))?;
-                tokio::select! {_=tokio::time::sleep(Duration::from_millis(ms))=>{},_=ctx.cancelled()=>{}}
-                Ok(Value::Null)
             }
             "on" => {
                 let name = text(&args, "event")?;
@@ -880,15 +954,25 @@ impl Scope {
             let mut entries = self.router.entries.lock().unwrap();
             let entry = entries.get_mut(&self.token).ok_or(Error::Closed)?;
             entry.open = false;
+            for request in entry.requests.values() {
+                if let Some(wait) = &request.withdraw {
+                    wait.send_replace(true);
+                }
+            }
             entry
                 .requests
                 .values()
-                .map(|request| request.result.clone())
+                .map(|request| (request.result.clone(), request.withdraw.is_some()))
                 .collect()
         };
         let mut failure = None;
-        for mut result in requests {
+        for (mut result, observation) in requests {
             if let Err(error) = wait_result(&mut result).await {
+                if observation
+                    && matches!(&error, Error::Refused { code, .. } if code == "wait_cancelled")
+                {
+                    continue;
+                }
                 failure.get_or_insert(error);
             }
         }

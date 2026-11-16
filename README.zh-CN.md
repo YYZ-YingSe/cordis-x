@@ -8,6 +8,10 @@ Cordis-X 是用 Rust 编写的可嵌入插件运行时，负责服务依赖、�
 
 项目仍处于开发阶段，API、协议和生成代码会随设计一同调整。目前通过源码工作区接入，Rust crate 和 npm 包尚未配置为公开发布。
 
+等待与真实操作的生命周期分别处理：Rust SDK 的 `Backend::wait(Wait)` 用于计时器/取消通知，`submit(Operation)` 用于实际操作。包装 SDK 的应用必须分别转发。Native、Process 在本地撤销落败的等待；ABI 撤销后仍接收原完成回调；Wasm 撤销宿主等待并归还请求槽。真实 RPC、资源获取、释放及失败责任继续排空，不会因丢弃结果而提前清理。此次为未发布接口直接替换，宿主与 guest SDK 需要一起重新构建。
+
+针对性验证：`cargo test -p cordis-wasm --test waits --locked` 自动构建当前 Native/ABI/Process/Wasm 探针，要求开发环境已有 Wasm target 和链接器；`cargo test -p cordis-sdk-runtime --test resources --locked` 验证资源所有权、迟到获取、在途排空与一次释放。
+
 ## 插件的生命周期
 
 一个插件可能注册监听器、启动后台任务、创建资源，还可能调用其他插件。替换它的代码时，这些工作都需要有明确的去向。

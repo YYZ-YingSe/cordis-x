@@ -177,7 +177,7 @@ impl Router {
         alias: String,
         args: Payload,
     ) -> Result<Reply> {
-        if matches!(operation, 9 | 10 | 11) {
+        if matches!(operation, 9..=11) {
             let ctx = self.context(grant)?;
             let instance = self.instance.clone();
             let value = ctx

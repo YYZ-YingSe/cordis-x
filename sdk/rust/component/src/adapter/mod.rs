@@ -23,6 +23,21 @@ impl ComponentBackend {
     }
 }
 impl Backend for ComponentBackend {
+    fn wait(&self, wait: cordis_sdk_core::backend::Wait) -> LocalFuture<()> {
+        let backend = self.clone();
+        Box::pin(async move {
+            wait.validate()?;
+            let args = match wait {
+                cordis_sdk_core::backend::Wait::Delay { milliseconds } => {
+                    cordis_sdk_core::json!({"kind":"delay", "milliseconds":milliseconds})
+                }
+                cordis_sdk_core::backend::Wait::Cancellation => {
+                    cordis_sdk_core::json!({"kind":"cancellation"})
+                }
+            };
+            backend.request("wait", args).await.map(|_| ())
+        })
+    }
     fn validation(&self) -> cordis_sdk_core::Validation {
         self.callbacks.validation()
     }
