@@ -1,3 +1,4 @@
+import { utf8Length } from '../../core/encoding.ts';
 import { Identities, makeRoom, Completion } from './retention.ts';
 import { Refusal } from '../../core/error.ts';
 import { RpcError } from './context.ts';
@@ -43,7 +44,7 @@ export class ScopeRegistry {
   private nextRun = new Identities();
   private runs = new Map<string, Run>();
   async register(channel: DependencyChannel, context: string, label: string): Promise<Scope> {
-    if (Buffer.byteLength(label) > 1024)
+    if (utf8Length(label) > 1024)
       throw new Refusal('invalid_argument', 'scope label too long');
 
     const scope = this.nextScope.next('c');

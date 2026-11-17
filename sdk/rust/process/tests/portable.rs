@@ -71,10 +71,10 @@ async fn scenario(endpoint: Endpoint) {
         .factory(FactoryBinding::new("worker", |_| {
             Ok(Plugin::new("child", |_| async { Ok(()) }))
         }));
-    spec.endpoint = endpoint;
-    spec.frame_capacity = 4 * 1024 * 1024;
-    spec.max_inflight = 257;
-    spec.io_timeout = std::time::Duration::from_millis(500);
+    spec.session.endpoint = endpoint;
+    spec.session.frame_capacity = 4 * 1024 * 1024;
+    spec.session.max_inflight = 257;
+    spec.session.io_timeout = std::time::Duration::from_millis(500);
     if matches!(endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());
     }

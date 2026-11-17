@@ -20,12 +20,12 @@ async fn main() -> Result<()> {
             ));
         }
     };
-    spec.endpoint = match args.get(2).map(String::as_str).unwrap_or("ipc") {
+    spec.session.endpoint = match args.get(2).map(String::as_str).unwrap_or("ipc") {
         "ipc" => Endpoint::Ipc,
         "http" => Endpoint::Http,
         _ => return Err(Error::Message("invalid endpoint".into())),
     };
-    if matches!(spec.endpoint, Endpoint::Ipc) {
+    if matches!(spec.session.endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());
     }
     let rt = Runtime::new();

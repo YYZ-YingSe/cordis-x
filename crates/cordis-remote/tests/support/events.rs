@@ -28,7 +28,7 @@ fn spec(
     if matches!(endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());
     }
-    spec.endpoint = endpoint;
+    spec.session.endpoint = endpoint;
 
     spec.requires(log_dependency())
         .event(EventBinding::new("tick", event))
@@ -366,7 +366,7 @@ fn peer(mode: &str) -> (ProcessSpec, PathBuf) {
         mode.into(),
         trace.display().to_string(),
     ]);
-    spec.execution_timeout = Some(Duration::from_millis(250));
+    spec.session.execution_timeout = Some(Duration::from_millis(250));
     (spec.event(EventBinding::new("tick", &probe_tick())), trace)
 }
 

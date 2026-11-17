@@ -57,7 +57,7 @@ async fn main() -> Result<()> {
         .requires(&calculator),
     )?;
     let mut spec = ProcessSpec::new(executable);
-    spec.endpoint = endpoint;
+    spec.session.endpoint = endpoint;
     let provider = runtime.install(spec.plugin("cpp-calculator", &calculator))?;
     // Observe provider failure directly instead of indefinitely waiting on a missing dependency.
     provider.ready().await?;

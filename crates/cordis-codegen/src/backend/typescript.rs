@@ -311,6 +311,11 @@ fn service(w: &mut Writer, module: &Module, s: &Service) {
     w.close("};");
     w.close("}");
     w.open(format!("export class {p}Client {{"));
+    w.line("/** Public identity comes from the contract, not a consumer-maintained mapping. */");
+    w.line(format!(
+        "static contract(): {{ name: string; revision: string }} {{ return {}; }}",
+        value(&serde_json::json!({"name":model.name,"revision":model.revision}))
+    ));
     w.line(format!(
         "private readonly dependency = {};",
         lit(&model.name)
@@ -429,6 +434,7 @@ impl Backend for Typescript {
             w.line(format!(
                 "import * as {alias} from \"./proto/{stem}_pb.ts\";"
             ));
+            w.line(format!("export {{ {alias} }};"));
         }
         for object in &plan.references {
             object_interface(&mut w, object);

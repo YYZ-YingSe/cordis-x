@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => return Err("endpoint must be ipc or http".into()),
     };
     let mut spec = ProcessSpec::new(executable);
-    spec.endpoint = endpoint;
+    spec.session.endpoint = endpoint;
     if matches!(endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());
     }

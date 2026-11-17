@@ -1,6 +1,7 @@
 import { valueInterface } from '../src/core/contract.ts';
 import { appendFileSync } from 'node:fs';
-import { run, RpcError, Inverse } from '../src/adapters/process/host.ts';
+import { run } from '../src/adapters/process.ts';
+import { RpcError, Inverse } from '../src/index.ts';
 
 await run(
   {

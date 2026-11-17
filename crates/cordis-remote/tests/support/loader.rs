@@ -18,13 +18,13 @@ async fn declarative_loader_reconfigures_one_binary_across_endpoints() {
             let trace = trace.clone();
             move |config| {
                 let mut spec = ProcessSpec::new(&executable);
-                spec.initialization_timeout = Duration::from_secs(5);
+                spec.session.initialization_timeout = Duration::from_secs(5);
                 spec.args = vec![
                     "--test-hooks".into(),
                     "--trace".into(),
                     trace.display().to_string(),
                 ];
-                spec.endpoint = match config["endpoint"].as_str() {
+                spec.session.endpoint = match config["endpoint"].as_str() {
                     Some("ipc") => Endpoint::Ipc,
                     Some("http") => Endpoint::Http,
                     _ => return Err(Error::Message("invalid endpoint".into())),

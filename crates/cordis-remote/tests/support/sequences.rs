@@ -15,7 +15,7 @@ fn pipeline() -> Service<RemoteService> {
 }
 fn spec(backend: Backend, endpoint: Endpoint) -> ProcessSpec {
     let mut spec = backend.spec("sequence");
-    spec.endpoint = endpoint;
+    spec.session.endpoint = endpoint;
 
     if matches!(endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());
@@ -359,7 +359,7 @@ fn peer(mode: &str) -> (ProcessSpec, PathBuf) {
         trace.display().to_string(),
     ]);
     if mode == "hang" {
-        spec.execution_timeout = Some(Duration::from_millis(200));
+        spec.session.execution_timeout = Some(Duration::from_millis(200));
     }
     (spec, trace)
 }

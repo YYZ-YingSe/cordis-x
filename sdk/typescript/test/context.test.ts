@@ -1,7 +1,7 @@
 import { request, answer, body, jsonBody, payload, type Request, type FixtureOutcome } from './binary-support.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Context, DependencyChannel, RpcError } from '../src/adapters/process/context.ts';
+import { Context, DependencyChannel, RpcError } from '../src/adapters/session/context.ts';
 import { decodeFrame } from '../src/protocols/session/binary.ts';
 import { Refusal } from '../src/index.ts';
 import type { Value } from '../src/core/value.ts';
@@ -114,7 +114,7 @@ test('invalid or duplicate replies are rejected and channel loss wakes all pendi
 });
 
 test('resource release waits for dependency calls started by a resource method', async () => {
-  const { ResourceRecord } = await import('../src/adapters/process/resources.ts');
+  const { ResourceRecord } = await import('../src/adapters/session/resources.ts');
   const { channel, context, response } = setup();
   let closed = false;
   const resource = new ResourceRecord('owner', {
@@ -137,7 +137,7 @@ test('resource release waits for dependency calls started by a resource method',
 });
 
 test('defer drains registration, survives acknowledgement races, and yields an independent handle', async () => {
-  const { EffectRegistry } = await import('../src/adapters/process/context.ts');
+  const { EffectRegistry } = await import('../src/adapters/session/context.ts');
   const { channel, sent, response } = setup();
   const effects = new EffectRegistry();
   const ctx = new Context(channel, 'c'.repeat(32), {}, effects);
@@ -176,7 +176,7 @@ test('defer drains registration, survives acknowledgement races, and yields an i
 });
 
 test('effect cleanup drains dependency calls and caches a failed inverse without retrying', async () => {
-  const { EffectRegistry } = await import('../src/adapters/process/context.ts');
+  const { EffectRegistry } = await import('../src/adapters/session/context.ts');
   const { channel, response } = setup();
   const effects = new EffectRegistry();
   const ctx = new Context(channel, 'c'.repeat(32), {}, effects);
@@ -206,7 +206,7 @@ test('effect cleanup drains dependency calls and caches a failed inverse without
 });
 
 test('unconfirmed registrations retain callbacks and negotiation is required', async () => {
-  const { EffectRegistry } = await import('../src/adapters/process/context.ts');
+  const { EffectRegistry } = await import('../src/adapters/session/context.ts');
   const { channel, context } = setup();
   await assert.rejects(
     context.defer('unsupported', () => {}),

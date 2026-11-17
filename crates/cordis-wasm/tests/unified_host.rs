@@ -100,8 +100,8 @@ fn prepare<P: sdk::Plugin>(
                 },
                 std::env::consts::EXE_SUFFIX
             )));
-            spec.bindings = bindings;
-            spec.endpoint = if http {
+            spec.session.bindings = bindings;
+            spec.session.endpoint = if http {
                 cordis_remote::Endpoint::Http
             } else {
                 cordis_remote::Endpoint::Ipc

@@ -1,3 +1,4 @@
+import { utf8Length } from '../../core/encoding.ts';
 import { Identities, makeRoom, Completion, registration } from './retention.ts';
 import { Refusal } from '../../core/error.ts';
 import { RpcError } from './context.ts';
@@ -59,7 +60,7 @@ export class SequenceRegistry {
     label: string,
     producer: EffectProducer,
   ): Promise<EffectSequence> {
-    if (Buffer.byteLength(label) > 1024)
+    if (utf8Length(label) > 1024)
       throw new Refusal('invalid_argument', 'sequence label too long');
     makeRoom(this.entries, 256, (e) => e.released);
     const sequence = this.nextId.next('s');
@@ -116,7 +117,7 @@ export class SequenceRegistry {
         !result ||
         typeof result.done !== 'boolean' ||
         (result.error && !result.done) ||
-        (inverse && (!(inverse instanceof Inverse) || Buffer.byteLength(inverse.label) > 1024))
+        (inverse && (!(inverse instanceof Inverse) || utf8Length(inverse.label) > 1024))
       )
         throw new Refusal('invalid_step', 'invalid producer result');
       entry.ended = result.done;

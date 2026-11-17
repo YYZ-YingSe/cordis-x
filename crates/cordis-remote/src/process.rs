@@ -1,74 +1,42 @@
-use crate::{Error, Result, Value, http::Http, session::Session};
-use cordis_contract::ContractId;
-use cordis_kernel::Activation;
-use cordis_runtime::{BoxFuture, Broker, BrokerRegistration, Context, Plugin, Service};
-use cordis_wire::local::Envelope;
-use cordis_wire::{Bytes, Identity, Payload, json};
-use std::{path::PathBuf, sync::Arc, time::Duration};
-use tokio::sync::Semaphore;
+//! Process-specific launch description over the common Session plugin binding.
+use crate::{RemoteService, SessionSpec, plugin::CodeLease};
+use cordis_runtime::{Broker, BrokerRegistration, Plugin, Service};
+use std::{path::PathBuf, sync::Arc};
 
-// Retained by definitions, sessions and their reaping workers, independently of
-// the public caller's wait. No code-format dependency enters the runtime.
-pub(crate) type CodeLease = Option<Arc<dyn Send + Sync>>;
-
-#[derive(Clone, Copy, Debug)]
-pub enum Endpoint {
-    Ipc,
-    Http,
-}
-
-/// Artifact selection is independent of endpoint and encoding. No language field.
+/// Process transport declaration. All protocol and lifecycle configuration lives
+/// in `session`, so adding a connected browser never invents an executable path.
 #[derive(Clone, Debug)]
 pub struct ProcessSpec {
-    /// Host-selected business validation, fixed for this installation.
-    pub bindings: cordis_host::HostBindings,
     pub executable: PathBuf,
     pub args: Vec<String>,
-    pub endpoint: Endpoint,
-    pub initialization_timeout: Duration,
-    pub execution_timeout: Option<Duration>,
-    pub io_timeout: Duration,
-    /// Per-instance ordinary admission. Cleanup has separate slots.
-    pub max_inflight: usize,
-    pub frame_capacity: usize,
-    /// Deadline for cancellation, cleanup, deactivation and process exit.
-    pub stop_timeout: Duration,
-    pub composition: crate::CompositionLimits,
+    pub session: SessionSpec,
 }
 impl ProcessSpec {
     pub fn new(executable: impl Into<PathBuf>) -> Self {
         Self {
-            bindings: cordis_host::HostBindings::default(),
             executable: executable.into(),
             args: Vec::new(),
-            endpoint: Endpoint::Ipc,
-            initialization_timeout: Duration::from_secs(10),
-            execution_timeout: None,
-            io_timeout: Duration::from_secs(5),
-            max_inflight: 16,
-            frame_capacity: cordis_wire::DEFAULT_FRAME_CAPACITY,
-            stop_timeout: Duration::from_secs(5),
-            composition: crate::CompositionLimits::default(),
+            session: SessionSpec::default(),
         }
     }
-    pub fn middleware(mut self, binding: cordis_host::MiddlewareBinding) -> Self {
-        self.bindings.middleware.push(binding);
-        self
-    }
-    pub fn factory(mut self, binding: cordis_host::FactoryBinding) -> Self {
-        self.bindings.factories.push(binding);
-        self
-    }
-    pub fn provision(mut self, binding: cordis_host::ProvisionBinding) -> Self {
-        self.bindings.provisions.push(binding);
+    pub fn requires(mut self, dependency: cordis_host::Dependency) -> Self {
+        self.session = self.session.requires(dependency);
         self
     }
     pub fn event(mut self, binding: cordis_host::EventBinding) -> Self {
-        self.bindings.events.push(binding);
+        self.session = self.session.event(binding);
         self
     }
-    pub fn requires(mut self, dependency: cordis_host::Dependency) -> Self {
-        self.bindings.dependencies.push(dependency);
+    pub fn middleware(mut self, binding: cordis_host::MiddlewareBinding) -> Self {
+        self.session = self.session.middleware(binding);
+        self
+    }
+    pub fn factory(mut self, binding: cordis_host::FactoryBinding) -> Self {
+        self.session = self.session.factory(binding);
+        self
+    }
+    pub fn provision(mut self, binding: cordis_host::ProvisionBinding) -> Self {
+        self.session = self.session.provision(binding);
         self
     }
     pub fn plugin(self, name: impl Into<String>, service: &Service<RemoteService>) -> Plugin {
@@ -80,19 +48,13 @@ impl ProcessSpec {
         service: &Service<RemoteService>,
         code: CodeLease,
     ) -> Plugin {
-        let declaration = service.clone();
-        let service = service.clone();
-        self.build_plugin(
-            name,
-            service.contract().clone(),
-            service.descriptor().cloned(),
-            code,
-            move |ctx, value| ctx.provide(&service, value),
-        )
-        .provides(&declaration)
+        let connector = Arc::new(crate::transport::ProcessConnector {
+            executable: self.executable,
+            args: self.args,
+        });
+        self.session
+            .connected_plugin(name, service, connector, code)
     }
-    /// Register a rolling candidate after handshake and activation. The
-    /// controller must await Active before promoting the returned registration.
     pub fn broker_plugin<F>(
         self,
         name: impl Into<String>,
@@ -120,429 +82,11 @@ impl ProcessSpec {
             + Sync
             + 'static,
     {
-        let declaration = broker.clone();
-        let broker = broker.clone();
-        self.build_plugin(
-            name,
-            broker.contract().clone(),
-            broker.descriptor().cloned(),
-            code,
-            move |ctx, value| registered(ctx.dependency(&broker)?.register(value)?),
-        )
-        .requires(&declaration)
-    }
-    fn build_plugin<F>(
-        self,
-        name: impl Into<String>,
-        contract: ContractId,
-        descriptor: Option<cordis_contract::Descriptor>,
-        code: CodeLease,
-        publish: F,
-    ) -> Plugin
-    where
-        F: Fn(&Context, Arc<RemoteService>) -> cordis_runtime::Result<()> + Send + Sync + 'static,
-    {
-        let dependencies = self.bindings.dependencies.clone();
-        let provisions = self.bindings.provisions.clone();
-        let publish = Arc::new(publish);
-        let mut plugin = Plugin::new(name, move |ctx| {
-            let spec = self.clone();
-            let contract = contract.clone();
-            let descriptor = descriptor.clone();
-            let code = code.clone();
-            let publish = publish.clone();
-            async move {
-                let descriptor = descriptor.ok_or_else(|| {
-                    cordis_runtime::Error::Message(format!(
-                        "contract {contract}: process interface descriptor required"
-                    ))
-                })?;
-                let value = spec.start(&ctx, &contract, descriptor, code).await?;
-                publish(&ctx, value)
-            }
+        let connector = Arc::new(crate::transport::ProcessConnector {
+            executable: self.executable,
+            args: self.args,
         });
-        for dependency in dependencies {
-            plugin = dependency.declare(plugin);
-        }
-        for provision in provisions {
-            plugin = plugin.provides(&provision.service);
-        }
-        plugin
-    }
-
-    async fn start(
-        self,
-        ctx: &Context,
-        contract: &ContractId,
-        descriptor: cordis_contract::Descriptor,
-        code: CodeLease,
-    ) -> cordis_runtime::Result<Arc<RemoteService>> {
-        let descriptor = descriptor.with_validation(self.bindings.validation);
-        let activation = ctx.activation();
-        let router = crate::dependency::Router::new(&self)?;
-        router.validate_primary(contract)?;
-        let declarations = router.declarations();
-        let dependency_interfaces = router.interfaces();
-        let events = router.event_declarations();
-        let middleware = router.middleware_declarations();
-        let composition = router.composition_declarations();
-        let launch = self.clone();
-        let owned = ctx
-            .acquire(
-                "process host",
-                async move {
-                    Session::spawn(&launch, identity(activation), router, code)
-                        .await
-                        .map_err(Into::into)
-                },
-                |session, ctx| async move { session.close(&ctx).await.map_err(Into::into) },
-            )
-            .await?;
-        let session = owned.with(Clone::clone)?;
-        let ready = session.request("hello", json!({
-            "max_inflight": self.max_inflight,
-            "io_timeout_ms": self.io_timeout.as_millis() as u64,
-            "frame_capacity": self.frame_capacity,
-            "capabilities": {"dependency_resources":true,"metadata":true,"effects":true,"effect_sequences":true,"scopes":true,"tasks":true,"events":true,"middleware":true,"composition":true},
-            "validation": self.bindings.validation,
-            "dependencies": declarations,
-            "dependency_interfaces": dependency_interfaces,
-            "events": events,
-            "middleware": middleware,
-            "composition": composition,
-            "contract": {"name": contract.name.as_ref(), "revision": contract.revision.as_ref()},
-            "interface": cordis_contract::portable::encode(&descriptor)
-        })).await?;
-        cordis_contract::portable::compare(&descriptor, &ready["interface"])
-            .map_err(|e| Error::Protocol(format!("contract {contract}: {e}")))?;
-        if ready["dependency_interfaces"].as_object().map(|v| v.len())
-            != dependency_interfaces.as_object().map(|v| v.len())
-        {
-            return Err(Error::Protocol("dependency interface identities differ".into()).into());
-        }
-        for (name, expected) in dependency_interfaces
-            .as_object()
-            .expect("declarations are a map")
-        {
-            let expected =
-                cordis_contract::portable::decode(expected).map_err(Error::InvalidInput)?;
-            cordis_contract::portable::compare(&expected, &ready["dependency_interfaces"][name])
-                .map_err(|e| Error::Protocol(format!("dependencies.{name}: {e}")))?;
-        }
-        if ready["contract"]["name"].as_str() != Some(&contract.name)
-            || ready["contract"]["revision"].as_str() != Some(&contract.revision)
-        {
-            return Err(Error::Protocol("ready contract mismatch".into()).into());
-        }
-        if ready
-            .get("dependencies")
-            .cloned()
-            .unwrap_or_else(|| json!({}))
-            != declarations
-            || (!self.bindings.dependencies.is_empty()
-                && ready["capabilities"]["reverse_calls"] != true)
-        {
-            return Err(Error::Protocol(
-                "dependency declarations or reverse-call capability mismatch".into(),
-            )
-            .into());
-        }
-        if ready.get("events").cloned().unwrap_or_else(|| json!({})) != events
-            || (!self.bindings.events.is_empty() && ready["capabilities"]["events"] != true)
-        {
-            return Err(Error::Protocol("event declarations or capability mismatch".into()).into());
-        }
-        if ready
-            .get("middleware")
-            .cloned()
-            .unwrap_or_else(|| json!({}))
-            != middleware
-            || (!self.bindings.middleware.is_empty() && ready["capabilities"]["middleware"] != true)
-        {
-            return Err(
-                Error::Protocol("middleware declarations or capability mismatch".into()).into(),
-            );
-        }
-        session.enable_middleware(ready["capabilities"]["middleware"] == true);
-        let mut declared_composition = ready
-            .get("composition")
-            .cloned()
-            .unwrap_or_else(|| json!({"factories":[],"provisions":{}}));
-        // Factory order is not authority. JS sorts UTF-16 code units, whereas
-        // Rust/C++ sort UTF-8, so normalize before comparing Unicode aliases.
-        if let Some(factories) = declared_composition
-            .get_mut("factories")
-            .and_then(Value::as_array_mut)
-        {
-            factories.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
-        }
-        if declared_composition != composition
-            || ((!self.bindings.factories.is_empty() || !self.bindings.provisions.is_empty())
-                && ready["capabilities"]["composition"] != true)
-        {
-            return Err(
-                Error::Protocol("composition declarations or capability mismatch".into()).into(),
-            );
-        }
-        session.enable_composition(ready["capabilities"]["composition"] == true);
-        session.enable_metadata(ready["capabilities"]["metadata"] == true);
-        session.enable_dependency_resources(ready["capabilities"]["dependency_resources"] == true);
-        session.enable_events(ready["capabilities"]["events"] == true);
-        session.enable_effects(ready["capabilities"]["effects"] == true);
-        session.enable_sequences(ready["capabilities"]["effect_sequences"] == true);
-        session.enable_scopes(ready["capabilities"]["scopes"] == true);
-        session.enable_tasks(ready["capabilities"]["tasks"] == true);
-        let ipc: Arc<dyn InvocationBackend> = Arc::new(Ipc(session.clone()));
-        let http = ready["http"]
-            .as_str()
-            .map(|url| {
-                Http::local(
-                    url,
-                    self.io_timeout,
-                    self.execution_timeout,
-                    self.stop_timeout,
-                    self.bindings.validation,
-                    self.frame_capacity,
-                )
-                .map(|http| Arc::new(http) as Arc<dyn InvocationBackend>)
-            })
-            .transpose()?;
-        if matches!(self.endpoint, Endpoint::Http) && http.is_none() {
-            return Err(Error::Protocol("host did not advertise an HTTP endpoint".into()).into());
-        }
-        session.mark_activation_attempted();
-        session.scoped_request(ctx, "activate", Value::Null).await?;
-        let monitor = session.clone();
-        ctx.spawn("process health", move |ctx| async move {
-            tokio::select! {
-                _ = ctx.cancelled() => Ok(()),
-                result = monitor.terminated() => {
-                    let message = result.err().unwrap_or_else(|| Error::HostLost("unexpected graceful exit".into())).to_string();
-                    ctx.fail(message)?; Ok(())
-                }
-            }
-        })?;
-        Ok(Arc::new(RemoteService {
-            descriptor,
-            ipc,
-            http,
-            endpoint: self.endpoint,
-            session,
-            activation,
-            capacity: Arc::new(Semaphore::new(self.max_inflight)),
-            resources: ready["capabilities"]["resources"]
-                .as_bool()
-                .unwrap_or(false),
-        }))
-    }
-}
-fn identity(a: Activation) -> Identity {
-    Identity {
-        incarnation: a.incarnation.to_string(),
-        fiber: a.fiber.0.to_string(),
-        epoch: a.epoch.to_string(),
-    }
-}
-
-/// A proxy is invoked under the normal native ServiceHandle lease. No raw client is exported.
-#[derive(Clone)]
-pub struct RemoteService {
-    pub(crate) descriptor: cordis_contract::Descriptor,
-    ipc: Arc<dyn InvocationBackend>,
-    http: Option<Arc<dyn InvocationBackend>>,
-    endpoint: Endpoint,
-    session: Session,
-    activation: Activation,
-    capacity: Arc<Semaphore>,
-    pub(crate) resources: bool,
-}
-impl RemoteService {
-    pub async fn invoke_json(&self, context: &Context, method: &str, args: Value) -> Result<Value> {
-        self.invoke_json_via(context, self.endpoint, method, args)
-            .await
-    }
-    pub async fn invoke_json_via(
-        &self,
-        context: &Context,
-        endpoint: Endpoint,
-        method: &str,
-        args: Value,
-    ) -> Result<Value> {
-        let signature =
-            cordis_contract::portable::method(&self.descriptor.interface().methods, method)
-                .map_err(Error::InvalidInput)?;
-        let input = crate::json_body(&signature.args, &args)?;
-        let bytes = self.invoke_via(context, endpoint, method, input).await?;
-        crate::body_json(&signature.result, &bytes)
-    }
-    pub async fn invoke(&self, context: &Context, method: &str, args: Bytes) -> Result<Bytes> {
-        self.invoke_via(context, self.endpoint, method, args).await
-    }
-    pub async fn invoke_via(
-        &self,
-        context: &Context,
-        endpoint: Endpoint,
-        method: &str,
-        args: Bytes,
-    ) -> Result<Bytes> {
-        self.invoke_envelope(context, endpoint, method, Payload::message(args).into())
-            .await?
-            .one()
-            .map_err(Into::into)
-    }
-    pub(crate) async fn invoke_envelope(
-        &self,
-        context: &Context,
-        endpoint: Endpoint,
-        method: &str,
-        args: Envelope,
-    ) -> Result<Envelope> {
-        self.managed(
-            context,
-            endpoint,
-            "call",
-            args.with_control(json!({"method":method})),
-        )
-        .await
-    }
-
-    pub(crate) async fn managed(
-        &self,
-        context: &Context,
-        endpoint: Endpoint,
-        command: &str,
-        payload: Envelope,
-    ) -> Result<Envelope> {
-        if context.activation() != self.activation {
-            return Err(Error::Closed);
-        }
-        let client = self.clone();
-        let command = command.to_owned();
-        context
-            .operation(move |context| async move {
-                Ok(client.execute(&context, endpoint, &command, payload).await)
-            })
-            .await
-            .map_err(crate::resource::runtime_error)?
-    }
-
-    // Invoked only within an executor-owned operation or acquisition ticket.
-    pub(crate) async fn execute(
-        &self,
-        context: &Context,
-        endpoint: Endpoint,
-        command: &str,
-        mut payload: Envelope,
-    ) -> Result<Envelope> {
-        if context.activation() != self.activation {
-            return Err(Error::Closed);
-        }
-        let signature = if command == "call" {
-            let method = payload.control["method"]
-                .as_str()
-                .ok_or_else(|| Error::InvalidInput("missing method".into()))?;
-            let signature =
-                cordis_contract::portable::method(&self.descriptor.interface().methods, method)
-                    .map_err(Error::InvalidInput)?;
-            payload
-                .check(&signature.args)
-                .map_err(Error::InvalidInput)?;
-            Some(signature)
-        } else {
-            if command == "resource_acquire" {
-                let kind = payload.control["kind"]
-                    .as_str()
-                    .ok_or_else(|| Error::InvalidInput("missing kind".into()))?;
-                let resource = cordis_contract::portable::resource(&self.descriptor, kind)
-                    .map_err(Error::InvalidInput)?;
-                payload.check(&resource.args).map_err(Error::InvalidInput)?;
-            }
-            None
-        };
-        let errors = if command == "resource_acquire" {
-            Some(
-                &cordis_contract::portable::resource(
-                    &self.descriptor,
-                    payload.control["kind"].as_str().expect("validated kind"),
-                )
-                .map_err(Error::InvalidInput)?
-                .errors,
-            )
-        } else {
-            signature.map(|s| &s.errors)
-        };
-        let permit = if command == "resource_release" {
-            None
-        } else {
-            Some(
-                self.capacity
-                    .clone()
-                    .try_acquire_owned()
-                    .map_err(|_| Error::Overloaded)?,
-            )
-        };
-        let backend = match endpoint {
-            Endpoint::Ipc => &self.ipc,
-            Endpoint::Http => self
-                .http
-                .as_ref()
-                .ok_or_else(|| Error::InvalidInput("HTTP endpoint unavailable".into()))?,
-        };
-        let _permit = permit;
-        let result = self
-            .session
-            .supervise(context, async {
-                let (request, _scope) = self
-                    .session
-                    .scoped_envelope(context, command, payload.into_wire())
-                    .await?;
-                backend.invoke(request).await
-            })
-            .await
-            .map_err(|e| match errors {
-                Some(errors) => e.check_declared(errors, "operation errors"),
-                None => e,
-            })
-            .and_then(|value| {
-                let mut value = Envelope::from(value);
-                if let Some(signature) = signature {
-                    value.check(&signature.result).map_err(Error::Protocol)?;
-                }
-                Ok(value)
-            });
-        if let Err(
-            error @ (Error::OutcomeUnknown(_)
-            | Error::Protocol(_)
-            | Error::HostLost(_)
-            | Error::Io(_)),
-        ) = &result
-        {
-            let _ = self.session.abort(error.clone()).await;
-            let _ = context.fail(error.to_string());
-        }
-        result
-    }
-
-    pub(crate) fn endpoint(&self) -> Endpoint {
-        self.endpoint
-    }
-    pub(crate) async fn invalidate(&self, context: &Context, error: Error) {
-        let _ = self.session.abort(error.clone()).await;
-        let _ = context.fail(error.to_string());
-    }
-}
-
-trait InvocationBackend: Send + Sync {
-    fn invoke(&self, request: crate::session::Operation) -> BoxFuture<'_, Result<Payload>>;
-}
-struct Ipc(Session);
-impl InvocationBackend for Ipc {
-    fn invoke(&self, request: crate::session::Operation) -> BoxFuture<'_, Result<Payload>> {
-        Box::pin(self.0.send(request))
-    }
-}
-impl InvocationBackend for Http {
-    fn invoke(&self, request: crate::session::Operation) -> BoxFuture<'_, Result<Payload>> {
-        Box::pin(self.call(request))
+        self.session
+            .connected_broker_plugin(name, broker, connector, code, registered)
     }
 }

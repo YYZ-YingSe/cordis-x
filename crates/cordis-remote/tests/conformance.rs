@@ -271,7 +271,7 @@ async fn rust_rejects_mismatched_peer_responses_and_keeps_cleanup_unconfirmed() 
         let runtime = Runtime::new();
         let mut spec = python_spec();
         if fault == "unknown_field" {
-            spec.bindings.validation = cordis_contract::Validation::Audit;
+            spec.session.bindings.validation = cordis_contract::Validation::Audit;
         }
         spec.args.extend([
             format!(
@@ -417,8 +417,8 @@ async fn host_selected_capacity_carries_large_values_without_application_chunks(
         ] {
             let runtime = Runtime::new();
             let mut spec = backend.spec("calculator");
-            spec.frame_capacity = 4 * 1024 * 1024;
-            spec.bindings.validation = validation;
+            spec.session.frame_capacity = 4 * 1024 * 1024;
+            spec.session.bindings.validation = validation;
             let service = calculator();
             let provider = runtime
                 .install(spec.plugin("large-values", &service))
@@ -578,8 +578,8 @@ async fn configured_hotspot_accepts_one_hundred_callers_over_both_transports() {
         for endpoint in [Endpoint::Ipc, Endpoint::Http] {
             let runtime = Runtime::new();
             let mut spec = backend.spec("calculator");
-            spec.max_inflight = 100;
-            spec.endpoint = endpoint;
+            spec.session.max_inflight = 100;
+            spec.session.endpoint = endpoint;
             let provider = runtime
                 .install(spec.plugin("hotspot", &calculator()))
                 .unwrap();

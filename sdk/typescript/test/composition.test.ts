@@ -1,8 +1,8 @@
 import { request, answer, body, jsonBody, payload, type Request, type FixtureOutcome } from './binary-support.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Context, DependencyChannel } from '../src/adapters/process/context.ts';
-import { Child, checkComposition } from '../src/adapters/process/composition.ts';
+import { Context, DependencyChannel } from '../src/adapters/session/context.ts';
+import { Child, checkComposition } from '../src/adapters/session/composition.ts';
 import type { Value } from '../src/core/value.ts';
 const manifest = {
   factories: ['worker'],

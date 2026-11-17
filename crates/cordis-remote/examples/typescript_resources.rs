@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .display()
                 .to_string(),
         );
-        spec.endpoint = endpoint;
+        spec.session.endpoint = endpoint;
         if matches!(endpoint, Endpoint::Ipc) {
             spec.args.push("--stdio-only".into());
         }

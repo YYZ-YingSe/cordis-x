@@ -1,3 +1,4 @@
+import { utf8Length } from '../../core/encoding.ts';
 import { Identities, makeRoom, Observation, registration } from './retention.ts';
 import { Refusal } from '../../core/error.ts';
 import { RpcError } from './context.ts';
@@ -58,7 +59,7 @@ export class TaskRegistry {
     label: string,
     callback: TaskCallback,
   ): Promise<Task> {
-    if (Buffer.byteLength(label) > 1024)
+    if (utf8Length(label) > 1024)
       throw new Refusal('invalid_argument', 'task label too long');
     makeRoom(this.entries, 4096, (e) => e.started && !e.running);
     const task = this.next.next('t');

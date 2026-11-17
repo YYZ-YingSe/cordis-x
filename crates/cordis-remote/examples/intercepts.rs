@@ -24,7 +24,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .to_string(),
         ];
     }
-    spec.endpoint = if args.get(1).map(String::as_str) == Some("http") {
+    spec.session.endpoint = if args.get(1).map(String::as_str) == Some("http") {
         Endpoint::Http
     } else {
         Endpoint::Ipc

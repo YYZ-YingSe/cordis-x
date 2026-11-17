@@ -283,7 +283,7 @@ fn language_spec(endpoint: Endpoint, client: bool, language: Language) -> Proces
         Language::Cpp => ProcessSpec::new(cpp::build().join("cordis_resources_process")),
         Language::TypeScript => typescript_spec("examples/resources/process.ts"),
     };
-    spec.endpoint = endpoint;
+    spec.session.endpoint = endpoint;
 
     if matches!(endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());

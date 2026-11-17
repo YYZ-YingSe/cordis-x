@@ -8,7 +8,7 @@ async fn dynamic_intercepts_cross_both_sdks_endpoints_and_pin_resources() {
             let rt = Runtime::new();
             let saved = Arc::new(Mutex::new(None));
             let mut spec = backend.spec("calculator");
-            spec.endpoint = endpoint;
+            spec.session.endpoint = endpoint;
 
             let provider = rt
                 .install(spec.plugin("calculator", &calculator()))

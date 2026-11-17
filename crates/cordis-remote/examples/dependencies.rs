@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
             })
         },
     ));
-    cpp.endpoint = endpoint;
+    cpp.session.endpoint = endpoint;
     let price = runtime.install(cpp.plugin("pricing", &pricing()))?;
     let mut ts = ProcessSpec::new("node").requires(Dependency::new(&pricing()).unwrap());
     ts.args = vec![
@@ -90,7 +90,7 @@ async fn main() -> Result<()> {
             .display()
             .to_string(),
     ];
-    ts.endpoint = endpoint;
+    ts.session.endpoint = endpoint;
     let order = runtime.install(ts.plugin("orders", &orders()))?;
 
     // Observe backend startup errors directly, before waiting on their consumers.

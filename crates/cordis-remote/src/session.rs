@@ -3,7 +3,6 @@ use cordis_runtime::Context;
 use cordis_wire::{Bytes, Identity, Incoming, Payload, Request, Value};
 use std::{
     collections::BTreeMap,
-    process::Stdio,
     sync::{
         Arc, Weak,
         atomic::{AtomicBool, Ordering},
@@ -11,7 +10,6 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    process::Command,
     sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch},
     task::JoinSet,
     time::{Instant, timeout},
@@ -67,7 +65,7 @@ impl WeakSession {
 }
 struct Client {
     frame_capacity: usize,
-    _code: crate::process::CodeLease,
+    _code: crate::plugin::CodeLease,
     send: mpsc::Sender<CommandMessage>,
     cleanup_capacity: Arc<Semaphore>,
     closed: watch::Receiver<Option<Result<()>>>,
@@ -81,11 +79,12 @@ struct Client {
 }
 
 impl Session {
-    pub async fn spawn(
-        spec: &crate::ProcessSpec,
+    pub async fn connect(
+        spec: &crate::SessionSpec,
         activation: Identity,
         router: Arc<crate::dependency::Router>,
-        code: crate::process::CodeLease,
+        connector: Arc<dyn crate::Connector>,
+        code: crate::plugin::CodeLease,
     ) -> Result<Self> {
         let layout = Layout::new(spec.max_inflight)
             .filter(|layout| {
@@ -131,23 +130,14 @@ impl Session {
         let mut random = [0u8; 16];
         getrandom::fill(&mut random).map_err(|e| Error::Io(e.to_string()))?;
         let session: String = random.iter().map(|b| format!("{b:02x}")).collect();
-        let mut child = Command::new(&spec.executable)
-            .args(&spec.args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .kill_on_drop(true)
-            .spawn()?;
-        // Connection-owned buffers coalesce frame fields without delaying a
-        // completed frame: frame::write still flushes before returning.
-        let mut stdin = tokio::io::BufWriter::with_capacity(
-            frame::BUFFER_CAPACITY,
-            child.stdin.take().unwrap(),
-        );
-        let mut stdout = tokio::io::BufReader::with_capacity(
-            frame::BUFFER_CAPACITY,
-            child.stdout.take().unwrap(),
-        );
+        let connected = timeout(initialization_timeout, connector.connect())
+            .await
+            .map_err(|_| Error::HostLost("remote connection timed out".into()))??;
+        let mut peer = connected.peer;
+        let mut stdin =
+            tokio::io::BufWriter::with_capacity(frame::BUFFER_CAPACITY, connected.output);
+        let mut stdout =
+            tokio::io::BufReader::with_capacity(frame::BUFFER_CAPACITY, connected.input);
         let (send, mut commands) = mpsc::channel(ordinary_capacity + CAPACITY);
         let cleanup_capacity = Arc::new(Semaphore::new(CAPACITY));
         let worker_cleanup_capacity = cleanup_capacity.clone();
@@ -298,8 +288,8 @@ impl Session {
                         }
                         Some(Err(error)) => {
                             if deactivated && pending.is_empty() && error == Error::Closed {
-                                match timeout(stop_timeout, child.wait()).await {
-                                    Ok(Ok(status)) if status.success() => break Ok(()),
+                                match timeout(stop_timeout, peer.wait()).await {
+                                    Ok(Ok(())) => break Ok(()),
                                     other => break Err(Error::HostLost(format!("exit after deactivation: {other:?}"))),
                                 }
                             }
@@ -392,19 +382,19 @@ impl Session {
                     _ = tick.tick() => {
                         let now = Instant::now();
                         if pending.values().any(|p| p.deadline.is_some_and(|end| end <= now)) || stopping.is_some_and(|end| end <= now) {
-                            break Err(Error::OutcomeUnknown("session deadline exceeded; process terminated without claiming cleanup".into()));
+                            break Err(Error::OutcomeUnknown("session deadline exceeded; carrier stopped without claiming cleanup".into()));
                         }
                     }
                 }
             };
-            // Resolve failed calls only after the owned process has stopped executing.
-            let _ = child.start_kill();
-            let reaped = child.wait().await;
+            // Stop the owned carrier before settling lost results. The peer owner
+            // reports what it can actually stop; disconnect never proves rollback.
+            let reaped = peer.stop().await;
             reader.abort();
             writer.abort();
             let _ = reader.await;
             let _ = writer.await;
-            let termination = termination.and_then(|()| reaped.map(|_| ()).map_err(Error::from));
+            let termination = termination.and_then(|()| reaped);
             // Even a successful deactivation can leave unsolicited child waits.
             // They must stop before joining reverse workers; native ownership
             // and admitted install/provide operations still drain normally.

@@ -1,3 +1,4 @@
+import { utf8Length } from '../../core/encoding.ts';
 import type { Validation } from '../../core/validation.ts';
 import { auditBinary } from '../../core/protobuf-wire.ts';
 import { create, fromBinary, fromJson, toBinary, toJson } from '@bufbuild/protobuf';
@@ -33,13 +34,13 @@ export function validateControl(value: Value): void {
       throw new Error('control integers outside safe range require a decimal string');
     if(typeof value==='string') {
       if(!value.isWellFormed()) throw new Error('invalid control Unicode');
-      bytes-=Buffer.byteLength(value);
+      bytes-=utf8Length(value);
     } else if(Array.isArray(value)) for(const child of value) walk(child,depth+1);
     else if(value!==null && typeof value==='object') {
       if(Object.getPrototypeOf(value)!==null && Object.getPrototypeOf(value)!==Object.prototype) throw new Error('expected control object');
       for(const [key,child] of Object.entries(value)) {
         if(!key.isWellFormed()) throw new Error('invalid control key');
-        bytes-=Buffer.byteLength(key);walk(child,depth+1);
+        bytes-=utf8Length(key);walk(child,depth+1);
       }
     } else if(!['boolean','number'].includes(typeof value) && value!==null) throw new Error('invalid control value');
     if(bytes<0) throw new Error('control byte limit exceeded');

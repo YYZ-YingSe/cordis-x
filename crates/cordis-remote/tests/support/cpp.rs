@@ -37,9 +37,9 @@ impl Setup {
         let _ = std::fs::remove_file(&trace);
         let mut spec = ProcessSpec::new(executable);
 
-        spec.endpoint = endpoint;
-        spec.execution_timeout = Some(timeout);
-        spec.max_inflight = 257;
+        spec.session.endpoint = endpoint;
+        spec.session.execution_timeout = Some(timeout);
+        spec.session.max_inflight = 257;
         spec.args = vec![
             "--test-hooks".into(),
             "--trace".into(),

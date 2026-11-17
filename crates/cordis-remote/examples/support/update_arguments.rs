@@ -10,12 +10,12 @@ pub fn parse() -> Result<(Vec<String>, ArtifactOptions, ProcessSpec), Box<dyn st
     }
     // The artifact determines the executable; this template selects its protocol.
     let mut spec = ProcessSpec::new("");
-    spec.endpoint = match args.get(2).map(String::as_str) {
+    spec.session.endpoint = match args.get(2).map(String::as_str) {
         None | Some("ipc") => Endpoint::Ipc,
         Some("http") => Endpoint::Http,
         _ => return Err("expected ipc or http".into()),
     };
-    if matches!(spec.endpoint, Endpoint::Ipc) {
+    if matches!(spec.session.endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());
     }
     let mut options = ArtifactOptions {

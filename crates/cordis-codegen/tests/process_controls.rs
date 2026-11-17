@@ -103,8 +103,8 @@ async fn scenario(root: &Path, language: &str, endpoint: Endpoint, validation: s
     ))
     .factory(factory)
     .provision(ProvisionBinding::new("settings", &settings));
-    spec.bindings.validation = validation;
-    spec.endpoint = endpoint;
+    spec.session.bindings.validation = validation;
+    spec.session.endpoint = endpoint;
     if matches!(endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());
     }

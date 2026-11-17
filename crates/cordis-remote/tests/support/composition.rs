@@ -15,7 +15,7 @@ fn settings() -> Service<cordis_host::Body> {
 fn spec(backend: Backend, endpoint: Endpoint, log: Arc<Mutex<Vec<String>>>) -> ProcessSpec {
     let mut spec = backend.spec("composition");
 
-    spec.endpoint = endpoint;
+    spec.session.endpoint = endpoint;
     if matches!(endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());
     }
@@ -167,7 +167,7 @@ async fn factory_failure_releases_capacity_but_successful_ids_are_never_reused()
     for &backend in Backend::ALL {
         let rt = Runtime::new();
         let mut spec = spec(backend, Endpoint::Http, Arc::default());
-        spec.composition = CompositionLimits { children: 1 };
+        spec.session.composition = CompositionLimits { children: 1 };
         let provider = rt.install(spec.plugin("composer", &service())).unwrap();
         bounded(provider.ready()).await.unwrap();
         let (_, handle) = consumer(&rt).await;
@@ -391,7 +391,7 @@ async fn broker_install_denies_before_factory_and_leaves_live_route_usable() {
         bounded(b.ready()).await.unwrap();
         let definitions = Arc::new(AtomicUsize::new(0));
         let mut spec = spec(backend, Endpoint::Ipc, Arc::default());
-        spec.bindings.factories = vec![FactoryBinding::new("worker", {
+        spec.session.bindings.factories = vec![FactoryBinding::new("worker", {
             let definitions = definitions.clone();
             move |_| {
                 definitions.fetch_add(1, Ordering::SeqCst);

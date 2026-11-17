@@ -328,7 +328,7 @@ impl Router {
             .await
             .map_err(crate::resource::runtime_error)
     }
-    pub fn new(spec: &crate::ProcessSpec) -> Result<Arc<Self>> {
+    pub fn new(spec: &crate::SessionSpec) -> Result<Arc<Self>> {
         spec.bindings
             .validate()
             .map_err(|e| Error::InvalidInput(e.to_string()))?;

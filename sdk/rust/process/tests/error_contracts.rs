@@ -83,7 +83,7 @@ async fn rig(endpoint: Endpoint) -> (Runtime, rt::PluginHandle, rt::ServiceHandl
         },
     );
     let mut spec = ProcessSpec::new(artifact()).requires(dependency);
-    spec.endpoint = endpoint;
+    spec.session.endpoint = endpoint;
 
     let service = Service::<RemoteService>::new("test.structure", "1")
         .with_descriptor(Descriptor::new(probe::ContractProbe::interface()).unwrap());

@@ -24,6 +24,9 @@ impl core::backend::Backend for Empty {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn observe(&self, _: core::backend::Observation) -> core::LocalFuture<core::Value> {
+        Box::pin(async { Err(core::refused("unbound", "no grants")) })
+    }
     fn submit(&self, _: core::backend::Operation) -> core::LocalFuture<core::backend::Reply> {
         Box::pin(async { Err(core::refused("unbound", "no grants")) })
     }

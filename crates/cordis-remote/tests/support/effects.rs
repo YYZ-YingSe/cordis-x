@@ -117,7 +117,7 @@ fn quiet_subscriptions() -> Service<RemoteService> {
 fn spec(backend: Backend, endpoint: Endpoint, logging: bool) -> ProcessSpec {
     let mut spec = backend.spec("subscriptions");
 
-    spec.endpoint = endpoint;
+    spec.session.endpoint = endpoint;
     if matches!(endpoint, Endpoint::Ipc) {
         spec.args.push("--stdio-only".into());
     }
@@ -498,7 +498,7 @@ fn peer(mode: &str) -> (ProcessSpec, PathBuf) {
         trace.display().to_string(),
     ]);
     if mode == "cleanup_hang" {
-        spec.execution_timeout = Some(Duration::from_millis(200));
+        spec.session.execution_timeout = Some(Duration::from_millis(200));
     }
     (spec, trace)
 }

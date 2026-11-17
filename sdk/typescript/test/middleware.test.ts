@@ -2,8 +2,8 @@ import { request, answer, body, jsonBody, payload, type Request, type FixtureOut
 import type { Context as PublicContext } from '../src/index.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Context, DependencyChannel, RpcError } from '../src/adapters/process/context.ts';
-import { MiddlewareRegistry, Next } from '../src/adapters/process/middleware.ts';
+import { Context, DependencyChannel, RpcError } from '../src/adapters/session/context.ts';
+import { MiddlewareRegistry, Next } from '../src/adapters/session/middleware.ts';
 import type { Value } from '../src/core/value.ts';
 function setup() {
   const sent: Request[] = [];

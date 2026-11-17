@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DependencyChannel } from '../src/protocols/session/channel.ts';
 import { decodeFrame } from '../src/protocols/session/binary.ts';
-import { Task } from '../src/adapters/process/task.ts';
+import { Task } from '../src/adapters/session/task.ts';
 import type { Request, Response, CancelObservation } from '../src/protocols/session/messages.ts';
 
 function setup() {

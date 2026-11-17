@@ -19,18 +19,22 @@ mod middleware;
 mod error;
 mod frame;
 mod http;
+mod plugin;
 mod process;
 mod resource;
 mod scope;
 mod sequence;
 mod session;
 mod task;
+mod transport;
 pub use cordis_contract::{Descriptor, Dispatch, Interface, MessageContract, Method};
 pub use cordis_wire::{Bytes, Payload, Value, json};
 
 pub use error::{Error, Result};
-pub use process::{Endpoint, ProcessSpec, RemoteService};
+pub use plugin::{Endpoint, RemoteService, SessionSpec};
+pub use process::ProcessSpec;
 pub use resource::RemoteResource;
+pub use transport::{Connected, Connector, Peer};
 
 pub(crate) fn json_body(shape: &MessageContract, value: &Value) -> Result<Bytes> {
     use prost::Message;

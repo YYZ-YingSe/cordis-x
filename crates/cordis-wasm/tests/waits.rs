@@ -133,7 +133,7 @@ fn provider(backend: Backend, bindings: HostBindings) -> (rt::Plugin, Dependency
             let mut spec = cordis_remote::ProcessSpec::new(
                 artifacts().join(format!("process_waits{}", std::env::consts::EXE_SUFFIX)),
             );
-            spec.bindings = bindings;
+            spec.session.bindings = bindings;
             (
                 spec.plugin("probe", &service),
                 Dependency::new(&service).unwrap(),

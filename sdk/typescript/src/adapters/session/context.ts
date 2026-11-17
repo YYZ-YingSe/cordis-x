@@ -1,3 +1,4 @@
+import { utf8Length } from '../../core/encoding.ts';
 import { Identities, makeRoom, Completion, registration } from './retention.ts';
 import { ReferenceRegistry } from './references.ts';
 import type { Interface } from '../../core/contract.ts';
@@ -310,7 +311,7 @@ export class EffectRegistry {
     label: string,
     cleanup: Cleanup,
   ): Promise<Effect> {
-    if (Buffer.byteLength(label, 'utf8') > 1024)
+    if (utf8Length(label) > 1024)
       throw new Refusal('invalid_argument', 'effect label too long');
     makeRoom(this.entries, 4096, (e) => e.released);
     const effect = this.next.next('e');

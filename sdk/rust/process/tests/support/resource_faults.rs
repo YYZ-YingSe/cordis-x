@@ -148,7 +148,7 @@ impl Fixture {
             ),
             Language::Cpp => unreachable!("no C++ process fault fixture"),
         };
-        process.endpoint = endpoint;
+        process.session.endpoint = endpoint;
 
         if matches!(endpoint, Endpoint::Ipc) {
             process.args.push("--stdio-only".into());

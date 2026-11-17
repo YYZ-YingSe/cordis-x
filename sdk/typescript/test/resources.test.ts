@@ -1,7 +1,7 @@
 import { body, jsonBody } from './binary-support.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ResourceRecord } from '../src/adapters/process/resources.ts';
+import { ResourceRecord } from '../src/adapters/session/resources.ts';
 
 test('resource close waits for admitted calls and repeated close shares one result', async () => {
   const gate = Promise.withResolvers<Uint8Array>();

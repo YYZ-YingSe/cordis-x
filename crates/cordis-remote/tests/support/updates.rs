@@ -170,7 +170,7 @@ impl Rolling {
             files.options(backend),
             move |config| {
                 let mut spec = ProcessSpec::new("ignored-artifact-template");
-                spec.endpoint = endpoint;
+                spec.session.endpoint = endpoint;
 
                 if matches!(endpoint, Endpoint::Ipc) {
                     spec.args.push("--stdio-only".into());
@@ -339,7 +339,7 @@ async fn script_packages_start_from_unicode_staging() {
     for endpoint in [Endpoint::Ipc, Endpoint::Http] {
         let rt = Runtime::new();
         let mut spec = ProcessSpec::new("ignored");
-        spec.endpoint = endpoint;
+        spec.session.endpoint = endpoint;
         let provider = rt
             .install(code.plugin("script", &calculator(), spec).unwrap())
             .unwrap();

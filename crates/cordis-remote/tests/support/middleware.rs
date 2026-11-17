@@ -20,7 +20,7 @@ fn spec(backend: Backend, endpoint: Endpoint) -> ProcessSpec {
     if matches!(endpoint, Endpoint::Ipc) {
         s.args.push("--stdio-only".into());
     }
-    s.endpoint = endpoint;
+    s.session.endpoint = endpoint;
 
     s.requires(log_dependency())
         .middleware(MiddlewareBinding::new("request", &pipeline()))
@@ -280,7 +280,7 @@ async fn startup_failure_releases_middleware_and_binding_mismatch_rejects() {
         assert!(bounded(provider.ready()).await.is_err());
         bounded(provider.dispose()).await.unwrap();
         let mut s = spec(backend, Endpoint::Ipc);
-        s.bindings.middleware.clear();
+        s.session.bindings.middleware.clear();
         let mismatch = rt.install(s.plugin("mismatch", &service())).unwrap();
         assert!(bounded(mismatch.ready()).await.is_err());
         bounded(mismatch.dispose()).await.unwrap();
@@ -312,7 +312,7 @@ fn peer(mode: &str) -> (ProcessSpec, PathBuf) {
         mode.into(),
         trace.display().to_string(),
     ]);
-    s.execution_timeout = Some(Duration::from_millis(500));
+    s.session.execution_timeout = Some(Duration::from_millis(500));
     (
         s.middleware(MiddlewareBinding::new("request", &probe_pipeline())),
         trace,
@@ -446,7 +446,7 @@ async fn lost_middleware_registration_ack_retains_recovery_responsibility() {
 async fn early_remote_reply_cannot_release_an_admitted_native_next() {
     let rt = Runtime::new();
     let (mut s, trace) = peer("early");
-    s.execution_timeout = Some(Duration::from_secs(5));
+    s.session.execution_timeout = Some(Duration::from_secs(5));
     let provider = rt.install(s.plugin("peer", &probe_service())).unwrap();
     bounded(provider.ready()).await.unwrap();
     let (owner, h, ctx) = probe_consumer(&rt).await;

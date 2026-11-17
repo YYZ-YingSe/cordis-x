@@ -7,7 +7,7 @@ import { validation } from '../../core/validation.ts';
 import { payload as data, one, type Payload } from '../../protocols/session/messages.ts';
 import { encodeFrame } from '../../protocols/session/binary.ts';
 import { Refusal } from '../../core/error.ts';
-import { readFrames, writeFrame } from '../../transports/stdio.ts';
+import type { Connection, CallEndpoint, EndpointFactory } from '../../transports/connection.ts';
 import type { Service } from '../../core/service.ts';
 import { normalizeInterface, compareInterfaces, operation } from '../../core/contract.ts';
 import { MiddlewareRegistry, Next } from './middleware.ts';
@@ -25,7 +25,6 @@ export { Scope } from './scope.ts';
 export type { ScopeCallback } from './scope.ts';
 export { EffectSequence, Inverse, iterate } from './sequence.ts';
 export type { EffectStep, EffectProducer, EffectCompletion } from './sequence.ts';
-import { listen } from '../../protocols/http/server.ts';
 import { validate } from '../../core/value.ts';
 import type { Value } from '../../core/value.ts';
 import { ResourceRecord, ResourceClosed } from './resources.ts';
@@ -54,8 +53,10 @@ function object(value: Value): Record<string, Value> {
   return value;
 }
 
-/** Session over protobuf frames, with either stdio or HTTP transport. */
-export async function run(service: Service, options: { http?: boolean } = {}): Promise<void> {
+/** Execute one service over an already connected carrier. All adapters share
+ * activation, reverse calls, resources, observations and drain responsibility.
+ * The platform owns transport establishment and any optional HTTP endpoint. */
+export async function serve(service: Service, connection: Connection, endpoint?: EndpointFactory): Promise<void> {
   const descriptor = normalizeInterface(service.interface);
   // Select the local decoder responsibility once, outside all field loops.
   const check = service.typedDispatch ? (_shape: import('../../core/contract.ts').MessageContract, _bytes: Message) => {}
@@ -493,8 +494,7 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
         fatal = error;
         active = false;
         channel.close();
-        process.exitCode = 1;
-        process.stdin.destroy();
+        connection.close();
         throw error;
       }
       return failure(
@@ -507,17 +507,16 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
       );
     }
   };
-  const server = await listen(
-    options.http !== false,
+  const server: CallEndpoint = endpoint ? await endpoint(
     { active: () => !!activation, validation: () => channel.validation, capacity: () => channel.frameCapacity, ioTimeout: () => ioTimeout, connections: () => operationLayout(maxInflight).connections },
     dispatch,
-  );
+  ) : { url: null, close: async () => {} };
   url = server.url;
-  const write = (bytes: Uint8Array) => writeFrame(process.stdout, bytes);
+  const write = (bytes: Uint8Array) => connection.write(bytes);
   const respond = (response: Response) => write(encodeFrame(response, channel.frameCapacity));
   let acknowledged = false;
   try {
-    for await (const value of readFrames(process.stdin, () => session ? channel.validation : 'audit', () => channel.frameCapacity)) {
+    for await (const value of connection.receive(() => session ? channel.validation : 'audit', () => channel.frameCapacity)) {
       if ('cancelObservation' in value) throw new Error('unexpected forward observation withdrawal');
       if ('outcome' in value) { channel.receive(value); continue; }
       const request = value;
@@ -562,8 +561,8 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
         await respond(result);
         if (request.command === 'deactivate') {
           acknowledged = true;
-          process.exitCode = result.outcome.kind === 'success' ? 0 : 1;
-          process.stdin.destroy();
+          if (result.outcome.kind !== 'success') fatal = new Error('deactivation did not complete');
+          connection.close();
         }
       })();
       pending.add(task);
@@ -574,8 +573,7 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
         },
         () => {
           lanes[lane]--;
-          process.exitCode = 1;
-          process.stdin.destroy();
+          connection.close();
         },
       );
     }
@@ -586,6 +584,7 @@ export async function run(service: Service, options: { http?: boolean } = {}): P
     if (fatal) throw fatal;
     if (!acknowledged) throw error;
   } finally {
+    connection.close();
     channel.close();
     await Promise.allSettled(pending);
     await server.close();

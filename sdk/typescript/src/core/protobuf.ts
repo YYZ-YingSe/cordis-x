@@ -1,3 +1,4 @@
+import { decodeBase64, encodeBase64 } from './encoding.ts';
 import { auditBinary } from './protobuf-wire.ts';
 import type { Validation } from './validation.ts';
 /** Standard protobuf messages plus bounded Cordis business validation. */
@@ -89,8 +90,8 @@ export function messageType(contract: MessageContract): DescMessage {
         return cached.message;
     if (contract.descriptor.length > 1398104)
         throw new Error('schema byte limit exceeded');
-    const bytes = Buffer.from(contract.descriptor, 'base64');
-    if (bytes.length > MAX_DESCRIPTOR_BYTES || bytes.toString('base64') !== contract.descriptor)
+    const bytes = decodeBase64(contract.descriptor);
+    if (bytes.length > MAX_DESCRIPTOR_BYTES || encodeBase64(bytes) !== contract.descriptor)
         throw new Error('invalid schema descriptor');
     const files = fromBinary(FileDescriptorSetSchema, bytes).file;
     let registry = createFileRegistry();

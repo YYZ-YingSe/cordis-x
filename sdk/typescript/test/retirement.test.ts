@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EffectRegistry, type Context, type DependencyChannel } from '../src/adapters/process/context.ts';
-import { SequenceRegistry } from '../src/adapters/process/sequence.ts';
+import { EffectRegistry, type Context, type DependencyChannel } from '../src/adapters/session/context.ts';
+import { SequenceRegistry } from '../src/adapters/session/sequence.ts';
 import { Refusal } from '../src/core/error.ts';
 
 const context = { async finish() {} } as Context;

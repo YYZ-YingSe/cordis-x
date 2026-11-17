@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
         ts.args.push("--stdio-only".into());
         Endpoint::Ipc
     };
-    ts.endpoint = endpoint;
+    ts.session.endpoint = endpoint;
     rt.install(
         ts.requires(log)
             .middleware(MiddlewareBinding::new("request", &pipeline))

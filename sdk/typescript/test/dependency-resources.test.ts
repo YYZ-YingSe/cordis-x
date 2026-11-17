@@ -1,7 +1,7 @@
 import { request, answer, body, jsonBody, payload, type Request, type FixtureOutcome } from './binary-support.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Context, DependencyChannel, RpcError } from '../src/adapters/process/context.ts';
+import { Context, DependencyChannel, RpcError } from '../src/adapters/session/context.ts';
 import type { Context as PublicContext, ResourceHandle, Value } from '../src/index.ts';
 
 function setup() {

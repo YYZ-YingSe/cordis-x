@@ -11,6 +11,9 @@ impl sdk::backend::Backend for Empty {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn observe(&self, _: sdk::backend::Observation) -> sdk::LocalFuture<sdk::Value> {
+        Box::pin(async { Err(sdk::refused("unbound", "no grants")) })
+    }
     fn submit(&self, _: sdk::backend::Operation) -> sdk::LocalFuture<sdk::backend::Reply> {
         Box::pin(async { Err(sdk::refused("unbound", "no grants")) })
     }

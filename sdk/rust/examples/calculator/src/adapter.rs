@@ -28,6 +28,14 @@ impl cordis_sdk_core::backend::Backend for NoImports {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn observe(
+        &self,
+        _: cordis_sdk_core::backend::Observation,
+    ) -> LocalFuture<cordis_sdk_core::Value> {
+        // This synchronous world has no host authority, including observation
+        // authority. Do not route waits through an operation submission.
+        Box::pin(async { Err(refused("unsupported_context", "this WIT world grants no host Context")) })
+    }
     fn submit(
         &self,
         _: cordis_sdk_core::backend::Operation,

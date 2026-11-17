@@ -77,8 +77,8 @@ async fn entered(handle: &ServiceHandle<RemoteService>) {
 async fn ordinary_calls_have_no_default_deadline_on_either_endpoint() {
     for endpoint in [Endpoint::Ipc, Endpoint::Http] {
         let mut spec = spec();
-        spec.io_timeout = Duration::from_millis(100);
-        assert_eq!(spec.execution_timeout, None);
+        spec.session.io_timeout = Duration::from_millis(100);
+        assert_eq!(spec.session.execution_timeout, None);
         let (runtime, _, handle) = setup(spec).await;
         let waiting = tokio::spawn({
             let handle = handle.clone();
@@ -101,7 +101,7 @@ async fn ordinary_calls_have_no_default_deadline_on_either_endpoint() {
 async fn explicit_execution_deadlines_preserve_unknown_outcomes() {
     for endpoint in [Endpoint::Ipc, Endpoint::Http] {
         let mut spec = spec();
-        spec.execution_timeout = Some(Duration::from_millis(100));
+        spec.session.execution_timeout = Some(Duration::from_millis(100));
         let (runtime, _, handle) = setup(spec).await;
         let result = tokio::time::timeout(Duration::from_secs(5), call(&handle, endpoint, "hold"))
             .await
@@ -119,7 +119,7 @@ async fn explicit_execution_deadlines_preserve_unknown_outcomes() {
 async fn unbounded_calls_still_have_a_stop_deadline_and_failed_cleanup() {
     for endpoint in [Endpoint::Ipc, Endpoint::Http] {
         let mut spec = spec();
-        spec.stop_timeout = Duration::from_millis(100);
+        spec.session.stop_timeout = Duration::from_millis(100);
         let (runtime, provider, handle) = setup(spec).await;
         let waiting = tokio::spawn({
             let handle = handle.clone();
@@ -151,7 +151,7 @@ async fn unbounded_calls_still_have_a_stop_deadline_and_failed_cleanup() {
 async fn invalid_frame_capacities_are_rejected_before_process_launch() {
     for capacity in [0, i32::MAX as usize + 1] {
         let mut spec = ProcessSpec::new("nonexistent-capacity-test-executable");
-        spec.frame_capacity = capacity;
+        spec.session.frame_capacity = capacity;
         let service = Service::new("test.capacity", "1").with_descriptor(
             cordis_remote::Descriptor::new(cordis_remote::Interface::value_dispatch(false))
                 .unwrap(),
@@ -170,10 +170,10 @@ async fn invalid_deadlines_are_rejected_before_process_launch() {
         for setting in 0..4 {
             let mut spec = ProcessSpec::new("nonexistent-deadline-test-executable");
             match setting {
-                0 => spec.initialization_timeout = timeout,
-                1 => spec.execution_timeout = Some(timeout),
-                2 => spec.stop_timeout = timeout,
-                _ => spec.io_timeout = timeout,
+                0 => spec.session.initialization_timeout = timeout,
+                1 => spec.session.execution_timeout = Some(timeout),
+                2 => spec.session.stop_timeout = timeout,
+                _ => spec.session.io_timeout = timeout,
             }
             let service = Service::new("test.deadlines", "1").with_descriptor(
                 cordis_remote::Descriptor::new(cordis_remote::Interface::value_dispatch(false))
@@ -195,7 +195,7 @@ async fn invalid_deadlines_are_rejected_before_process_launch() {
 async fn dropping_the_waiter_does_not_start_the_stop_deadline() {
     for endpoint in [Endpoint::Ipc, Endpoint::Http] {
         let mut spec = spec();
-        spec.stop_timeout = Duration::from_millis(100);
+        spec.session.stop_timeout = Duration::from_millis(100);
         let (runtime, _, handle) = setup(spec).await;
         let waiting = tokio::spawn({
             let handle = handle.clone();

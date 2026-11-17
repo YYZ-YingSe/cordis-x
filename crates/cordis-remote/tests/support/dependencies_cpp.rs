@@ -20,7 +20,7 @@ fn price_spec(endpoint: Endpoint) -> ProcessSpec {
     let mut spec =
         ProcessSpec::new(binary().with_file_name("cordis_pricing")).requires(log_dependency());
 
-    spec.endpoint = endpoint;
+    spec.session.endpoint = endpoint;
     if matches!(endpoint, Endpoint::Ipc) {
         spec.args = vec!["--stdio-only".into()];
     }
@@ -84,7 +84,7 @@ async fn adder_checks_fields_and_declared_overflow_across_endpoints() {
         let rt = Runtime::new();
         let mut spec = ProcessSpec::new(binary().with_file_name("cordis_adder"));
 
-        spec.endpoint = endpoint;
+        spec.session.endpoint = endpoint;
         let provider = rt.install(spec.plugin("adder", &adder)).unwrap();
         bounded(provider.ready()).await.unwrap();
         let (_, saved) = consumer(&rt, adder.clone()).await;
@@ -236,7 +236,7 @@ async fn typescript_to_cpp_to_native_dependencies_restart_and_cleanup_in_order()
             .install(price_spec(endpoint).plugin("pricing", &pricing()))
             .unwrap();
         let mut spec = ProcessSpec::new("node").requires(Dependency::new(&pricing()).unwrap());
-        spec.endpoint = endpoint;
+        spec.session.endpoint = endpoint;
         spec.args = vec![
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../sdk/typescript/examples/orders.ts")
@@ -367,7 +367,7 @@ async fn pricing_dependency_shape_drift_is_rejected_before_activation() {
     methods.get_mut("write").unwrap().result =
         cordis_remote::MessageContract::standard("google.protobuf.StringValue");
     let mut spec = price_spec(Endpoint::Ipc);
-    spec.bindings.dependencies = vec![Dependency::json(
+    spec.session.bindings.dependencies = vec![Dependency::json(
         &logger(),
         cordis_remote::Descriptor::new(interface).unwrap(),
         write_log,

@@ -491,7 +491,7 @@ pub(crate) fn compare(
             );
             if let Some(executable) = executable {
                 let mut spec = cordis_remote::ProcessSpec::new(executable);
-                spec.endpoint = endpoint;
+                spec.session.endpoint = endpoint;
                 if matches!(endpoint, cordis_remote::Endpoint::Ipc) {
                     spec.args.push("--stdio-only".into());
                 }
@@ -507,7 +507,7 @@ pub(crate) fn compare(
                     .to_string_lossy()
                     .into_owned(),
             );
-            spec.endpoint = endpoint;
+            spec.session.endpoint = endpoint;
             assert_eq!(
                 scenario(service.clone(), spec.plugin("typescript", &service)).await,
                 expected

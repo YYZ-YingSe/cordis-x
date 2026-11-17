@@ -193,7 +193,7 @@ fn fault_spec(timeout: Duration) -> ProcessSpec {
         .join("tests/fixtures/dependency_peer.py")
         .display()
         .to_string()]);
-    spec.execution_timeout = Some(timeout);
+    spec.session.execution_timeout = Some(timeout);
     spec
 }
 

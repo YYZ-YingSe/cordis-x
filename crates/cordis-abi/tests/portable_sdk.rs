@@ -270,7 +270,7 @@ async fn cpp_service_runs_through_ipc_http() {
                 .factory(cordis_host::FactoryBinding::new("worker", |_| {
                     Ok(Plugin::new("child", |_| async { Ok(()) }))
                 }));
-            spec.endpoint = endpoint;
+            spec.session.endpoint = endpoint;
             if matches!(endpoint, Endpoint::Ipc) {
                 spec.args.push("--stdio-only".into());
             }

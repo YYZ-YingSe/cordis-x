@@ -75,7 +75,7 @@ async fn main() -> Result<()> {
             .to_string(),
         "--listen".into(),
     ];
-    subscriber.endpoint = if std::env::args().nth(1).as_deref() == Some("http") {
+    subscriber.session.endpoint = if std::env::args().nth(1).as_deref() == Some("http") {
         Endpoint::Http
     } else {
         subscriber.args.push("--stdio-only".into());

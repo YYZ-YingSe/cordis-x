@@ -80,22 +80,22 @@ impl ProcessArtifact {
     }
     fn bind(&self, mut spec: ProcessSpec) -> Result<ProcessSpec> {
         // Validate host-selected startup settings without executing foreign code.
-        if spec.initialization_timeout.is_zero()
+        if spec.session.initialization_timeout.is_zero()
             || std::time::Instant::now()
-                .checked_add(spec.initialization_timeout)
+                .checked_add(spec.session.initialization_timeout)
                 .is_none()
-            || spec.execution_timeout.is_some_and(|timeout| {
+            || spec.session.execution_timeout.is_some_and(|timeout| {
                 timeout.is_zero() || std::time::Instant::now().checked_add(timeout).is_none()
             })
-            || spec.stop_timeout.is_zero()
+            || spec.session.stop_timeout.is_zero()
             || std::time::Instant::now()
-                .checked_add(spec.stop_timeout)
+                .checked_add(spec.session.stop_timeout)
                 .is_none()
             || spec.args.iter().any(|arg| arg.contains('\0'))
         {
             return Err(invalid("invalid process arguments or timeouts"));
         }
-        crate::dependency::Router::new(&spec)?;
+        crate::dependency::Router::new(&spec.session)?;
         spec.executable = self.executable.clone();
         spec.args.splice(0..0, self.prefix_args.iter().cloned());
         Ok(spec)
@@ -108,7 +108,7 @@ impl ProcessArtifact {
         service: &Service<RemoteService>,
         spec: ProcessSpec,
     ) -> Result<Plugin> {
-        crate::dependency::Router::new(&spec)?.validate_primary(service.contract())?;
+        crate::dependency::Router::new(&spec.session)?.validate_primary(service.contract())?;
         Ok(self
             .bind(spec)?
             .pinned_plugin(name, service, Some(self.code.clone())))
@@ -126,7 +126,7 @@ impl ProcessArtifact {
             + Sync
             + 'static,
     {
-        crate::dependency::Router::new(&spec)?.validate_primary(broker.contract())?;
+        crate::dependency::Router::new(&spec.session)?.validate_primary(broker.contract())?;
         Ok(self
             .bind(spec)?
             .pinned_broker_plugin(name, broker, Some(self.code.clone()), registered))

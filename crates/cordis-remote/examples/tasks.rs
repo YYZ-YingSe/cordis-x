@@ -68,7 +68,7 @@ async fn main() -> Result<()> {
         }
         _ => return Err(Error::Message("expected cpp or ts".into())),
     };
-    spec.endpoint = match std::env::args().nth(2).as_deref() {
+    spec.session.endpoint = match std::env::args().nth(2).as_deref() {
         None | Some("ipc") => {
             spec.args.push("--stdio-only".into());
             Endpoint::Ipc
