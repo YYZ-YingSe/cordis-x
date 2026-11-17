@@ -473,21 +473,13 @@ async fn unknown_scope_runs_and_failed_cleanup_retain_child_responsibility() {
             .unwrap();
         let _ = invoke_json(&handle, Endpoint::Ipc, "run", "run").await;
         if mode == "malformed" {
-            let status = invoke_json(&handle, Endpoint::Ipc, "status", "run")
-                .await
-                .unwrap();
-            assert_eq!(status["value"]["runs"][0]["state"], "unknown");
-            assert_eq!(
-                invoke_json(&handle, Endpoint::Ipc, "run", "run")
+            // The scope retains the actual provider definition. A malformed
+            // backend callback faults that definition, withdrawing its service;
+            // anonymous ownership does not hide the implementation failure.
+            assert!(
+                invoke_json(&handle, Endpoint::Ipc, "status", "run")
                     .await
-                    .unwrap()["kind"],
-                "failure"
-            );
-            assert_eq!(
-                invoke_json(&handle, Endpoint::Ipc, "close", "run")
-                    .await
-                    .unwrap()["kind"],
-                "failure"
+                    .is_err()
             );
         }
         assert!(bounded(owner.dispose()).await.is_err(), "{mode}");

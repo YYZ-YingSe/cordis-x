@@ -121,6 +121,8 @@ The host runtime is Rust. Plugins can run through the following SDK paths:
 | WebAssembly | Rust, C++ | A Component Model instance hosted by Wasmtime |
 | Process | Rust, C++, TypeScript on Node.js | A child process using framed stdio or HTTP |
 
+Middleware callbacks use the invoking operation’s owner and the handler’s implementation identity. Anonymous scopes preserve their creating definition, including dynamically retained implementations; their child resources drain before that retention is released. Registration lifetime and event-subscriber ownership remain independent.
+
 The portable SDKs expose services, resources, dependency calls, events, middleware, child plugins, scopes, tasks, and cleanup effects. Backend capabilities remain explicit: the basic Wasm world exports services and resources; the managed world also imports host context operations.
 
 Business DTOs have no implicit total string/bytes or collection-node quota. Declared field constraints, depth and cycle checks still apply. Native, C ABI and component payloads do not inherit a Process limit. Process/HTTP use the host's `ProcessSpec.frame_capacity` (1 MiB deployment default), communicated to Rust/C++/TypeScript peers during initialization. Physical readers check capacity before allocation; bounded operation, connection and output slots retain ownership through settlement. Allocation, protobuf representation, control metadata and Wasm Store limits still apply. Applications pass complete typed values, not transport chunks.

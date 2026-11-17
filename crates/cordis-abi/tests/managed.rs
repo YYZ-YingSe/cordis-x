@@ -330,7 +330,9 @@ async fn scopes_have_child_ownership_fresh_context_and_nested_cleanup() {
     );
     let record = &rig.logger.records("scoped")[0];
     assert_ne!(Some(record.owner), rig.client.snapshot().activation);
-    assert_eq!(record.caller, Some(record.owner));
+    // The scope owns effects; the installed provider remains the executable
+    // definition and therefore the caller of dependency methods.
+    assert_eq!(record.caller, rig.provider.snapshot().activation);
     assert!(
         matches!(invoke_json(&rig.handle,"expired",Value::Null).await,Err(AbiError::Refused{code,..})if code=="closed")
     );
@@ -669,7 +671,8 @@ async fn broker_managed_effects_and_tasks_keep_old_code_and_old_definition_depen
         })
         .await
         .unwrap();
-    // Native Context still rejects child installation through dynamic Broker routing.
+    // Anonymous scopes retain the selected implementation under dynamic routing;
+    // arbitrary child plugin installation remains a separate guarded operation.
     assert!(
         handle
             .route(|s, ctx| Box::pin(async move {
@@ -678,7 +681,7 @@ async fn broker_managed_effects_and_tasks_keep_old_code_and_old_definition_depen
                     .map_err(Into::into)
             }))
             .await
-            .is_err()
+            .is_ok()
     );
     let v2 = rt.install(register(&new, "v2")).unwrap();
     bounded(v2.ready()).await.unwrap();

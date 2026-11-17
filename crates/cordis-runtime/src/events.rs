@@ -482,9 +482,19 @@ fn run_chain<T: Send + 'static, R: Send + 'static>(
             return protected(async { (chain.terminal)(value, chain.context.clone()).await }).await;
         }
         let handler = &chain.handlers[index];
-        let (mut context, authority, pins) = handler.context.operation_context()?;
+        // Middleware is part of the invoking operation. Its implementation and
+        // dependencies belong to the registered handler, but effects and child
+        // resources must retain the invoking owner. Using the registration
+        // context here would detach execution from caller scope constraints.
+        let authority = crate::runtime::Authority::new(true);
+        let definition = handler.context.definition.clone();
+        let (mut context, mut pins) = chain
+            .context
+            .for_service(definition.clone(), authority.clone())?;
+        if definition.activation != context.owner() {
+            context.retain_provider(&definition, handler.context.definition_lease()?, &mut pins)?;
+        }
         context = context.with_barrier(handler.gate.clone());
-        context.caller = Some(chain.context.activation());
         let frame = Arc::new(Mutex::new(Continuation {
             open: true,
             used: false,

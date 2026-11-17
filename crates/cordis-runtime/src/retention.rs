@@ -116,7 +116,11 @@ impl Context {
         {
             pin.enter()
         } else {
-            self.definition.gate.enter(false, self.continuing())
+            // A scope callback can execute a definition that is still in its
+            // initializer, with a distinct child owner. Possessing that Context
+            // is the entry authority; acquiring its implementation lease must
+            // not reject initialization merely because the owner is a child.
+            self.definition.gate.enter(true, self.continuing())
         }
     }
 }
