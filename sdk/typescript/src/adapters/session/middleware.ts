@@ -1,4 +1,4 @@
-import { Identities, makeRoom, Completion, registration } from './retention.ts';
+import { Identities, sweepRetired, Completion, registration } from './retention.ts';
 import { OperationInbox, RESERVED_CAPACITY } from '../../protocols/session/operations.ts';
 import type { Message } from '../../core/message.ts';
 import { payload, one, type Payload } from '../../protocols/session/messages.ts';
@@ -58,6 +58,7 @@ export class MiddlewareRegistry {
   private handlers = new Map<string, Entry>();
   private runs = new Map<string, Terminal>();
   private seen = new OperationInbox(2 * RESERVED_CAPACITY);
+  configure(capacity: number) { this.seen.grow(capacity); }
   private nextHandler = new Identities();
   private nextRun = new Identities();
   private declarations: Record<string, { name: string; revision: string }>;
@@ -75,7 +76,7 @@ export class MiddlewareRegistry {
     callback: MiddlewareCallback,
   ): Promise<MiddlewareRegistration> {
     this.check(middleware);
-    makeRoom(this.handlers, 4096, (e) => !e.callback && !e.running);
+    sweepRetired(this.handlers, (e) => !e.callback && !e.running);
     const handler = this.nextHandler.next('m');
     this.handlers.set(handler, { callback, running: 0 });
     const reply = await registration(channel.request('middleware_register', { context, middleware, handler }), () => this.handlers.delete(handler));
@@ -98,7 +99,6 @@ export class MiddlewareRegistry {
     callback: TerminalCallback,
   ): Promise<Message> {
     this.check(middleware);
-    makeRoom(this.runs, 4096, () => false);
     const run = this.nextRun.next('q');
     this.runs.set(run, { callback, used: false });
     try {

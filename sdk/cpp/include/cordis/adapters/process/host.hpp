@@ -1,4 +1,5 @@
 #pragma once
+#include <cordis/core/retention.hpp>
 #include "context.hpp"
 #include "references.hpp"
 #include <algorithm>
@@ -177,6 +178,7 @@ class Host {
   OperationInbox seen{1};
   std::chrono::milliseconds io_timeout{5000};
   std::map<std::string, std::shared_ptr<ResourceRecord>> resources;
+  cordis::detail::RetiredSweep sweep;
   std::uint64_t next_resource = 0;
   native::Runtime runtime;
   http::Server http_server{
@@ -266,12 +268,10 @@ class Host {
       entry->kind = kind;
       {
         std::lock_guard lock(state_mutex);
-        if (resources.size() >= 4096)
-          std::erase_if(resources, [](const auto &item) {
+        sweep.collect(resources, [](const auto &item) {
             return item.second->released();
           });
-        if (resources.size() >= 4096)
-          throw Refusal("overloaded", "live resource capacity reached");
+
         if (next_resource == UINT64_MAX)
           throw Refusal("exhausted", "resource identity space exhausted");
         id = "r" + std::to_string(++next_resource);
@@ -421,6 +421,9 @@ class Host {
       const OperationLayout layout(max_inflight);
       seen.grow(layout.incoming);
       ordinary_lane.capacity(max_inflight);
+      for (auto *lane : {&cleanup_lane, &step_lane, &scope_lane, &task_lane,
+                         &event_lane, &middleware_lane, &terminal_lane})
+        lane->capacity(layout.forward[1]);
       const auto duration = payload.at("io_timeout_ms").get<std::uint64_t>();
       if (duration == 0 || duration > INT32_MAX)
         throw Refusal("invalid_argument", "invalid io_timeout_ms");
@@ -451,7 +454,7 @@ class Host {
       greeted = true;
       effects_enabled =
           payload.value("capabilities", Json::object()).value("effects", false);
-      dependencies->configure(session, activation,
+      dependencies->configure(layout, session, activation,
                               [this](std::vector<uint8_t> bytes) {
                                 stdio.write(std::move(bytes));
                               });
@@ -503,7 +506,9 @@ class Host {
                         "middleware bindings must match installation");
       }
       middlewares = std::make_shared<MiddlewareRegistry>(declared_middleware);
+      middlewares->capacity(layout.forward[7] + layout.forward[8]);
       events = std::make_shared<EventRegistry>(declared_events);
+      events->capacity(layout.forward[6]);
       co_return Json{{"contract", service.contract()},
                      {"interface", descriptor},
                      {"dependency_interfaces", service.dependency_interfaces()},

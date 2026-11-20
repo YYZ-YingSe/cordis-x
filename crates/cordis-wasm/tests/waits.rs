@@ -147,7 +147,7 @@ fn provider(backend: Backend, bindings: HostBindings) -> (rt::Plugin, Dependency
                 cordis_wasm::Limits::default(),
                 cordis_wasm::Capabilities {
                     bindings,
-                    max_requests: 4,
+                    max_requests: Some(4),
                     ..Default::default()
                 },
             )

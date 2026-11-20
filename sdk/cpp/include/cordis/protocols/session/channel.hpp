@@ -22,7 +22,7 @@ class DependencyChannel {
   std::function<void(std::vector<uint8_t>)> write;
   std::string session;
   Identity activation;
-  OperationOutbox operations{reverse_lanes};
+  OperationOutbox operations{0};
   std::uint64_t next_resource = 0;
   bool closed = false;
   bool cleanup_calls = false;
@@ -39,9 +39,10 @@ public:
       throw Refusal("resources_exhausted", "resource identity space exhausted");
     return "r" + std::to_string(++next_resource);
   }
-  void configure(const std::string &token, const Identity &identity,
+  void configure(const OperationLayout &layout, const std::string &token, const Identity &identity,
                  std::function<void(std::vector<uint8_t>)> output) {
     std::lock_guard lock(mutex);
+    operations = OperationOutbox(layout.reverse);
     session = token;
     activation = identity;
     write = std::move(output);

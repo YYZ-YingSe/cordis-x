@@ -221,7 +221,7 @@ async fn old_dependencies_remain_usable_until_tasks_exit_and_effects_reverse() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn full_task_capacity_still_allows_cancellation_dependencies_and_cleanup() {
+async fn one_session_runs_one_hundred_tasks_and_drains_their_dependencies() {
     for &backend in Backend::ALL {
         let rt = Runtime::new();
         let log = Log::new();
@@ -231,16 +231,33 @@ async fn full_task_capacity_still_allows_cancellation_dependencies_and_cleanup()
             .unwrap();
         bounded(provider.ready()).await.unwrap();
         let (owner, handle) = consumer(&rt).await;
-        for i in 0..16 {
-            invoke_json(&handle, Endpoint::Ipc, "open", &i.to_string())
-                .await
-                .unwrap();
+        let mut calls = tokio::task::JoinSet::new();
+        for i in 0..100 {
+            let handle = handle.clone();
+            calls.spawn(async move {
+                invoke_json(&handle, Endpoint::Ipc, "open", &i.to_string()).await
+            });
         }
-        assert!(
-            invoke_json(&handle, Endpoint::Ipc, "open", "overflow")
-                .await
-                .is_err()
-        );
+        while let Some(result) = calls.join_next().await {
+            result.unwrap().unwrap();
+        }
+        bounded(async {
+            loop {
+                let names = log.names();
+                if names
+                    .iter()
+                    .filter(|name| name.ends_with("/started"))
+                    .count()
+                    == 100
+                {
+                    assert!(!names.iter().any(|name| name.ends_with("/stopped")));
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
+
         assert_eq!(
             invoke_json(&handle, Endpoint::Ipc, "status", "0")
                 .await
@@ -249,13 +266,16 @@ async fn full_task_capacity_still_allows_cancellation_dependencies_and_cleanup()
         );
         bounded(owner.dispose()).await.unwrap();
         let names = log.names();
-        assert_eq!(names.iter().filter(|s| s.ends_with("/stopped")).count(), 16);
+        assert_eq!(
+            names.iter().filter(|s| s.ends_with("/stopped")).count(),
+            100
+        );
         assert_eq!(
             names
                 .iter()
                 .filter(|s| s.ends_with("/connection.close"))
                 .count(),
-            17
+            100
         );
         bounded(rt.shutdown()).await.unwrap();
     }

@@ -122,7 +122,7 @@ fn fixture() -> (Host<Probe>, mpsc::Receiver<cordis_wire::Bytes>) {
     (
         Host {
             descriptor: cordis_sdk_core::Descriptor::new(Probe::interface()).unwrap(),
-            channel: Channel::new(send),
+            channel: Channel::new(send, &cordis_wire::operations::Layout::new(16).unwrap()),
             bindings: Rc::new(Default::default()),
             plugin: Rc::new(Probe::default()),
             dependencies: Rc::new(BTreeMap::from([("test.upstream".into(), "1".into())])),

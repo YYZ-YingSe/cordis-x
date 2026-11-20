@@ -15,8 +15,8 @@ use tokio::sync::{Notify, mpsc, oneshot};
 #[derive(Clone)]
 pub(crate) struct Client(Arc<Mailboxes>);
 struct Mailboxes {
-    ordinary: mpsc::Sender<Message>,
-    cleanup: mpsc::Sender<Message>,
+    ordinary: mpsc::UnboundedSender<Message>,
+    cleanup: mpsc::UnboundedSender<Message>,
 }
 pub struct Service {
     pub(crate) client: Client,
@@ -147,9 +147,6 @@ impl Instance {
         Ok(id)
     }
     fn reserve_resource(&self) -> Result<u64> {
-        if self.resources.borrow().len() >= 4096 {
-            return Err(refused("overloaded", "resource capacity exhausted"));
-        }
         let id = self
             .next_resource
             .get()
@@ -196,9 +193,6 @@ impl Instance {
             .ok_or_else(|| refused("closed", "callback absent"))
     }
     fn store(&self, callback: StoredCallback) -> Result<u64> {
-        if self.callbacks.borrow().len() >= 4096 {
-            return Err(refused("overloaded", "callback capacity exhausted"));
-        }
         let id = self
             .next
             .get()
@@ -245,8 +239,8 @@ impl Frame {
 }
 impl Client {
     pub async fn start<P: Plugin>(config: Value, capabilities: Arc<HostBindings>) -> Result<Self> {
-        let (sender, mut receiver) = mpsc::channel::<Message>(64);
-        let (cleanup_sender, mut cleanup_receiver) = mpsc::channel::<Message>(64);
+        let (sender, mut receiver) = mpsc::unbounded_channel::<Message>();
+        let (cleanup_sender, mut cleanup_receiver) = mpsc::unbounded_channel::<Message>();
         let mailboxes = Arc::new(Mailboxes {
             ordinary: sender,
             cleanup: cleanup_sender,
@@ -445,18 +439,13 @@ impl Client {
                 Action::Release(_) | Action::Forget(_) | Action::Close | Action::Lifecycle(false)
             );
         let message = Message { ctx, action, reply };
-        if cleanup {
-            self.0
-                .cleanup
-                .send(message)
-                .await
-                .map_err(|e| refused("closed", e))?;
+        // Cleanup is received first, including while ordinary work is queued.
+        let mailbox = if cleanup {
+            &self.0.cleanup
         } else {
-            self.0
-                .ordinary
-                .try_send(message)
-                .map_err(|e| refused("unavailable", e))?;
-        }
+            &self.0.ordinary
+        };
+        mailbox.send(message).map_err(|e| refused("closed", e))?;
         result.await.map_err(unknown)?
     }
     pub async fn lifecycle(&self, ctx: &rt::Context, activate: bool) -> Result<()> {
@@ -543,5 +532,35 @@ impl Client {
     }
     pub async fn close(&self) -> Result<()> {
         self.send(None, Action::Close).await.map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn burst_is_admitted_and_cleanup_has_its_own_mailbox() {
+        let (ordinary, mut requests) = mpsc::unbounded_channel();
+        let (cleanup, mut releases) = mpsc::unbounded_channel();
+        let client = Client(Arc::new(Mailboxes { ordinary, cleanup }));
+        let mut calls = Vec::new();
+        for id in 0..256 {
+            let mut call = Box::pin(client.send(None, Action::Callback(id, Value::Null)));
+            assert!(futures_util::poll!(&mut call).is_pending());
+            calls.push(call);
+        }
+        assert_eq!(requests.len(), calls.len());
+
+        let (released, ()) = tokio::join!(client.forget(1), async {
+            let message = releases.recv().await.unwrap();
+            assert!(message.reply.send(Ok(Response::Value(Value::Null))).is_ok());
+        });
+        released.unwrap();
+        for call in calls {
+            let message = requests.recv().await.unwrap();
+            assert!(message.reply.send(Ok(Response::Value(Value::Null))).is_ok());
+            assert!(call.await.is_ok());
+        }
     }
 }

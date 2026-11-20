@@ -12,7 +12,7 @@ struct Peer {
   std::shared_ptr<cordis::session::DependencyChannel> channel =
       std::make_shared<cordis::session::DependencyChannel>();
   Peer() {
-    channel->configure(
+    channel->configure(cordis::session::OperationLayout(16),
         std::string(32, 'a'), {"1", "2", "3"}, [this](const auto &bytes) {
           auto frame = cordis::session::decode(bytes);
           std::lock_guard lock(mutex);

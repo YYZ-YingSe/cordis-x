@@ -1,7 +1,10 @@
 //! Bounded request identities. A slot can be used again only after its outgoing
 //! request settles. The generation is never reused, including local failures.
 //! Receivers retain one generation per slot, not every operation ever seen.
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 /// Reverse protocol queries have no business effect. The host uses this
 /// classification, never a caller-supplied flag, to decide whether withdrawal
@@ -25,27 +28,34 @@ pub fn is_observation(command: &str) -> bool {
     )
 }
 pub const RESERVED_CAPACITY: usize = 16;
-pub const REVERSE_LANES: [usize; 14] = [RESERVED_CAPACITY; 14];
+pub const REVERSE_LANE_COUNT: usize = 14;
 
 #[derive(Clone, Copy)]
 pub struct Layout {
     pub forward: [usize; 9],
+    pub reverse: [usize; REVERSE_LANE_COUNT],
     pub incoming: usize,
     pub output: usize,
     pub connections: usize,
 }
 impl Layout {
+    pub fn max_ordinary(max_slots: usize) -> usize {
+        max_slots.min(u32::MAX as usize) / (9 + REVERSE_LANE_COUNT)
+    }
     pub fn new(ordinary: usize) -> Option<Self> {
-        let incoming = ordinary.checked_add(8 * RESERVED_CAPACITY)?;
-        let output = incoming.checked_add(REVERSE_LANES.iter().sum())?;
-        let connections = ordinary.checked_add(RESERVED_CAPACITY)?.checked_mul(2)?;
+        let auxiliary = ordinary.max(RESERVED_CAPACITY);
+        let incoming = ordinary.checked_add(8usize.checked_mul(auxiliary)?)?;
+        let reverse = [auxiliary; REVERSE_LANE_COUNT];
+        let output = incoming.checked_add(auxiliary.checked_mul(reverse.len())?)?;
+        let connections = ordinary.checked_add(auxiliary)?.checked_mul(2)?;
         if ordinary == 0 || output > u32::MAX as usize || connections > u32::MAX as usize {
             return None;
         }
-        let mut forward = [RESERVED_CAPACITY; 9];
+        let mut forward = [auxiliary; 9];
         forward[0] = ordinary;
         Some(Self {
             forward,
+            reverse,
             incoming,
             output,
             connections,
@@ -53,7 +63,7 @@ impl Layout {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Id {
     pub slot: usize,
     pub generation: u64,
@@ -82,9 +92,21 @@ struct Slot {
 
 /// Owned by the transport, not by a cancellable waiting future.
 pub struct Outgoing {
-    slots: Mutex<Vec<Slot>>,
-    lanes: Vec<std::ops::Range<usize>>,
+    lanes: Vec<Lane>,
 }
+
+struct Lane {
+    start: usize,
+    capacity: usize,
+    state: Mutex<LaneSlots>,
+}
+
+#[derive(Default)]
+struct LaneSlots {
+    entries: Vec<Slot>,
+    free: Vec<usize>,
+}
+
 /// A reservation for executor-owned work. Do not attach it to a cancellable
 /// public waiter: the work must keep it until its completion is observed.
 pub struct Lease {
@@ -101,40 +123,44 @@ impl Outgoing {
         Self::with_lanes(&[capacity])
     }
     pub fn with_lanes(capacities: &[usize]) -> Self {
-        let mut end = 0usize;
+        let mut start: usize = 0;
         let lanes = capacities
             .iter()
-            .map(|capacity| {
-                let start = end;
-                end = end
-                    .checked_add(*capacity)
+            .map(|&capacity| {
+                let lane = Lane {
+                    start,
+                    capacity,
+                    state: Mutex::default(),
+                };
+                start = start
+                    .checked_add(capacity)
                     .expect("operation capacity overflow");
-                start..end
+                lane
             })
             .collect();
-        Self {
-            slots: Mutex::new(vec![Slot::default(); end]),
-            lanes,
-        }
+        Self { lanes }
     }
     pub fn allocate(&self) -> Option<Id> {
-        self.allocate_range(0..usize::MAX)
+        (0..self.lanes.len()).find_map(|lane| self.allocate_lane(lane))
     }
     pub fn allocate_lane(&self, lane: usize) -> Option<Id> {
-        self.allocate_range(self.lanes.get(lane)?.clone())
-    }
-    fn allocate_range(&self, range: std::ops::Range<usize>) -> Option<Id> {
-        let mut slots = self.slots.lock().unwrap();
-        let (slot, entry) = slots
-            .iter_mut()
-            .enumerate()
-            .skip(range.start)
-            .take(range.end.saturating_sub(range.start))
-            .find(|(_, entry)| !entry.active && entry.generation != u64::MAX)?;
+        let lane = self.lanes.get(lane)?;
+        let mut state = lane.state.lock().unwrap();
+        let index = if let Some(index) = state.free.pop() {
+            index
+        } else {
+            let index = state.entries.len();
+            if index == lane.capacity {
+                return None;
+            }
+            state.entries.push(Slot::default());
+            index
+        };
+        let entry = &mut state.entries[index];
         entry.generation += 1;
         entry.active = true;
         Some(Id {
-            slot,
+            slot: lane.start + index,
             generation: entry.generation,
         })
     }
@@ -152,47 +178,65 @@ impl Outgoing {
     }
     /// A stale completion cannot release the slot of a later request.
     pub fn complete(&self, id: Id) -> bool {
-        let mut slots = self.slots.lock().unwrap();
-        let Some(entry) = slots.get_mut(id.slot) else {
+        let Some(lane) = self
+            .lanes
+            .iter()
+            .find(|lane| (lane.start..lane.start + lane.capacity).contains(&id.slot))
+        else {
+            return false;
+        };
+        let index = id.slot - lane.start;
+        let mut state = lane.state.lock().unwrap();
+        let Some(entry) = state.entries.get_mut(index) else {
             return false;
         };
         if !entry.active || entry.generation != id.generation {
             return false;
         }
         entry.active = false;
+        if entry.generation != u64::MAX {
+            state.free.push(index);
+        }
         true
     }
 }
 
 #[derive(Clone)]
 pub struct Incoming {
-    slots: Arc<Mutex<Vec<Slot>>>,
+    slots: Arc<Mutex<ReceivedSlots>>,
+}
+struct ReceivedSlots {
+    capacity: usize,
+    seen: HashMap<usize, Slot>,
 }
 pub struct Admission {
-    slots: Arc<Mutex<Vec<Slot>>>,
+    slots: Arc<Mutex<ReceivedSlots>>,
     id: Id,
 }
 impl Incoming {
     pub fn new(capacity: usize) -> Self {
         Self {
-            slots: Arc::new(Mutex::new(vec![Slot::default(); capacity])),
+            slots: Arc::new(Mutex::new(ReceivedSlots {
+                capacity,
+                seen: HashMap::new(),
+            })),
         }
     }
     pub fn grow(&self, capacity: usize) -> Result<(), String> {
         let mut slots = self.slots.lock().unwrap();
-        let additional = capacity
-            .checked_sub(slots.len())
-            .ok_or("operation table cannot shrink")?;
-        slots
-            .try_reserve_exact(additional)
-            .map_err(|error| error.to_string())?;
-        slots.resize(capacity, Slot::default());
+        if capacity < slots.capacity {
+            return Err("operation table cannot shrink".into());
+        }
+        slots.capacity = capacity;
         Ok(())
     }
     pub fn admit(&self, id: Id) -> Option<Admission> {
         let mut slots = self.slots.lock().unwrap();
-        let entry = slots.get_mut(id.slot)?;
-        if entry.active || id.generation == 0 || id.generation <= entry.generation {
+        if id.slot >= slots.capacity || id.generation == 0 {
+            return None;
+        }
+        let entry = slots.seen.entry(id.slot).or_default();
+        if entry.active || id.generation <= entry.generation {
             return None;
         }
         *entry = Slot {
@@ -208,7 +252,7 @@ impl Incoming {
 impl Drop for Admission {
     fn drop(&mut self) {
         let mut slots = self.slots.lock().unwrap();
-        let entry = &mut slots[self.id.slot];
+        let entry = slots.seen.get_mut(&self.id.slot).expect("admitted slot");
         debug_assert_eq!(entry.generation, self.id.generation);
         entry.active = false;
     }
@@ -304,7 +348,13 @@ mod tests {
             })
         );
         let sender = Outgoing::new(1);
-        sender.slots.lock().unwrap()[0].generation = u64::MAX;
+        let id = sender.allocate().unwrap();
+        let last = Id {
+            generation: u64::MAX,
+            ..id
+        };
+        sender.lanes[0].state.lock().unwrap().entries[0].generation = last.generation;
+        assert!(sender.complete(last));
         assert!(sender.allocate().is_none());
     }
 }

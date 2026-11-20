@@ -9,6 +9,8 @@ use tokio::sync::watch;
 
 use cordis_host::{Body, EventBinding};
 pub(crate) struct Events {
+    dispatch_sweep: cordis_wire::retention::Sweep,
+    listener_sweep: cordis_wire::retention::Sweep,
     bindings: BTreeMap<String, Event<Body, Body>>,
     listeners: Mutex<BTreeMap<String, Arc<Listener>>>,
     dispatches: Mutex<BTreeMap<String, Dispatch>>,
@@ -27,7 +29,7 @@ struct Dispatch {
     observed: bool,
 }
 impl Events {
-    pub fn new(bindings: &[EventBinding]) -> Result<Self> {
+    pub fn new(bindings: &[EventBinding], capacity: usize) -> Result<Self> {
         let mut entries = BTreeMap::new();
         for b in bindings {
             if b.alias.is_empty()
@@ -41,11 +43,11 @@ impl Events {
         }
         Ok(Self {
             bindings: entries,
+            listener_sweep: Default::default(),
             listeners: Mutex::default(),
+            dispatch_sweep: Default::default(),
             dispatches: Mutex::default(),
-            next_call: Arc::new(cordis_wire::operations::Outgoing::new(
-                cordis_wire::operations::RESERVED_CAPACITY,
-            )),
+            next_call: Arc::new(cordis_wire::operations::Outgoing::new(capacity)),
         })
     }
     pub fn declarations(&self) -> Value {
@@ -64,11 +66,9 @@ impl Events {
         if entries.contains_key(&id) {
             return Err(Error::InvalidInput("duplicate listener".into()));
         }
-        if entries.len() >= 4096 {
+        if self.listener_sweep.due(entries.len()) {
             entries.retain(|_, e| !e.handle.get().is_some_and(WeakEffectHandle::is_released));
-        }
-        if entries.len() >= 4096 {
-            return Err(Error::Overloaded);
+            self.listener_sweep.retained(entries.len());
         }
         let entry = Arc::new(Listener {
             grant: grant()?,
@@ -175,17 +175,9 @@ impl Events {
         if entries.contains_key(&id) {
             return Err(Error::InvalidInput("duplicate dispatch".into()));
         }
-        if entries.len() >= 4096 {
+        if self.dispatch_sweep.due(entries.len()) {
             entries.retain(|_, d| !d.observed);
-        }
-        if entries.len() >= 4096
-            || entries
-                .values()
-                .filter(|d| d.result.borrow().is_none())
-                .count()
-                >= 16
-        {
-            return Err(Error::Overloaded);
+            self.dispatch_sweep.retained(entries.len());
         }
         let grant = grant()?;
         let dispatch = if serial {

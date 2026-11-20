@@ -8,21 +8,13 @@ use std::{
 };
 use tokio::sync::watch;
 
-const MAX_SEQUENCES: usize = 256;
-const MAX_STEPS: usize = 4096;
+#[derive(Default)]
 pub(crate) struct Sequences {
+    sweep: cordis_wire::retention::Sweep,
     entries: Mutex<BTreeMap<String, Arc<Entry>>>,
-    steps: Arc<tokio::sync::Semaphore>,
-}
-impl Default for Sequences {
-    fn default() -> Self {
-        Self {
-            entries: Mutex::default(),
-            steps: Arc::new(tokio::sync::Semaphore::new(MAX_STEPS)),
-        }
-    }
 }
 struct Entry {
+    step_sweep: cordis_wire::retention::Sweep,
     id: String,
     grant: String,
     handle: OnceLock<WeakEffectSequence>,
@@ -57,11 +49,9 @@ impl Sequences {
         if entries.contains_key(&id) {
             return Err(Error::InvalidInput("duplicate sequence ID".into()));
         }
-        if entries.len() >= MAX_SEQUENCES {
+        if self.sweep.due(entries.len()) {
             entries.retain(|_, e| !e.handle.get().is_some_and(WeakEffectSequence::is_released));
-        }
-        if entries.len() >= MAX_SEQUENCES {
-            return Err(Error::Overloaded);
+            self.sweep.retained(entries.len());
         }
         let mut random = [0u8; 16];
         getrandom::fill(&mut random).map_err(|e| Error::Io(e.to_string()))?;
@@ -75,11 +65,11 @@ impl Sequences {
             forward_error: Mutex::new(None),
             cleanup_error: Mutex::new(None),
             released: Mutex::new(None),
+            step_sweep: Default::default(),
             steps: Mutex::new(Vec::new()),
             next_step: std::sync::atomic::AtomicU64::new(1),
         });
         let runner = entry.clone();
-        let total = self.steps.clone();
         let release_entry = entry.clone();
         let release_session = session.clone();
         let handle = ctx
@@ -88,8 +78,7 @@ impl Sequences {
                 move |ctx| {
                     let entry = runner.clone();
                     let session = session.clone();
-                    let total = total.clone();
-                    async move { Ok(entry.next(ctx, session, total).await) }
+                    async move { Ok(entry.next(ctx, session).await) }
                 },
                 Inverse::new("remote sequence producer", move |ctx| async move {
                     let result = request(
@@ -230,16 +219,7 @@ impl Sequences {
     }
 }
 impl Entry {
-    async fn next(
-        self: Arc<Self>,
-        ctx: Context,
-        session: WeakSession,
-        total: Arc<tokio::sync::Semaphore>,
-    ) -> EffectStep {
-        let permit = match total.try_acquire_owned() {
-            Ok(permit) => permit,
-            Err(_) => return self.fail(Error::Overloaded, None),
-        };
+    async fn next(self: Arc<Self>, ctx: Context, session: WeakSession) -> EffectStep {
         let number = match self
             .next_step
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
@@ -259,13 +239,14 @@ impl Entry {
         // prevents recovery until this ticket has landed, including unknown results.
         let ticket = {
             let mut steps = self.steps.lock().unwrap();
-            if steps.len() >= MAX_STEPS {
+            if self.step_sweep.due(steps.len()) {
                 steps.retain(|t| {
                     matches!(
                         t.state.lock().unwrap()["state"].as_str(),
                         Some("pending" | "owned" | "unknown" | "failed")
                     )
                 });
+                self.step_sweep.retained(steps.len());
             }
             let ticket = Arc::new(Ticket {
                 number,
@@ -314,7 +295,6 @@ impl Entry {
                         );
                         result.map(|_| ()).map_err(Into::into)
                     })
-                    .retain_capacity(permit)
                 });
                 if let Some(error) = error {
                     self.fail(error, inverse)
@@ -346,7 +326,7 @@ impl Entry {
                         Err(failure.into())
                     },
                 );
-                self.fail(unknown, Some(inverse.retain_capacity(permit)))
+                self.fail(unknown, Some(inverse))
             }
         }
     }

@@ -11,6 +11,7 @@ use std::{
 
 #[derive(Default)]
 pub(super) struct Resources {
+    next_sweep: Cell<usize>,
     entries: RefCell<BTreeMap<u64, Rc<Entry>>>,
     next: Cell<u64>,
 }
@@ -27,7 +28,7 @@ impl Resources {
         {
             return Err(refused("invalid_argument", "invalid resource owner"));
         }
-        if self.entries.borrow().len() >= 4096 {
+        if self.entries.borrow().len() >= self.next_sweep.get().max(4096) {
             self.entries.borrow_mut().retain(|_, e| {
                 !e.completion
                     .borrow()
@@ -35,9 +36,8 @@ impl Resources {
                     .and_then(|f| f.peek())
                     .is_some_and(Result::is_ok)
             });
-        }
-        if self.entries.borrow().len() >= 4096 {
-            return Err(refused("overloaded", "live resource capacity reached"));
+            self.next_sweep
+                .set(self.entries.borrow().len().saturating_mul(2));
         }
         let id = self
             .next

@@ -164,6 +164,9 @@ static void abi_contexts() {
   base.dispose = [](uint64_t, uint64_t, uint64_t, CordisAbiCompletion done) {
     abi::detail::complete(done, abi::detail::result());
   };
+  base.observe = [](uint64_t, uint64_t, uint64_t, uint32_t, uint64_t,
+                    const CordisAbiBuffer *, uint64_t, CordisAbiCompletion) { std::abort(); };
+  base.cancel_observation = [](uint64_t, uint64_t, uint64_t) { std::abort(); };
   base.release_result = [](CordisAbiResult *result) {
     ++released_results;
     abi::detail::release(result);

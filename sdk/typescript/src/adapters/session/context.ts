@@ -1,5 +1,5 @@
 import { utf8Length } from '../../core/encoding.ts';
-import { Identities, makeRoom, Completion, registration } from './retention.ts';
+import { Identities, sweepRetired, Completion, registration } from './retention.ts';
 import { ReferenceRegistry } from './references.ts';
 import type { Interface } from '../../core/contract.ts';
 import type { ReferenceObject } from '../../core/reference.ts';
@@ -313,7 +313,7 @@ export class EffectRegistry {
   ): Promise<Effect> {
     if (utf8Length(label) > 1024)
       throw new Refusal('invalid_argument', 'effect label too long');
-    makeRoom(this.entries, 4096, (e) => e.released);
+    sweepRetired(this.entries, (e) => e.released);
     const effect = this.next.next('e');
     // Store before sending: cleanup can arrive even if the acknowledgement is lost.
     this.entries.set(effect, { cleanup, released: false });

@@ -167,7 +167,7 @@ async fn factory_failure_releases_capacity_but_successful_ids_are_never_reused()
     for &backend in Backend::ALL {
         let rt = Runtime::new();
         let mut spec = spec(backend, Endpoint::Http, Arc::default());
-        spec.session.composition = CompositionLimits { children: 1 };
+        spec.session.composition = CompositionLimits { children: Some(1) };
         let provider = rt.install(spec.plugin("composer", &service())).unwrap();
         bounded(provider.ready()).await.unwrap();
         let (_, handle) = consumer(&rt).await;

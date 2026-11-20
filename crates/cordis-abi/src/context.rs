@@ -13,31 +13,17 @@ use tokio::sync::Semaphore;
 
 /// Host policy, checked against the extension manifest before instance creation.
 /// Limits count live work and unresolved recovery, not cumulative history.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Capabilities {
     pub bindings: cordis_host::HostBindings,
-    /// Ordinary foreign execution, bounded by the SDK's 128-slot executor.
-    pub max_inflight: usize,
-    pub max_effects: usize,
-    pub max_contexts: usize,
-    pub max_callbacks: usize,
+    /// Optional host-selected admission policy for ordinary foreign calls.
+    pub max_inflight: Option<usize>,
+    pub max_effects: Option<usize>,
+    pub max_contexts: Option<usize>,
+    pub max_callbacks: Option<usize>,
     pub managed: crate::ManagedLimits,
     pub reactive: crate::ReactiveLimits,
     pub composition: crate::CompositionLimits,
-}
-impl Default for Capabilities {
-    fn default() -> Self {
-        Self {
-            bindings: cordis_host::HostBindings::default(),
-            max_inflight: 16,
-            max_effects: 1024,
-            max_contexts: 256,
-            max_callbacks: 16,
-            managed: crate::ManagedLimits::default(),
-            reactive: crate::ReactiveLimits::default(),
-            composition: crate::CompositionLimits::default(),
-        }
-    }
 }
 impl Capabilities {
     pub(crate) fn validate(
@@ -48,10 +34,14 @@ impl Capabilities {
         self.bindings
             .validate()
             .map_err(|e| Error::Contract(e.to_string()))?;
-        if !(1..=128).contains(&self.max_inflight)
-            || self.max_contexts == 0
-            || self.max_callbacks == 0
-            || self.max_callbacks > Semaphore::MAX_PERMITS
+        if self
+            .max_inflight
+            .is_some_and(|n| !(1..=Semaphore::MAX_PERMITS).contains(&n))
+            || self.max_contexts == Some(0)
+            || self.max_callbacks == Some(0)
+            || self
+                .max_callbacks
+                .is_some_and(|n| n > Semaphore::MAX_PERMITS)
         {
             return Err(Error::InvalidInput("invalid Context capacity".into()));
         }
@@ -156,6 +146,7 @@ impl Drop for HostCall {
 }
 
 pub(crate) struct Router {
+    effect_sweep: cordis_wire::retention::Sweep,
     pub id: u64,
     pub runtime: tokio::runtime::Handle,
     pub(crate) instance: Weak<Instance>,
@@ -186,25 +177,33 @@ impl Router {
         }
         let capabilities = Arc::new(bound);
         let managed = crate::managed::Managed::new(
-            capabilities.max_callbacks.min(capabilities.max_contexts),
-            capabilities.managed.steps,
+            capabilities
+                .max_callbacks
+                .unwrap_or(Semaphore::MAX_PERMITS)
+                .min(capabilities.max_contexts.unwrap_or(Semaphore::MAX_PERMITS)),
+            capabilities.managed.steps.unwrap_or(Semaphore::MAX_PERMITS),
         );
         let reactive = crate::reactive::Reactive::new(&capabilities);
         let composition = crate::composition::Composition::new(&capabilities);
-        let resources = crate::resource_dependencies::Resources::new(capabilities.max_callbacks);
+        let resources = crate::resource_dependencies::Resources::new(
+            capabilities.max_callbacks.unwrap_or(Semaphore::MAX_PERMITS),
+        );
         let router = Arc::new(Self {
             id,
             runtime: tokio::runtime::Handle::current(),
             instance,
-            calls: Semaphore::new(capabilities.max_callbacks),
-            cleanup_calls: Semaphore::new(capabilities.max_callbacks),
-            disposals: Semaphore::new(capabilities.max_callbacks),
+            calls: Semaphore::new(capabilities.max_callbacks.unwrap_or(Semaphore::MAX_PERMITS)),
+            cleanup_calls: Semaphore::new(
+                capabilities.max_callbacks.unwrap_or(Semaphore::MAX_PERMITS),
+            ),
+            disposals: Semaphore::new(capabilities.max_callbacks.unwrap_or(Semaphore::MAX_PERMITS)),
             capabilities,
             contexts: Mutex::default(),
             managed,
             reactive,
             composition,
             resources,
+            effect_sweep: Default::default(),
             effects: Mutex::default(),
             observations: Mutex::default(),
         });
@@ -242,9 +241,9 @@ impl Router {
         let mut contexts = self.contexts.lock().unwrap();
         // Reserve independent admission for inverses even when ordinary calls
         // have filled their Context grant budget.
-        if contexts.values().filter(|entry| entry.lane == kind).count()
-            >= self.capabilities.max_contexts
-        {
+        if self.capabilities.max_contexts.is_some_and(|limit| {
+            contexts.values().filter(|entry| entry.lane == kind).count() >= limit
+        }) {
             return Err(Error::Overloaded);
         }
         let grant = next_id()?;
@@ -389,10 +388,20 @@ impl Router {
         if entries.values().any(|entry| entry.callback == callback) {
             return Err(Error::InvalidInput("duplicate effect callback".into()));
         }
-        if entries.len() >= self.capabilities.max_effects {
+        if self.effect_sweep.due(entries.len())
+            || self
+                .capabilities
+                .max_effects
+                .is_some_and(|limit| entries.len() >= limit)
+        {
             entries.retain(|_, e| !e.handle.get().is_some_and(WeakEffectHandle::is_released));
+            self.effect_sweep.retained(entries.len());
         }
-        if entries.len() >= self.capabilities.max_effects {
+        if self
+            .capabilities
+            .max_effects
+            .is_some_and(|limit| entries.len() >= limit)
+        {
             return Err(Error::Overloaded);
         }
         let id = next_id()?;

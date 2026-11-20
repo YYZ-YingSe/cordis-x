@@ -232,7 +232,7 @@ async fn undeclared_aliases_and_exhaustion_do_not_execute_factory() {
     let files = Files::new("cordis_abi_composition");
     let state = FactoryState::new();
     let mut policy = composition_caps(&state);
-    policy.composition.children = 1;
+    policy.composition.children = Some(1);
     let rig = rig(&files, cordis_wire::json!({}), policy).await;
     refused(
         invoke_json(&rig.handle, "install", json!({"factory":"unbound"}))
@@ -475,7 +475,7 @@ async fn cancelled_waiter_does_not_drop_running_factory_or_late_child() {
     let files = Files::new("cordis_abi_composition");
     let state = FactoryState::new();
     let mut policy = composition_caps(&state);
-    policy.composition.active_installs = 1;
+    policy.composition.active_installs = Some(1);
     let rig = rig(&files, cordis_wire::json!({}), policy).await;
     let call = tokio::spawn({
         let handle = rig.handle.clone();

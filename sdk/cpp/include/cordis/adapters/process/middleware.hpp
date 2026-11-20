@@ -1,4 +1,5 @@
 #pragma once
+#include <cordis/core/retention.hpp>
 #include <cordis/core/observation.hpp>
 #include "context.hpp"
 
@@ -100,6 +101,7 @@ class MiddlewareRegistry {
   };
   std::mutex mutex;
   std::map<std::string, std::shared_ptr<Entry>> handlers;
+  cordis::detail::RetiredSweep sweep;
   std::map<std::string, Terminal> runs;
   OperationInbox seen{2 * reserved_capacity};
   std::uint64_t next_handler = 0, next_run = 0;
@@ -117,6 +119,7 @@ class MiddlewareRegistry {
   }
 
 public:
+  void capacity(std::size_t count) { seen.grow(count); }
   explicit MiddlewareRegistry(Json declarations)
       : declarations(std::move(declarations)) {}
   Async<MiddlewareRegistration> add(std::shared_ptr<DependencyChannel> channel,
@@ -127,8 +130,8 @@ public:
     {
       std::lock_guard lock(mutex);
       if (next_handler == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
-      if (handlers.size() >= 4096) std::erase_if(handlers, [](const auto &item) { return !item.second->callback && !item.second->running; });
-      if (handlers.size() >= 4096) throw Refusal("overloaded", "live capacity reached");
+      sweep.collect(handlers, [](const auto &item) { return !item.second->callback && !item.second->running; });
+
       id = "m" + std::to_string(++next_handler);
       handlers.emplace(id,
                        std::make_shared<Entry>(Entry{std::move(callback), 0}));
@@ -158,7 +161,7 @@ public:
     {
       std::lock_guard lock(mutex);
       if (next_run == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
-      if (runs.size() >= 4096) throw Refusal("overloaded", "live capacity reached");
+
       id = "q" + std::to_string(++next_run);
       runs.emplace(id, Terminal{std::move(callback), false});
     }

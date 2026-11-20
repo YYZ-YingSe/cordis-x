@@ -24,7 +24,7 @@ impl Channel {
             cordis_sdk_core::Validation::Audit
         }
     }
-    pub fn new(output: mpsc::Sender<Bytes>) -> Rc<Self> {
+    pub fn new(output: mpsc::Sender<Bytes>, layout: &cordis_wire::operations::Layout) -> Rc<Self> {
         Rc::new(Self {
             frame_capacity: Cell::new(cordis_wire::DEFAULT_FRAME_CAPACITY),
             io_timeout: Cell::new(std::time::Duration::from_secs(5)),
@@ -33,9 +33,7 @@ impl Channel {
             dependency_resources: Cell::new(false),
             output,
             pending: RefCell::default(),
-            operations: cordis_wire::operations::Outgoing::with_lanes(
-                &cordis_wire::operations::REVERSE_LANES,
-            ),
+            operations: cordis_wire::operations::Outgoing::with_lanes(&layout.reverse),
             closed: Cell::new(false),
         })
     }

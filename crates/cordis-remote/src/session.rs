@@ -2,7 +2,7 @@ use crate::{Error, Result, error::outcome, frame};
 use cordis_runtime::Context;
 use cordis_wire::{Bytes, Identity, Incoming, Payload, Request, Value};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::{
         Arc, Weak,
         atomic::{AtomicBool, Ordering},
@@ -15,7 +15,7 @@ use tokio::{
     time::{Instant, timeout},
 };
 
-use cordis_wire::operations::{Layout, RESERVED_CAPACITY as CAPACITY, REVERSE_LANES};
+use cordis_wire::operations::{Layout, RESERVED_CAPACITY as CAPACITY};
 fn lane(command: &str) -> u8 {
     match command {
         "effect_release" | "sequence_undo" | "sequence_release" | "event_release"
@@ -86,7 +86,7 @@ impl Session {
         connector: Arc<dyn crate::Connector>,
         code: crate::plugin::CodeLease,
     ) -> Result<Self> {
-        let layout = Layout::new(spec.max_inflight)
+        let layout = Layout::new(spec.ordinary_capacity())
             .filter(|layout| {
                 layout.output <= Semaphore::MAX_PERMITS
                     && layout.connections <= Semaphore::MAX_PERMITS
@@ -102,7 +102,6 @@ impl Session {
                 "I/O timeout must be positive and representable in milliseconds".into(),
             ));
         }
-        let ordinary_capacity = spec.max_inflight;
         let frame_capacity = spec.frame_capacity;
         if frame_capacity == 0 || frame_capacity > i32::MAX as usize {
             return Err(Error::InvalidInput(
@@ -138,8 +137,8 @@ impl Session {
             tokio::io::BufWriter::with_capacity(frame::BUFFER_CAPACITY, connected.output);
         let mut stdout =
             tokio::io::BufReader::with_capacity(frame::BUFFER_CAPACITY, connected.input);
-        let (send, mut commands) = mpsc::channel(ordinary_capacity + CAPACITY);
-        let cleanup_capacity = Arc::new(Semaphore::new(CAPACITY));
+        let (send, mut commands) = mpsc::channel(layout.incoming);
+        let cleanup_capacity = Arc::new(Semaphore::new(layout.forward[1]));
         let worker_cleanup_capacity = cleanup_capacity.clone();
         let (closed_tx, closed) = watch::channel(None);
         let (peer_stopped_tx, peer_stopped) = watch::channel(false);
@@ -193,11 +192,17 @@ impl Session {
             let mut child_disposals = JoinSet::new();
             let mut resource_calls = JoinSet::new();
             let callback_history =
-                cordis_wire::operations::Incoming::new(REVERSE_LANES.iter().sum());
+                cordis_wire::operations::Incoming::new(layout.reverse.iter().sum());
             let mut deactivated = false;
             let mut stopping = None;
-            let mut tick = tokio::time::interval(Duration::from_millis(25));
+            let mut deadlines = BTreeSet::<(Instant, cordis_wire::operations::Id)>::new();
             let termination = loop {
+                let deadline = deadlines
+                    .first()
+                    .map(|&(end, _)| end)
+                    .into_iter()
+                    .chain(stopping)
+                    .min();
                 tokio::select! {
                     command = commands.recv() => match command {
                         Some(CommandMessage::Request(operation, bytes, reply)) => {
@@ -214,6 +219,7 @@ impl Session {
                             if writes.try_send(bytes).is_err() { drop(operation); let _ = reply.send(Err(Error::Overloaded)); continue; }
                             let expires = request_timeout.map(|duration| Instant::now() + duration);
                             let Operation { request, _lease, _cleanup_permit } = operation;
+                            if let Some(end) = expires { deadlines.insert((end, _lease.id)); }
                             pending.insert(request.operation, Pending { session: request.session, activation: request.activation, command: request.command, lease: _lease, cleanup_permit: _cleanup_permit, reply, deadline: expires });
                         }
                         Some(CommandMessage::Abort(error)) => break Err(error),
@@ -242,7 +248,7 @@ impl Session {
                                 let Some(admission) = admission else { break Err(Error::Protocol("invalid or duplicate reverse request".into())); };
                                 let router = callback_router.clone();
                                 let workers = match request.command.as_str() { "child_install" | "value_provide" => &mut composition_calls, "child_ready" | "child_settled" => &mut child_waits, "child_dispose" => &mut child_disposals, "effect_dispose" | "sequence_dispose" | "scope_dispose" | "event_dispose" | "middleware_dispose" | "dependency_resource_dispose" | "reference_dispose" => &mut disposals, "sequence_ready" | "scope_ready" => &mut sequence_waits, "scope_run" => &mut scope_runs, "task_join" => &mut task_joins, "cleanup_call" | "cleanup_metadata" | "cleanup_resource_call" => &mut cleanup_calls, "dependency_resource_call" | "reference_invoke" => &mut resource_calls, "event_emit" => &mut event_emits, "event_join" => &mut event_joins, "middleware_run" => &mut middleware_runs, "middleware_next" => &mut middleware_nexts, _ => &mut callbacks };
-                                if workers.len() >= CAPACITY {
+                                if workers.len() >= layout.reverse[0] {
                                     let response = match reverse_response(&request, Err(Error::Overloaded), frame_capacity) { Ok(bytes) => bytes, Err(error) => break Err(error) };
                                     if writes.try_send(response).is_err() { break Err(Error::HostLost("session response queue exhausted".into())); }
                                 } else {
@@ -276,6 +282,7 @@ impl Session {
                             }
                             let Incoming::Response(response) = incoming else { unreachable!() };
                             let Some(entry) = pending.remove(&response.operation) else { break Err(Error::Protocol("unsolicited or duplicate response".into())); };
+                            if let Some(end) = entry.deadline { deadlines.remove(&(end, entry.lease.id)); }
                             // The operation key was matched by removal above.
                             if entry.session != response.session || entry.activation != response.activation {
                                 let error = Error::Protocol("response session/activation mismatch".into()); let _ = entry.reply.send(Err(error.clone())); break Err(error);
@@ -379,12 +386,12 @@ impl Session {
                             Some(Ok(Err(error))) => break Err(error), _ => break Err(Error::Protocol("composition dispatcher failed".into())) };
                         if writes.try_send(response).is_err() { break Err(Error::HostLost("session response queue exhausted".into())); }
                     },
-                    _ = tick.tick() => {
-                        let now = Instant::now();
-                        if pending.values().any(|p| p.deadline.is_some_and(|end| end <= now)) || stopping.is_some_and(|end| end <= now) {
-                            break Err(Error::OutcomeUnknown("session deadline exceeded; carrier stopped without claiming cleanup".into()));
+                    _ = async {
+                        match deadline {
+                            Some(end) => tokio::time::sleep_until(end).await,
+                            None => std::future::pending::<()>().await,
                         }
-                    }
+                    } => break Err(Error::OutcomeUnknown("session deadline exceeded; carrier stopped without claiming cleanup".into())),
                 }
             };
             // Stop the owned carrier before settling lost results. The peer owner

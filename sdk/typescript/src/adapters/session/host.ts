@@ -1,6 +1,6 @@
-import { Identities, makeRoom, Completion } from './retention.ts';
+import { Identities, sweepRetired, Completion } from './retention.ts';
 import { ReferenceRegistry } from './references.ts';
-import { OperationInbox, parseOperation, operationLayout } from '../../protocols/session/operations.ts';
+import { OperationInbox, parseOperation, operationLayout, RESERVED_CAPACITY } from '../../protocols/session/operations.ts';
 import type { Message } from '../../core/message.ts';
 import { checkBinary } from '../../core/protobuf.ts';
 import { validation } from '../../core/validation.ts';
@@ -126,7 +126,7 @@ export async function serve(service: Service, connection: Connection, endpoint?:
       if (typeof payload.kind !== 'string')
         throw new Refusal('invalid_argument', 'missing resource kind');
       input(() => check(operation(descriptor.resources, payload.kind as string).args, body!));
-      makeRoom(resources, 4096, (e) => e.released);
+      sweepRetired(resources, (e) => e.released);
       const id = nextResource.next('r');
       const entry = new ResourceRecord(owner);
       entry.kind = payload.kind;
@@ -244,7 +244,9 @@ export async function serve(service: Service, connection: Connection, endpoint?:
       activation = request.activation;
       compositionEnabled = object(payload.capabilities ?? {}).composition === true;
       session = request.session;
-      channel.configure(session, activation, write);
+      channel.configure(maxInflight, session, activation, write);
+      events.configure(layout.forward[6]);
+      middlewares.configure(layout.forward[7] + layout.forward[8]);
       channel.enableMetadata(object(payload.capabilities ?? {}).metadata === true);
       channel.enableResources(object(payload.capabilities ?? {}).dependency_resources === true);
       effectsEnabled = object(payload.capabilities ?? {}).effects === true;
@@ -550,7 +552,7 @@ export async function serve(service: Service, connection: Connection, endpoint?:
                           ].includes(request.command)
                         ? 1
                         : 0;
-      if (lanes[lane] >= (lane === 0 ? maxInflight : 16)) {
+      if (lanes[lane] >= (lane === 0 ? maxInflight : Math.max(maxInflight, RESERVED_CAPACITY))) {
         await respond(failure(request, 'overloaded', 'worker queue full', 'refused'));
         continue;
       }

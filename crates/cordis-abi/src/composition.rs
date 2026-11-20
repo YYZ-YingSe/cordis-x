@@ -14,19 +14,11 @@ use std::{
 use tokio::sync::Semaphore;
 
 use cordis_host::Body;
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct CompositionLimits {
     /// Includes disposed child handles; IDs are never reused in an instance.
-    pub children: usize,
-    pub active_installs: usize,
-}
-impl Default for CompositionLimits {
-    fn default() -> Self {
-        Self {
-            children: 1024,
-            active_installs: 16,
-        }
-    }
+    pub children: Option<usize>,
+    pub active_installs: Option<usize>,
 }
 impl crate::Capabilities {
     pub(crate) fn validate_composition(
@@ -34,7 +26,11 @@ impl crate::Capabilities {
         manifest: Option<&Value>,
         primary: &ContractId,
     ) -> Result<()> {
-        if self.composition.active_installs > Semaphore::MAX_PERMITS {
+        if self
+            .composition
+            .active_installs
+            .is_some_and(|n| n > Semaphore::MAX_PERMITS)
+        {
             return Err(Error::InvalidInput("invalid Composition capacity".into()));
         }
         let mut factories = BTreeSet::new();
@@ -74,6 +70,7 @@ fn valid_alias(alias: &str) -> bool {
 }
 
 pub(crate) struct Composition {
+    sweep: cordis_wire::retention::Sweep,
     children: Mutex<BTreeMap<u64, Option<WeakPluginHandle>>>,
     installs: Semaphore,
     waits: Semaphore,
@@ -82,10 +79,15 @@ pub(crate) struct Composition {
 impl Composition {
     pub fn new(caps: &crate::Capabilities) -> Self {
         Self {
+            sweep: Default::default(),
             children: Mutex::default(),
-            installs: Semaphore::new(caps.composition.active_installs),
-            waits: Semaphore::new(caps.max_callbacks),
-            disposals: Semaphore::new(caps.max_callbacks),
+            installs: Semaphore::new(
+                caps.composition
+                    .active_installs
+                    .unwrap_or(Semaphore::MAX_PERMITS),
+            ),
+            waits: Semaphore::new(caps.max_callbacks.unwrap_or(Semaphore::MAX_PERMITS)),
+            disposals: Semaphore::new(caps.max_callbacks.unwrap_or(Semaphore::MAX_PERMITS)),
         }
     }
 }
@@ -208,12 +210,24 @@ impl Router {
                             let id = next_id()?;
                             {
                                 let mut children = router.composition.children.lock().unwrap();
-                                if children.len() >= router.capabilities.composition.children {
+                                if router.composition.sweep.due(children.len())
+                                    || router
+                                        .capabilities
+                                        .composition
+                                        .children
+                                        .is_some_and(|limit| children.len() >= limit)
+                                {
                                     children.retain(|_, e| {
                                         !e.as_ref().is_some_and(WeakPluginHandle::is_retired)
                                     });
+                                    router.composition.sweep.retained(children.len());
                                 }
-                                if children.len() >= router.capabilities.composition.children {
+                                if router
+                                    .capabilities
+                                    .composition
+                                    .children
+                                    .is_some_and(|limit| children.len() >= limit)
+                                {
                                     return Err(Error::Overloaded);
                                 }
                                 children.insert(id, None);

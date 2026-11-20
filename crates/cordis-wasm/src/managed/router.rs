@@ -69,6 +69,7 @@ enum Handle {
     Resource(cordis_host::WeakResource),
 }
 pub(super) struct Router {
+    handle_sweep: cordis_wire::retention::Sweep,
     instance: Weak<Instance>,
     entries: Mutex<BTreeMap<String, Entry>>,
     handles: Mutex<BTreeMap<String, Handle>>,
@@ -140,6 +141,7 @@ impl Router {
         Arc::new(Self {
             instance,
             entries: Mutex::default(),
+            handle_sweep: Default::default(),
             handles: Mutex::default(),
             next: Mutex::default(),
             ids: AtomicU64::new(1),
@@ -195,12 +197,18 @@ impl Router {
             } else {
                 0
             };
-            if entries
-                .values()
-                .flat_map(|entry| entry.requests.values())
-                .filter(|request| request.lane == lane)
-                .count()
-                >= instance.module.capabilities.max_requests
+            if instance
+                .module
+                .capabilities
+                .max_requests
+                .is_some_and(|limit| {
+                    entries
+                        .values()
+                        .flat_map(|entry| entry.requests.values())
+                        .filter(|request| request.lane == lane)
+                        .count()
+                        >= limit
+                })
             {
                 return Err(Error::Overloaded);
             }
@@ -283,7 +291,13 @@ impl Router {
     fn reserve(&self) -> Result<Reservation<'_>> {
         let instance = self.instance.upgrade().ok_or(Error::Closed)?;
         let mut handles = self.handles.lock().unwrap();
-        if handles.len() >= instance.module.capabilities.max_handles {
+        if self.handle_sweep.due(handles.len())
+            || instance
+                .module
+                .capabilities
+                .max_handles
+                .is_some_and(|n| handles.len() >= n)
+        {
             handles.retain(|_, h| !match h {
                 Handle::Effect(h) => h.is_released(),
                 Handle::Scope(h) => h.is_retired(),
@@ -294,8 +308,14 @@ impl Router {
                 Handle::Dispatch(_, observed) => *observed,
                 _ => false,
             });
+            self.handle_sweep.retained(handles.len());
         }
-        if handles.len() >= instance.module.capabilities.max_handles {
+        if instance
+            .module
+            .capabilities
+            .max_handles
+            .is_some_and(|n| handles.len() >= n)
+        {
             return Err(Error::Overloaded);
         }
         let grant = token()?;

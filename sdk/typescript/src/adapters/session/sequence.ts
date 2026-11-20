@@ -1,5 +1,5 @@
 import { utf8Length } from '../../core/encoding.ts';
-import { Identities, makeRoom, Completion, registration } from './retention.ts';
+import { Identities, sweepRetired, Completion, registration } from './retention.ts';
 import { Refusal } from '../../core/error.ts';
 import { RpcError } from './context.ts';
 import type { Context, DependencyChannel } from './context.ts';
@@ -53,7 +53,6 @@ type SequenceRecord = {
 export class SequenceRegistry {
   private entries = new Map<string, SequenceRecord>();
   private nextId = new Identities();
-  private steps = 0;
   async register(
     channel: DependencyChannel,
     context: string,
@@ -62,7 +61,7 @@ export class SequenceRegistry {
   ): Promise<EffectSequence> {
     if (utf8Length(label) > 1024)
       throw new Refusal('invalid_argument', 'sequence label too long');
-    makeRoom(this.entries, 256, (e) => e.released);
+    sweepRetired(this.entries, (e) => e.released);
     const sequence = this.nextId.next('s');
     // Save the producer before requesting ownership, including acknowledgement loss.
     this.entries.set(sequence, {
@@ -95,8 +94,6 @@ export class SequenceRegistry {
     if (entry.released || entry.ended || entry.running)
       throw new Refusal('closed', 'sequence cannot advance');
     if (step !== String(entry.next)) throw new Refusal('invalid_step', 'step order mismatch');
-    if (this.steps >= 4096) throw new Refusal('overloaded', 'unrecovered step capacity reached');
-    this.steps++;
     entry.next++;
     entry.running = true;
     let result: EffectStep;
@@ -112,7 +109,6 @@ export class SequenceRegistry {
       // Save any inverse even when validating the result later fails.
       const inverse = result?.inverse;
       if (inverse) entry.steps.set(step, { inverse, released: false });
-      else this.steps--;
       if (
         !result ||
         typeof result.done !== 'boolean' ||
@@ -142,7 +138,6 @@ export class SequenceRegistry {
           await ctx.finish();
         }
         entry.released = true;
-        this.steps--;
         entry.inverse = undefined;
       });
     }

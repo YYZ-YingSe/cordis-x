@@ -1,4 +1,4 @@
-import { OperationOutbox, REVERSE_LANES } from './operations.ts';
+import { OperationOutbox, operationLayout } from './operations.ts';
 import type { Message } from '../../core/message.ts';
 import { encodeFrame } from './binary.ts';
 import { payload, one, controlOnly, type Payload, type Request, type Response } from './messages.ts';
@@ -15,7 +15,7 @@ export class DependencyChannel {
   frameCapacity = DEFAULT_FRAME_CAPACITY;
   validation: import('../../core/validation.ts').Validation = 'checked';
   private pending = new Map<string, Pending>();
-  private operations = new OperationOutbox(REVERSE_LANES);
+  private operations = new OperationOutbox(0);
   private session = '';
   private cleanupCalls = false;
   private metadataEnabled = false;
@@ -48,7 +48,8 @@ export class DependencyChannel {
   }
   private activation: Identity | undefined;
   private output: ((bytes: Uint8Array) => Promise<void>) | undefined;
-  configure(session: string, activation: Identity, output: (bytes: Uint8Array) => Promise<void>) {
+  configure(capacity: number, session: string, activation: Identity, output: (bytes: Uint8Array) => Promise<void>) {
+    this.operations = new OperationOutbox(operationLayout(capacity).reverse);
     this.session = session;
     this.activation = activation;
     this.output = output;

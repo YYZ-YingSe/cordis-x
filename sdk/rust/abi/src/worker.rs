@@ -12,7 +12,7 @@ tokio::task_local! { pub(crate) static CALLER: (u64, u64); }
 #[derive(Clone)]
 pub(crate) struct Client {
     pub validation: cordis_sdk_core::Validation,
-    send: mpsc::Sender<Message>,
+    send: mpsc::UnboundedSender<Message>,
     thread: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
 }
 struct Message {
@@ -76,9 +76,6 @@ impl<P: Plugin> Instance<P> {
         } else {
             &self.inflight
         };
-        if inflight.get() >= 128 {
-            return Err(refused("overloaded", "callback capacity reached"));
-        }
         inflight.set(inflight.get() + 1);
         let frame = Frame::new();
         let backend = Abi {
@@ -249,7 +246,7 @@ impl Client {
         config: Value,
         validation: cordis_sdk_core::Validation,
     ) -> Result<Self> {
-        let (send, mut receive) = mpsc::channel::<Message>(256);
+        let (send, mut receive) = mpsc::unbounded_channel::<Message>();
         let (ready, result) = std::sync::mpsc::sync_channel(1);
         let thread = std::thread::Builder::new()
             .name("cordis-abi-plugin".into())
@@ -354,13 +351,13 @@ impl Client {
     fn send(&self, action: Action) -> Result<Payload> {
         let (reply, result) = std::sync::mpsc::sync_channel(1);
         self.send
-            .try_send(Message {
+            .send(Message {
                 action,
                 reply: Box::new(move |value| {
                     let _ = reply.send(value);
                 }),
             })
-            .map_err(|e| refused("overloaded", e))?;
+            .map_err(|e| refused("closed", e))?;
         result.recv().map_err(unknown)?
     }
     pub fn dispatch(
@@ -373,11 +370,11 @@ impl Client {
         reply: impl FnOnce(Result<Payload>) + Send + 'static,
     ) -> Result<()> {
         self.send
-            .try_send(Message {
+            .send(Message {
                 action: Action::Dispatch(host, op, target, method, args),
                 reply: Box::new(reply),
             })
-            .map_err(|e| refused("overloaded", e))
+            .map_err(|e| refused("closed", e))
     }
     pub fn close(&self) -> Result<()> {
         self.send(Action::Close)?;

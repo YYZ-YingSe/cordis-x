@@ -234,9 +234,9 @@ async fn sixteen_nested_callbacks_can_reach_terminal_and_cleanup() {
         let rt = Runtime::new();
         let log = Log::new();
         rt.install(log_plugin(log.clone())).unwrap();
-        let provider = rt
-            .install(spec(backend, Endpoint::Ipc).plugin("pipeline", &service()))
-            .unwrap();
+        let mut binding = spec(backend, Endpoint::Ipc);
+        binding.session.max_inflight = Some(16);
+        let provider = rt.install(binding.plugin("pipeline", &service())).unwrap();
         bounded(provider.ready()).await.unwrap();
         let (owner, h, _) = consumer(&rt).await;
         for i in 0..16 {

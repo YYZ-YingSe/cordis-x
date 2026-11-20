@@ -10,12 +10,13 @@ export class Identities {
   }
 }
 
-/** A bounded terminal cache is expendable; live and failed work is not. */
-export function makeRoom<T>(entries: Map<string, T>, capacity: number, retired: (entry: T) => boolean): void {
-  if (entries.size >= capacity) {
-    for (const [id, entry] of entries) if (retired(entry)) entries.delete(id);
-  }
-  if (entries.size >= capacity) throw new Refusal('overloaded', 'live capacity reached');
+const nextSweep = new WeakMap<object, number>();
+
+/** Only retire observed entries. Growing live sets amortize registry scans. */
+export function sweepRetired<T>(entries: Map<string, T>, retired: (entry: T) => boolean): void {
+  if (entries.size < (nextSweep.get(entries) ?? 4096)) return;
+  for (const [id, entry] of entries) if (retired(entry)) entries.delete(id);
+  nextSweep.set(entries, Math.max(4096, entries.size * 2));
 }
 
 /** Copies of a public capability observe one completion; refusals can retry. */

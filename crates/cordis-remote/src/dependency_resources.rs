@@ -8,6 +8,7 @@ use std::{
 /// scope through a resource acquired during plugin initialization.
 #[derive(Default)]
 pub(crate) struct Resources {
+    sweep: cordis_wire::retention::Sweep,
     entries: Mutex<BTreeMap<String, Arc<Entry>>>,
 }
 pub(crate) struct Entry {
@@ -25,7 +26,7 @@ impl Resources {
         if entries.contains_key(&id) {
             return Err(Error::InvalidInput("duplicate resource ID".into()));
         }
-        if entries.len() >= 4096 {
+        if self.sweep.due(entries.len()) {
             entries.retain(|_, e| {
                 !e.rejected.load(std::sync::atomic::Ordering::Acquire)
                     && !e
@@ -33,9 +34,7 @@ impl Resources {
                         .get()
                         .is_some_and(cordis_host::WeakResource::is_released)
             });
-        }
-        if entries.len() >= 4096 {
-            return Err(Error::Overloaded);
+            self.sweep.retained(entries.len());
         }
         let mut bytes = [0; 16];
         getrandom::fill(&mut bytes).map_err(|e| Error::Io(e.to_string()))?;

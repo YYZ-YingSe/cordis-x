@@ -2,6 +2,7 @@
 pub mod binary;
 pub mod local;
 pub mod operations;
+pub mod retention;
 pub use binary::{CONTENT_TYPE, Payload};
 pub use cordis_contract::Validation;
 pub use prost::bytes::Bytes;

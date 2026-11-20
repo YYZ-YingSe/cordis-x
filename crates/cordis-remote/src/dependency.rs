@@ -329,6 +329,8 @@ impl Router {
             .map_err(crate::resource::runtime_error)
     }
     pub fn new(spec: &crate::SessionSpec) -> Result<Arc<Self>> {
+        let layout = cordis_wire::operations::Layout::new(spec.ordinary_capacity())
+            .ok_or_else(|| Error::InvalidInput("invalid Session capacity".into()))?;
         spec.bindings
             .validate()
             .map_err(|e| Error::InvalidInput(e.to_string()))?;
@@ -350,9 +352,12 @@ impl Router {
             sequences_enabled: AtomicBool::new(false),
             children: crate::scope::Scopes::default(),
             children_enabled: AtomicBool::new(false),
-            middleware: crate::middleware::Middlewares::new(&spec.bindings.middleware)?,
+            middleware: crate::middleware::Middlewares::new(
+                &spec.bindings.middleware,
+                layout.forward[7] + layout.forward[8],
+            )?,
             middleware_enabled: AtomicBool::new(false),
-            events: crate::events::Events::new(&spec.bindings.events)?,
+            events: crate::events::Events::new(&spec.bindings.events, layout.forward[6])?,
             events_enabled: AtomicBool::new(false),
             tasks: crate::task::Tasks::default(),
             tasks_enabled: AtomicBool::new(false),

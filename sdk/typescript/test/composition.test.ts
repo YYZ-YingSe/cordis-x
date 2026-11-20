@@ -11,7 +11,7 @@ const manifest = {
 function setup(cleanup = false) {
   const channel = new DependencyChannel(),
     sent: Request[] = [];
-  channel.configure('a'.repeat(32), { incarnation: '1', fiber: '2', epoch: '3' }, async (v) => {
+  channel.configure(16, 'a'.repeat(32), { incarnation: '1', fiber: '2', epoch: '3' }, async (v) => {
     sent.push(request(v));
   });
   const ctx = new Context(

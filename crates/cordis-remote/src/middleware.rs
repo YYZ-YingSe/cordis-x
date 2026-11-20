@@ -22,12 +22,10 @@ struct Calls {
     slots: Arc<cordis_wire::operations::Outgoing>,
     active: Mutex<BTreeMap<String, Continuation>>,
 }
-impl Default for Calls {
-    fn default() -> Self {
+impl Calls {
+    fn new(capacity: usize) -> Self {
         Self {
-            slots: Arc::new(cordis_wire::operations::Outgoing::new(
-                2 * cordis_wire::operations::RESERVED_CAPACITY,
-            )),
+            slots: Arc::new(cordis_wire::operations::Outgoing::new(capacity)),
             active: Mutex::default(),
         }
     }
@@ -42,13 +40,14 @@ impl Drop for Frame {
     }
 }
 pub(crate) struct Middlewares {
+    handler_sweep: cordis_wire::retention::Sweep,
     bindings: BTreeMap<String, Middleware<Body, Body>>,
     handlers: Mutex<BTreeMap<String, Arc<Handler>>>,
     runs: Mutex<BTreeSet<String>>,
     calls: Arc<Calls>,
 }
 impl Middlewares {
-    pub fn new(bindings: &[MiddlewareBinding]) -> Result<Self> {
+    pub fn new(bindings: &[MiddlewareBinding], capacity: usize) -> Result<Self> {
         let mut entries = BTreeMap::new();
         for b in bindings {
             if b.alias.is_empty()
@@ -64,9 +63,10 @@ impl Middlewares {
         }
         Ok(Self {
             bindings: entries,
+            handler_sweep: Default::default(),
             handlers: Mutex::default(),
             runs: Mutex::default(),
-            calls: Arc::default(),
+            calls: Arc::new(Calls::new(capacity)),
         })
     }
     pub fn declarations(&self) -> Value {
@@ -87,11 +87,9 @@ impl Middlewares {
         if entries.contains_key(&id) {
             return Err(Error::InvalidInput("duplicate middleware handler".into()));
         }
-        if entries.len() >= 4096 {
+        if self.handler_sweep.due(entries.len()) {
             entries.retain(|_, e| !e.handle.get().is_some_and(WeakEffectHandle::is_released));
-        }
-        if entries.len() >= 4096 {
-            return Err(Error::Overloaded);
+            self.handler_sweep.retained(entries.len());
         }
         let entry = Arc::new(Handler {
             grant: grant()?,
@@ -235,9 +233,6 @@ impl Middlewares {
             let mut runs = self.runs.lock().unwrap();
             if runs.contains(&run) {
                 return Err(Error::InvalidInput("duplicate middleware run".into()));
-            }
-            if runs.len() >= 4096 {
-                return Err(Error::Overloaded);
             }
             runs.insert(run.clone());
         }

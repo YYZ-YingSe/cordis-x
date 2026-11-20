@@ -8,6 +8,9 @@ This file records user-visible changes. Development work is listed under Unrelea
 
 ### Runtime and SDKs / 运行时与 SDK
 
+- Hosts can explicitly cap concurrent work in Process, ABI and Wasm. With default settings, live tasks and callbacks share growable registries. Session peers must use the same negotiated operation layout.
+  Process、ABI 和 Wasm 的并发额度由宿主显式设置。默认按实际工作量登记任务与回调，Session 两端使用同一套协商后的槽位布局。
+
 - Dependency-driven activation, scoped effects, caller-owned resources, events, middleware, and managed tasks.
   按依赖激活插件，提供作用域副作用、调用者所有的资源、事件、中间件和受管理任务。
 - Native Rust, C ABI, process, and WebAssembly execution paths, with Rust, C++, and TypeScript SDKs for their supported backends.

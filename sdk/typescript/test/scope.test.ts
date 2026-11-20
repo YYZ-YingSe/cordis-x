@@ -9,7 +9,7 @@ import type { Value } from '../src/core/value.ts';
 function setup() {
   const sent: Request[] = [];
   const channel = new DependencyChannel();
-  channel.configure('a'.repeat(32), { incarnation: '1', fiber: '2', epoch: '3' }, async (value) => {
+  channel.configure(16, 'a'.repeat(32), { incarnation: '1', fiber: '2', epoch: '3' }, async (value) => {
     sent.push(request(value));
   });
   const registry = new ScopeRegistry();

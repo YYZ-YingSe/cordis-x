@@ -251,7 +251,7 @@ fn validates_contract_artifact_and_imports_before_publication() {
         Component::from_bytes(
             support::bytes(),
             Limits {
-                pending_calls: 2048,
+                pending_calls: Some(2048),
                 ..Limits::default()
             }
         )
@@ -320,7 +320,7 @@ async fn resource_limit_releases_capacity_after_confirmed_cleanup() {
     let component = Component::from_bytes(
         support::bytes(),
         Limits {
-            resources: 1,
+            resources: Some(1),
             ..Limits::default()
         },
     )

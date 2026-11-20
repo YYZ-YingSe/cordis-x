@@ -212,8 +212,8 @@ impl Fixture {
                     )],
                     ..Default::default()
                 },
-                max_calls: 16,
-                max_requests: 16,
+                max_calls: Some(16),
+                max_requests: Some(16),
                 ..Default::default()
             },
         );
@@ -240,7 +240,7 @@ impl Fixture {
                         dependencies: vec![Dependency::new(&counters).unwrap()],
                         ..Default::default()
                     },
-                    max_handles: 4,
+                    max_handles: Some(4),
                     ..Default::default()
                 },
             );
@@ -585,7 +585,7 @@ async fn exported_resource_quota_is_reserved_before_factory_and_returned_after_r
             },
             Value::Null,
             Limits {
-                resources: 1,
+                resources: Some(1),
                 ..Default::default()
             },
         )

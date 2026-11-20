@@ -539,8 +539,6 @@ template <class Model> class ContextHost {
       {
         std::lock_guard lock(instance->mutex);
         auto &count = cleanup ? instance->cleanup : instance->ordinary;
-        if (count >= 128)
-          throw Refusal("overloaded", "callback capacity reached");
         ++count;
         admitted = true;
       }

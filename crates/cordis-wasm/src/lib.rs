@@ -296,7 +296,12 @@ impl Instance {
         Self {
             #[cfg(test)]
             hook: Mutex::new(None),
-            capacity: Arc::new(Semaphore::new(module.limits.pending_calls)),
+            capacity: Arc::new(Semaphore::new(
+                module
+                    .limits
+                    .pending_calls
+                    .unwrap_or(Semaphore::MAX_PERMITS),
+            )),
             module,
             state: Mutex::new(State {
                 id: Err(Error::Unknown("create has not returned".into())),
@@ -367,7 +372,13 @@ impl Instance {
                 return Err(Error::Closed);
             }
             let id = state.id.clone()?;
-            if matches!(op, Op::Acquire) && state.resources >= instance.module.limits.resources {
+            if matches!(op, Op::Acquire)
+                && instance
+                    .module
+                    .limits
+                    .resources
+                    .is_some_and(|n| state.resources >= n)
+            {
                 return Err(Error::Overloaded);
             }
             let result = state

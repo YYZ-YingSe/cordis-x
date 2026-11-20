@@ -412,9 +412,9 @@ async fn unknown_event_middleware_and_terminal_retain_failed_responsibility_and_
 async fn subscription_dispatch_run_and_callback_limits_do_not_orphan_captures() {
     let files = Files::new("cordis_abi_reactive");
     let mut capabilities = reactive_caps();
-    capabilities.reactive.subscriptions = 1;
-    capabilities.reactive.dispatches = 1;
-    capabilities.reactive.runs = 1;
+    capabilities.reactive.subscriptions = Some(1);
+    capabilities.reactive.dispatches = Some(1);
+    capabilities.reactive.runs = Some(1);
     let rig = rig(&files, cordis_wire::json!({}), capabilities).await;
     invoke_json(&rig.handle, "on", json!({"id":"a"}))
         .await
@@ -450,8 +450,8 @@ async fn subscription_dispatch_run_and_callback_limits_do_not_orphan_captures() 
 async fn nested_callbacks_have_separate_terminal_capacity_and_self_disposal_is_rejected() {
     let files = Files::new("cordis_abi_reactive");
     let mut capabilities = reactive_caps();
-    capabilities.reactive.active_callbacks = 4;
-    capabilities.max_contexts = 4;
+    capabilities.reactive.active_callbacks = Some(4);
+    capabilities.max_contexts = Some(4);
     let rig = rig(&files, cordis_wire::json!({}), capabilities).await;
     invoke_json(&rig.handle, "on", json!({"nested":true,"self":true}))
         .await
@@ -695,9 +695,9 @@ async fn loader_preflights_reactive_bindings_and_runs_pinned_callbacks() {
 async fn full_callback_capacity_drains_without_using_cleanup_or_join_slots() {
     let files = Files::new("cordis_abi_reactive");
     let mut capabilities = reactive_caps();
-    capabilities.max_contexts = 2;
-    capabilities.max_callbacks = 2;
-    capabilities.reactive.active_callbacks = 2;
+    capabilities.max_contexts = Some(2);
+    capabilities.max_callbacks = Some(2);
+    capabilities.reactive.active_callbacks = Some(2);
     let rig = rig(&files, cordis_wire::json!({}), capabilities).await;
     for n in 0..2 {
         invoke_json(

@@ -7,6 +7,7 @@ use std::{
 
 #[derive(Default)]
 pub(crate) struct Tasks {
+    sweep: cordis_wire::retention::Sweep,
     entries: Mutex<BTreeMap<String, Entry>>,
 }
 struct Entry {
@@ -30,19 +31,11 @@ impl Tasks {
         if entries.contains_key(&id) {
             return Err(Error::InvalidInput("duplicate task ID".into()));
         }
-        if entries.len() >= 4096 {
+        if self.sweep.due(entries.len()) {
             entries.retain(|_, e| {
                 !(e.state.lock().unwrap().observed && matches!(e.handle.outcome(), Some(Ok(()))))
             });
-        }
-        if entries.len() >= 4096
-            || entries
-                .values()
-                .filter(|e| e.state.lock().unwrap().phase == "running")
-                .count()
-                >= 16
-        {
-            return Err(Error::Overloaded);
+            self.sweep.retained(entries.len());
         }
         let mut bytes = [0u8; 16];
         getrandom::fill(&mut bytes).map_err(|e| Error::Io(e.to_string()))?;

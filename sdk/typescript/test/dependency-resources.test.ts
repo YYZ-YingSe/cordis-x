@@ -7,7 +7,7 @@ import type { Context as PublicContext, ResourceHandle, Value } from '../src/ind
 function setup() {
   const sent: Request[] = [];
   const channel = new DependencyChannel();
-  channel.configure('a'.repeat(32), { incarnation: '1', fiber: '2', epoch: '3' }, async (value) => {
+  channel.configure(16, 'a'.repeat(32), { incarnation: '1', fiber: '2', epoch: '3' }, async (value) => {
     sent.push(request(value));
   });
   channel.enableResources(true);

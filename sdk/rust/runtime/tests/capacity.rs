@@ -64,14 +64,14 @@ impl CapacityProbe {
             if command != "invoke" {
                 return Ok(Value::Null);
             }
-            // Leave room for the producer, but not for its returned inverse.
-            for _ in 0..4095 {
+            // Keep independent effects live while registering and releasing the sequence.
+            for _ in 0..5000 {
                 ctx.defer("occupied", |_| async { Ok(()) }).await?;
             }
             let acquired = Rc::new(Cell::new(0));
             let started = acquired.clone();
             let sequence = ctx
-                .effect("must reject before acquiring", move |_| {
+                .effect("acquire and return inverse", move |_| {
                     started.set(started.get() + 1);
                     async { Ok(Step::yield_inverse(|_| async { Ok(()) }).finish()) }
                 })
@@ -84,7 +84,7 @@ impl CapacityProbe {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn full_callback_table_rejects_sequence_before_acquisition() {
+async fn live_callbacks_grow_with_owned_effects() {
     let rt = Runtime::new();
     let service = Service::<PortableService>::new("example.capacity", "1");
     rt.install(
@@ -117,7 +117,7 @@ async fn full_callback_table_rejects_sequence_before_acquisition() {
                             })
                         })
                         .await?;
-                    assert_eq!(value, json!({"failed":true,"acquired":0.0}));
+                    assert_eq!(value, json!({"failed":false,"acquired":1.0}));
                     Ok(())
                 }
             })

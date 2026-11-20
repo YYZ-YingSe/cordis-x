@@ -129,8 +129,6 @@ template <class Model> struct Plugin {
     managed_plugin_context_set_0(holder);
     frame->cleanup = cleanup;
     try {
-      if (calls[cleanup] >= 128)
-        throw Refusal("overloaded", "call capacity reached");
       frame->token = detail::text(*token);
       auto method = detail::text(*command);
       frame->validation = service ? callbacks->validation : Validation::Audit;

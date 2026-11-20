@@ -7,10 +7,13 @@ use std::{
 
 #[derive(Default)]
 pub(crate) struct Scopes {
+    run_sweep: cordis_wire::retention::Sweep,
+    scope_sweep: cordis_wire::retention::Sweep,
     entries: Mutex<BTreeMap<String, Arc<Entry>>>,
     runs: Mutex<BTreeMap<String, Arc<Ticket>>>,
 }
 struct Entry {
+    history_sweep: cordis_wire::retention::Sweep,
     grant: String,
     handle: WeakScopeHandle,
     runs: Mutex<Vec<Arc<Ticket>>>,
@@ -30,11 +33,9 @@ impl Scopes {
         if entries.contains_key(&id) {
             return Err(Error::InvalidInput("duplicate scope ID".into()));
         }
-        if entries.len() >= 256 {
+        if self.scope_sweep.due(entries.len()) {
             entries.retain(|_, e| !e.handle.is_retired());
-        }
-        if entries.len() >= 256 {
-            return Err(Error::Overloaded);
+            self.scope_sweep.retained(entries.len());
         }
         let mut bytes = [0u8; 16];
         getrandom::fill(&mut bytes).map_err(|e| Error::Io(e.to_string()))?;
@@ -45,6 +46,7 @@ impl Scopes {
             Arc::new(Entry {
                 grant: grant.clone(),
                 handle: handle.downgrade(),
+                history_sweep: Default::default(),
                 runs: Mutex::default(),
             }),
         );
@@ -112,22 +114,21 @@ impl Scopes {
                     if runs.contains_key(&run) {
                         return Err(Error::InvalidInput("duplicate scope run".into()));
                     }
-                    if runs.len() >= 4096 {
+                    if self.run_sweep.due(runs.len()) {
                         runs.retain(|_, t| {
                             !matches!(*t.state.lock().unwrap(), "completed" | "not_executed")
                         });
-                    }
-                    if runs.len() >= 4096 {
-                        return Err(Error::Overloaded);
+                        self.run_sweep.retained(runs.len());
                     }
                     runs.insert(run.clone(), ticket.clone());
                 }
                 {
                     let mut history = entry.runs.lock().unwrap();
-                    if history.len() >= 4096 {
+                    if entry.history_sweep.due(history.len()) {
                         history.retain(|t| {
                             !matches!(*t.state.lock().unwrap(), "completed" | "not_executed")
                         });
+                        entry.history_sweep.retained(history.len());
                     }
                     history.push(ticket.clone());
                 }

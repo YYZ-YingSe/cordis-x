@@ -85,9 +85,9 @@ pub struct Capabilities {
     /// Named host factories are the only plugins a guest may install.
     /// Explicit value services the guest is allowed to publish during initialization.
     pub wasi: Option<Wasi>,
-    pub max_handles: usize,
-    pub max_requests: usize,
-    pub max_calls: usize,
+    pub max_handles: Option<usize>,
+    pub max_requests: Option<usize>,
+    pub max_calls: Option<usize>,
     pub initialization_timeout: Duration,
     pub execution_timeout: Option<Duration>,
     pub stop_timeout: Duration,
@@ -97,9 +97,9 @@ impl Default for Capabilities {
         Self {
             bindings: cordis_host::HostBindings::default(),
             wasi: None,
-            max_handles: 1024,
-            max_requests: 256,
-            max_calls: 128,
+            max_handles: None,
+            max_requests: None,
+            max_calls: None,
             initialization_timeout: Duration::from_secs(30),
             execution_timeout: None,
             stop_timeout: Duration::from_secs(5),
@@ -150,16 +150,20 @@ impl ContextComponent {
                 .with_validation(capabilities.bindings.validation);
         }
         if bytes.len() > limits.artifact_bytes
-            || limits.pending_calls == 0
-            || limits.pending_calls > Semaphore::MAX_PERMITS
+            || limits.pending_calls == Some(0)
+            || limits
+                .pending_calls
+                .is_some_and(|n| n > Semaphore::MAX_PERMITS)
             || limits.memory_bytes == 0
             || limits.fuel_on_admission == 0
             || limits.initialization_fuel == 0
-            || limits.resources > Semaphore::MAX_PERMITS
-            || capabilities.max_handles == 0
-            || capabilities.max_calls == 0
-            || capabilities.max_calls > Semaphore::MAX_PERMITS
-            || capabilities.max_requests == 0
+            || limits.resources.is_some_and(|n| n > Semaphore::MAX_PERMITS)
+            || capabilities.max_handles == Some(0)
+            || capabilities.max_calls == Some(0)
+            || capabilities
+                .max_calls
+                .is_some_and(|n| n > Semaphore::MAX_PERMITS)
+            || capabilities.max_requests == Some(0)
             || [
                 Some(capabilities.initialization_timeout),
                 capabilities.execution_timeout,
@@ -362,10 +366,25 @@ impl ContextComponent {
             async move {
                 let instance = Arc::new_cyclic(|weak| Instance {
                     router: router::Router::new(weak.clone()),
-                    capacity: Arc::new(Semaphore::new(module.limits.pending_calls)),
-                    calls: Arc::new(Semaphore::new(module.capabilities.max_calls)),
-                    cleanup_calls: Arc::new(Semaphore::new(module.capabilities.max_calls)),
-                    resource_slots: Arc::new(Semaphore::new(module.limits.resources)),
+                    capacity: Arc::new(Semaphore::new(
+                        module
+                            .limits
+                            .pending_calls
+                            .unwrap_or(Semaphore::MAX_PERMITS),
+                    )),
+                    calls: Arc::new(Semaphore::new(
+                        module
+                            .capabilities
+                            .max_calls
+                            .unwrap_or(Semaphore::MAX_PERMITS),
+                    )),
+                    cleanup_calls: Arc::new(Semaphore::new(
+                        module
+                            .capabilities
+                            .max_calls
+                            .unwrap_or(Semaphore::MAX_PERMITS),
+                    )),
+                    resource_slots: Arc::new(Semaphore::new(module.limits.resource_capacity())),
                     module,
                     guest: Mutex::new(None),
                     worker: Mutex::new(None),
@@ -733,7 +752,7 @@ impl Instance {
     }
     async fn cleanup(self: &Arc<Self>, ctx: &Context) -> Result<()> {
         self.check()?;
-        if self.resource_slots.available_permits() != self.module.limits.resources {
+        if self.resource_slots.available_permits() != self.module.limits.resource_capacity() {
             return Err(unknown("managed resources remain unreleased"));
         }
         if self.activated.load(std::sync::atomic::Ordering::Acquire) {

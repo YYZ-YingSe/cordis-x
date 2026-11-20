@@ -54,6 +54,7 @@ impl<P: Plugin> Host<P> {
             .grow(layout.incoming)
             .map_err(|error| refused("invalid_argument", error))?;
         self.max_inflight.set(max_inflight);
+        self.registry.configure(layout.forward[6])?;
         let io_timeout = args["io_timeout_ms"]
             .as_u64()
             .filter(|duration| (1..=i32::MAX as u64).contains(duration))
@@ -464,7 +465,9 @@ impl<P: Plugin> Host<P> {
             >= if lane == 0 {
                 self.max_inflight.get()
             } else {
-                16
+                self.max_inflight
+                    .get()
+                    .max(cordis_wire::operations::RESERVED_CAPACITY)
             } {
             Err(refused("overloaded", "callback lane full"))
         } else {
@@ -515,7 +518,7 @@ pub async fn serve<P: Plugin>(options: Options) -> Result<()> {
     let layout = session_layout(&first.payload.control)?;
     let (send, mut output) = mpsc::channel(layout.output);
     let mut first = Some(Incoming::Request(first));
-    let channel = Channel::new(send);
+    let channel = Channel::new(send, &layout);
     let mut listener = if options.http {
         Some(
             tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))

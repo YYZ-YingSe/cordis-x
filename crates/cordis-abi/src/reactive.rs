@@ -12,26 +12,14 @@ use std::{
 use tokio::sync::{Semaphore, watch};
 
 use cordis_host::Body;
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ReactiveLimits {
-    pub subscriptions: usize,
-    pub dispatches: usize,
-    pub runs: usize,
-    pub active_dispatches: usize,
-    pub active_callbacks: usize,
-    pub active_runs: usize,
-}
-impl Default for ReactiveLimits {
-    fn default() -> Self {
-        Self {
-            subscriptions: 1024,
-            dispatches: 4096,
-            runs: 4096,
-            active_dispatches: 16,
-            active_callbacks: 32,
-            active_runs: 16,
-        }
-    }
+    pub subscriptions: Option<usize>,
+    pub dispatches: Option<usize>,
+    pub runs: Option<usize>,
+    pub active_dispatches: Option<usize>,
+    pub active_callbacks: Option<usize>,
+    pub active_runs: Option<usize>,
 }
 impl crate::Capabilities {
     pub(crate) fn validate_reactive(&self, manifest: Option<&Value>) -> Result<()> {
@@ -40,7 +28,7 @@ impl crate::Capabilities {
             self.reactive.active_callbacks,
             self.reactive.active_runs,
         ] {
-            if n > Semaphore::MAX_PERMITS {
+            if n.is_some_and(|n| n > Semaphore::MAX_PERMITS) {
                 return Err(Error::InvalidInput("invalid Reactive capacity".into()));
             }
         }
@@ -89,6 +77,8 @@ fn declaration(map: &mut Value, alias: &str, contract: &cordis_contract::Contrac
 }
 #[derive(Default)]
 struct Registry {
+    dispatches_sweep: cordis_wire::retention::Sweep,
+    subscriptions_sweep: cordis_wire::retention::Sweep,
     callbacks: BTreeSet<u64>,
     subscriptions: BTreeMap<u64, Arc<Subscription>>,
     dispatches: BTreeMap<u64, Dispatch>,
@@ -120,15 +110,25 @@ pub(crate) struct Reactive {
 }
 impl Reactive {
     pub fn new(caps: &crate::Capabilities) -> Self {
-        let callbacks = caps.reactive.active_callbacks.min(caps.max_contexts);
-        let waits = caps.max_callbacks.min(caps.max_contexts);
+        let callbacks = caps
+            .reactive
+            .active_callbacks
+            .unwrap_or(Semaphore::MAX_PERMITS)
+            .min(caps.max_contexts.unwrap_or(Semaphore::MAX_PERMITS));
+        let waits = caps
+            .max_callbacks
+            .unwrap_or(Semaphore::MAX_PERMITS)
+            .min(caps.max_contexts.unwrap_or(Semaphore::MAX_PERMITS));
         Self {
             entries: Mutex::default(),
             callbacks: Arc::new(Semaphore::new(callbacks)),
             terminals: Arc::new(Semaphore::new(
-                caps.reactive.active_runs.min(caps.max_contexts),
+                caps.reactive
+                    .active_runs
+                    .unwrap_or(Semaphore::MAX_PERMITS)
+                    .min(caps.max_contexts.unwrap_or(Semaphore::MAX_PERMITS)),
             )),
-            runs: Semaphore::new(caps.reactive.active_runs),
+            runs: Semaphore::new(caps.reactive.active_runs.unwrap_or(Semaphore::MAX_PERMITS)),
             joins: Semaphore::new(waits),
             disposals: Semaphore::new(waits),
         }
@@ -398,7 +398,13 @@ impl Router {
         let instance = self.instance.upgrade().ok_or(Error::Closed)?;
         let mut entries = self.reactive.entries.lock().unwrap();
         check_callback(&entries, callback)?;
-        if entries.subscriptions.len() >= self.capabilities.reactive.subscriptions {
+        if entries.subscriptions_sweep.due(entries.subscriptions.len())
+            || self
+                .capabilities
+                .reactive
+                .subscriptions
+                .is_some_and(|limit| entries.subscriptions.len() >= limit)
+        {
             let retired: Vec<_> = entries
                 .subscriptions
                 .iter()
@@ -409,8 +415,16 @@ impl Router {
                 entries.subscriptions.remove(&id);
                 entries.callbacks.remove(&callback);
             }
+            entries
+                .subscriptions_sweep
+                .retained(entries.subscriptions.len());
         }
-        if entries.subscriptions.len() >= self.capabilities.reactive.subscriptions {
+        if self
+            .capabilities
+            .reactive
+            .subscriptions
+            .is_some_and(|limit| entries.subscriptions.len() >= limit)
+        {
             return Err(Error::Overloaded);
         }
         let id = next_id()?;
@@ -563,16 +577,33 @@ impl Router {
             .ok_or_else(|| Error::InvalidInput("missing dispatch mode".into()))?;
         let input = args.one().map_err(invalid_payload)?;
         let mut entries = self.reactive.entries.lock().unwrap();
-        if entries.dispatches.len() >= self.capabilities.reactive.dispatches {
-            entries.dispatches.retain(|_, d| !d.observed);
-        }
-        if entries.dispatches.len() >= self.capabilities.reactive.dispatches
-            || entries
+        if entries.dispatches_sweep.due(entries.dispatches.len())
+            || self
+                .capabilities
+                .reactive
                 .dispatches
-                .values()
-                .filter(|d| d.result.borrow().is_none())
-                .count()
-                >= self.capabilities.reactive.active_dispatches
+                .is_some_and(|limit| entries.dispatches.len() >= limit)
+        {
+            entries.dispatches.retain(|_, d| !d.observed);
+            entries.dispatches_sweep.retained(entries.dispatches.len());
+        }
+        if self
+            .capabilities
+            .reactive
+            .dispatches
+            .is_some_and(|limit| entries.dispatches.len() >= limit)
+            || self
+                .capabilities
+                .reactive
+                .active_dispatches
+                .is_some_and(|limit| {
+                    entries
+                        .dispatches
+                        .values()
+                        .filter(|d| d.result.borrow().is_none())
+                        .count()
+                        >= limit
+                })
         {
             return Err(Error::Overloaded);
         }
@@ -627,7 +658,12 @@ impl Router {
         {
             let mut entries = self.reactive.entries.lock().unwrap();
             check_callback(&entries, callback)?;
-            if entries.runs >= self.capabilities.reactive.runs {
+            if self
+                .capabilities
+                .reactive
+                .runs
+                .is_some_and(|limit| entries.runs >= limit)
+            {
                 return Err(Error::Overloaded);
             }
             entries.runs += 1;

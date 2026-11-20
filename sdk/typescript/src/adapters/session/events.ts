@@ -1,4 +1,4 @@
-import { Identities, makeRoom, Completion, Observation, registration } from './retention.ts';
+import { Identities, sweepRetired, Completion, Observation, registration } from './retention.ts';
 import { OperationInbox, RESERVED_CAPACITY } from '../../protocols/session/operations.ts';
 import type { Message } from '../../core/message.ts';
 import { payload, controlOnly, type Payload } from '../../protocols/session/messages.ts';
@@ -67,6 +67,7 @@ type Entry = { callback?: EventCallback; running: number };
 export class EventRegistry {
   private entries = new Map<string, Entry>();
   private seen = new OperationInbox(RESERVED_CAPACITY);
+  configure(capacity: number) { this.seen.grow(capacity); }
   private nextListener = new Identities();
   private nextDispatch = new Identities();
   private declarations: Record<string, { name: string; revision: string }>;
@@ -95,7 +96,7 @@ export class EventRegistry {
     callback: EventCallback,
   ): Promise<Subscription> {
     this.check(event);
-    makeRoom(this.entries, 4096, (e) => !e.callback && !e.running);
+    sweepRetired(this.entries, (e) => !e.callback && !e.running);
     const listener = this.nextListener.next('l');
     this.entries.set(listener, { callback, running: 0 });
     const reply = await registration(channel.request('event_register', { context, event, listener }), () => this.entries.delete(listener));

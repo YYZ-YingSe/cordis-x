@@ -2,6 +2,7 @@
 #include <cordis/core/error.hpp>
 #include <charconv>
 #include <array>
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -9,21 +10,23 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 namespace cordis::session {
 inline constexpr std::size_t reserved_capacity = 16;
-inline const std::vector<std::size_t> reverse_lanes(14, reserved_capacity);
 struct OperationLayout {
-  std::vector<std::size_t> forward;
+  std::vector<std::size_t> forward, reverse;
   std::size_t incoming, output, connections;
-  explicit OperationLayout(std::size_t ordinary) : forward(9, reserved_capacity) {
-    if (ordinary == 0 || ordinary > UINT32_MAX / 2 - reserved_capacity ||
-        ordinary > UINT32_MAX - 22 * reserved_capacity)
+  explicit OperationLayout(std::size_t ordinary)
+      : forward(9, std::max(ordinary, reserved_capacity)),
+        reverse(14, std::max(ordinary, reserved_capacity)) {
+    const auto auxiliary = reverse.front();
+    if (ordinary == 0 || ordinary > UINT32_MAX || auxiliary > (UINT32_MAX - ordinary) / 22)
       throw Refusal("invalid_argument", "max_inflight must be positive and representable");
     forward[0] = ordinary;
-    incoming = ordinary + 8 * reserved_capacity;
-    output = incoming + 14 * reserved_capacity;
-    connections = 2 * (ordinary + reserved_capacity);
+    incoming = ordinary + 8 * auxiliary;
+    output = incoming + 14 * auxiliary;
+    connections = 2 * (ordinary + auxiliary);
   }
 };
 struct OperationId {
@@ -43,52 +46,70 @@ struct OperationId {
 };
 struct OperationSlot { uint64_t generation = 0; bool active = false; };
 class OperationOutbox {
-  std::vector<OperationSlot> slots;
-  std::vector<std::pair<std::size_t, std::size_t>> lanes;
+  struct Lane {
+    std::size_t start, capacity;
+    std::vector<OperationSlot> entries;
+    std::vector<std::size_t> free;
+  };
+  std::vector<Lane> lanes;
 public:
   explicit OperationOutbox(std::size_t capacity) : OperationOutbox(std::vector<std::size_t>{capacity}) {}
   explicit OperationOutbox(const std::vector<std::size_t> &capacities) {
     std::size_t end = 0;
-    for (const auto capacity : capacities) {
-      if (capacity > slots.max_size() - end) throw std::length_error("operation capacity overflow");
-      lanes.emplace_back(end, end + capacity);
+    for (auto capacity : capacities) {
+      if (capacity > std::numeric_limits<std::size_t>::max() - end)
+        throw std::length_error("operation capacity overflow");
+      lanes.push_back({end, capacity, {}, {}});
       end += capacity;
     }
-    slots.resize(end);
   }
-  // Caller serializes access together with its pending request map.
+  // Caller serializes allocation with its pending request map.
   std::string allocate(std::optional<std::size_t> lane = {}) {
-    const auto begin = lane ? lanes.at(*lane).first : 0;
-    const auto end = lane ? lanes.at(*lane).second : slots.size();
-    for (std::size_t n = begin; n < end; ++n) {
-      auto &s = slots[n];
-      if (!s.active && s.generation != std::numeric_limits<uint64_t>::max()) {
-        s.active = true;
-        return OperationId{n, ++s.generation}.str();
+    for (std::size_t i = 0; i < lanes.size(); ++i) {
+      if (lane && i != *lane) continue;
+      auto &pool = lanes[i];
+      std::size_t index;
+      if (!pool.free.empty()) {
+        index = pool.free.back();
+        pool.free.pop_back();
+      } else {
+        if (pool.entries.size() >= pool.capacity) continue;
+        index = pool.entries.size();
+        pool.entries.emplace_back();
       }
+      auto &entry = pool.entries[index];
+      entry.active = true;
+      return OperationId{pool.start + index, ++entry.generation}.str();
     }
     throw Refusal("overloaded", "request slots full");
   }
   bool complete(const std::string &value) {
     auto id = OperationId::parse(value);
-    if (!id || id->slot >= slots.size()) return false;
-    auto &s = slots[id->slot];
-    if (!s.active || s.generation != id->generation) return false;
-    s.active = false;
-    return true;
+    if (!id) return false;
+    for (auto &pool : lanes) {
+      if (id->slot < pool.start || id->slot - pool.start >= pool.entries.size()) continue;
+      auto index = id->slot - pool.start;
+      auto &entry = pool.entries[index];
+      if (!entry.active || entry.generation != id->generation) return false;
+      entry.active = false;
+      if (entry.generation != UINT64_MAX) pool.free.push_back(index);
+      return true;
+    }
+    return false;
   }
 };
 class OperationInbox {
-  struct State { std::mutex mutex; std::vector<OperationSlot> slots;
-    explicit State(std::size_t count) : slots(count) {} };
+  struct State { std::mutex mutex; std::size_t capacity;
+    std::unordered_map<std::size_t, OperationSlot> slots;
+    explicit State(std::size_t count) : capacity(count) {} };
   std::shared_ptr<State> state;
 public:
   explicit OperationInbox(std::size_t capacity)
       : state(std::make_shared<State>(capacity)) {}
   void grow(std::size_t capacity) {
     std::lock_guard lock(state->mutex);
-    if (capacity < state->slots.size()) throw std::length_error("operation table cannot shrink");
-    state->slots.resize(capacity);
+    if (capacity < state->capacity) throw std::length_error("operation table cannot shrink");
+    state->capacity = capacity;
   }
   struct Admission {
     std::shared_ptr<State> state;
@@ -100,7 +121,7 @@ public:
   Admission admit(const std::string &value) {
     auto id = OperationId::parse(value);
     std::lock_guard lock(state->mutex);
-    if (!id || id->slot >= state->slots.size())
+    if (!id || id->slot >= state->capacity)
       throw Refusal("protocol", "invalid request identity");
     auto &s = state->slots[id->slot];
     if (s.active || id->generation <= s.generation)

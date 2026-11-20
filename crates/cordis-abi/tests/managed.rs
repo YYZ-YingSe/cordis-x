@@ -125,9 +125,9 @@ async fn direct_sequence_and_task_self_waits_are_rejected() {
 async fn full_task_capacity_can_cancel_and_drain_through_old_dependencies() {
     let files = Files::new("cordis_abi_managed");
     let mut capabilities = caps();
-    capabilities.max_contexts = 2;
-    capabilities.max_callbacks = 2;
-    capabilities.managed.active_tasks = 2;
+    capabilities.max_contexts = Some(2);
+    capabilities.max_callbacks = Some(2);
+    capabilities.managed.active_tasks = Some(2);
     let rig = rig(&files, cordis_wire::json!({}), capabilities).await;
     for _ in 0..2 {
         invoke_json(&rig.handle, "task-start", Value::Null)
@@ -239,7 +239,7 @@ async fn forward_failure_preserves_final_inverse_and_does_not_fault_provider() {
 async fn cancelled_ready_and_dispose_waits_keep_late_step_but_stop_next_admission() {
     let files = Files::new("cordis_abi_managed");
     let mut capabilities = caps();
-    capabilities.max_callbacks = 1;
+    capabilities.max_callbacks = Some(1);
     let rig = rig(&files, json!({"hold_step":true}), capabilities).await;
     invoke_json(&rig.handle, "sequence-start", Value::Null)
         .await
@@ -482,10 +482,10 @@ async fn failed_task_join_retains_failed_responsibility_without_retry() {
 async fn managed_admission_limits_leave_no_untracked_cpp_callbacks() {
     let files = Files::new("cordis_abi_managed");
     let mut capabilities = caps();
-    capabilities.managed.sequences = 1;
-    capabilities.managed.steps = 1;
-    capabilities.managed.scopes = 1;
-    capabilities.managed.tasks = 1;
+    capabilities.managed.sequences = Some(1);
+    capabilities.managed.steps = Some(1);
+    capabilities.managed.scopes = Some(1);
+    capabilities.managed.tasks = Some(1);
     let rig = rig(&files, json!({"finite_task":true}), capabilities).await;
     invoke_json(&rig.handle, "sequence-start", Value::Null)
         .await

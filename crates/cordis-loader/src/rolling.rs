@@ -50,13 +50,6 @@ impl<T: ?Sized + Send + Sync + 'static> Candidates<T> {
                 "duplicate candidate for activation".into(),
             ));
         }
-        // A normal deployment has at most two generations. This also bounds
-        // malformed factory callbacks and externally retained registration tokens.
-        if entries.len() >= 16 {
-            return Err(cordis_runtime::Error::Message(
-                "candidate table full".into(),
-            ));
-        }
         entries.insert(activation, candidate.downgrade());
         Ok(())
     }
@@ -117,7 +110,6 @@ pub enum DeploymentError {
     Promote(cordis_runtime::Error),
     Drain(crate::Error),
     Blocked(crate::Error),
-    QueueFull,
     Stopped,
 }
 impl std::fmt::Display for DeploymentError {
@@ -134,7 +126,6 @@ impl std::fmt::Display for DeploymentError {
                 f,
                 "deployment blocked by retained recovery responsibility: {e}"
             ),
-            Self::QueueFull => f.write_str("deployment queue full"),
             Self::Stopped => f.write_str("deployment controller stopped"),
         }
     }
@@ -198,7 +189,7 @@ type Reply = oneshot::Sender<Result<DeploymentSnapshot, DeploymentError>>;
 /// empty/disabled desired state). It exclusively owns its Loader and promotions.
 /// Drop does not dispose plugins; submit an empty configuration before shutdown.
 pub struct RollingDeployment<T: ?Sized> {
-    commands: mpsc::Sender<(Configuration, Reply)>,
+    commands: mpsc::UnboundedSender<(Configuration, Reply)>,
     loader: Loader,
     state: Arc<Mutex<DeploymentState>>,
     changed: watch::Sender<()>,
@@ -234,7 +225,7 @@ impl<T: ?Sized + Send + Sync + 'static> RollingDeployment<T> {
         let loader = Loader::new(runtime, registry);
         let state = Arc::new(Mutex::new(DeploymentState::default()));
         let (changed, _) = watch::channel(());
-        let (commands, mut requests) = mpsc::channel::<(Configuration, Reply)>(16);
+        let (commands, mut requests) = mpsc::unbounded_channel::<(Configuration, Reply)>();
         let mut worker = Worker {
             loader: loader.clone(),
             state: state.clone(),
@@ -284,11 +275,8 @@ impl<T: ?Sized + Send + Sync + 'static> RollingDeployment<T> {
     {
         let (reply, wait) = oneshot::channel();
         self.commands
-            .try_send((config, reply))
-            .map_err(|error| match error {
-                mpsc::error::TrySendError::Full(_) => DeploymentError::QueueFull,
-                mpsc::error::TrySendError::Closed(_) => DeploymentError::Stopped,
-            })?;
+            .send((config, reply))
+            .map_err(|_| DeploymentError::Stopped)?;
         Ok(wait)
     }
     pub fn snapshot(&self) -> DeploymentSnapshot {

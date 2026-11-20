@@ -27,7 +27,8 @@ pub struct SessionSpec {
     pub initialization_timeout: Duration,
     pub execution_timeout: Option<Duration>,
     pub io_timeout: Duration,
-    pub max_inflight: usize,
+    /// Optional host policy per ordinary lane. An absent limit uses the wire ID range.
+    pub max_inflight: Option<usize>,
     pub frame_capacity: usize,
     pub stop_timeout: Duration,
     pub composition: crate::CompositionLimits,
@@ -40,7 +41,7 @@ impl Default for SessionSpec {
             initialization_timeout: Duration::from_secs(10),
             execution_timeout: None,
             io_timeout: Duration::from_secs(5),
-            max_inflight: 16,
+            max_inflight: None,
             frame_capacity: cordis_wire::DEFAULT_FRAME_CAPACITY,
             stop_timeout: Duration::from_secs(5),
             composition: crate::CompositionLimits::default(),
@@ -49,6 +50,12 @@ impl Default for SessionSpec {
 }
 
 impl SessionSpec {
+    pub(crate) fn ordinary_capacity(&self) -> usize {
+        self.max_inflight.unwrap_or_else(|| {
+            cordis_wire::operations::Layout::max_ordinary(Semaphore::MAX_PERMITS)
+        })
+    }
+
     pub fn middleware(mut self, binding: cordis_host::MiddlewareBinding) -> Self {
         self.bindings.middleware.push(binding);
         self
@@ -198,7 +205,7 @@ impl SessionSpec {
             .await?;
         let session = owned.with(Clone::clone)?;
         let ready = session.request("hello", json!({
-            "max_inflight": self.max_inflight,
+            "max_inflight": self.ordinary_capacity(),
             "io_timeout_ms": self.io_timeout.as_millis() as u64,
             "frame_capacity": self.frame_capacity,
             "capabilities": {"dependency_resources":true,"metadata":true,"effects":true,"effect_sequences":true,"scopes":true,"tasks":true,"events":true,"middleware":true,"composition":true},
@@ -327,7 +334,7 @@ impl SessionSpec {
             endpoint: self.endpoint,
             session,
             activation,
-            capacity: Arc::new(Semaphore::new(self.max_inflight)),
+            capacity: Arc::new(Semaphore::new(self.ordinary_capacity())),
             resources: ready["capabilities"]["resources"]
                 .as_bool()
                 .unwrap_or(false),

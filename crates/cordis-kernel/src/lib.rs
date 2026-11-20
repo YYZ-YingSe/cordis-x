@@ -759,30 +759,50 @@ impl Kernel {
         false
     }
 
-    /// Follow the actual recovery barrier, including paths that alternate
-    /// committed dependency edges and child ownership edges.
-    pub fn recovery_waits_for(&self, waiter: FiberId, blocker: FiberId) -> bool {
-        let mut todo = vec![waiter];
+    /// Traverse committed dependencies, live ownership and retained implementations
+    /// in the same graph. Each reachable blocker is visited once.
+    pub fn recovery_blockers(
+        &self,
+        start: FiberId,
+        retained: impl IntoIterator<Item = (FiberId, FiberId)>,
+    ) -> BTreeSet<FiberId> {
+        let mut edges = BTreeMap::<FiberId, Vec<FiberId>>::new();
+        for (&owner, fiber) in &self.fibers {
+            let parent = fiber
+                .spec
+                .parent
+                .filter(|_| fiber.state != Lifecycle::Inactive);
+            for activation in fiber.committed.values().copied().chain(parent) {
+                if activation.fiber != owner
+                    && self.fibers.contains_key(&activation.fiber)
+                    && self.activation(activation.fiber) == activation
+                {
+                    edges.entry(activation.fiber).or_default().push(owner);
+                }
+            }
+        }
+        for (provider, owner) in retained {
+            edges.entry(provider).or_default().push(owner);
+        }
+        let mut todo = vec![start];
         let mut seen = BTreeSet::new();
         while let Some(id) = todo.pop() {
-            if !seen.insert(id) {
-                continue;
+            if seen.insert(id)
+                && let Some(next) = edges.get(&id)
+            {
+                todo.extend(next.iter().copied());
             }
-            if id == blocker {
-                return true;
-            }
-            if !self.fibers.contains_key(&id) {
-                continue;
-            }
-            let activation = self.activation(id);
-            todo.extend(self.fibers.iter().filter_map(|(&other, f)| {
-                (other != id
-                    && (f.committed.values().any(|&a| a == activation)
-                        || (f.spec.parent == Some(activation) && f.state != Lifecycle::Inactive)))
-                    .then_some(other)
-            }));
         }
-        false
+        seen
+    }
+
+    pub fn cleanup_failures(&self) -> impl Iterator<Item = (FiberId, &str)> {
+        self.fibers
+            .iter()
+            .filter_map(|(&id, fiber)| match &fiber.outcome {
+                Some(Outcome::CleanupFailed(message)) => Some((id, message.as_str())),
+                _ => None,
+            })
     }
 
     /// Detect waiting for a child whose activation transitively needs the waiting initializer.

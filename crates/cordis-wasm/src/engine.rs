@@ -23,9 +23,15 @@ pub struct Limits {
     pub core_instances: usize,
     pub tables: usize,
     pub memories: usize,
-    pub resources: usize,
-    pub pending_calls: usize,
+    pub resources: Option<usize>,
+    pub pending_calls: Option<usize>,
     pub artifact_bytes: usize,
+}
+impl Limits {
+    pub(crate) fn resource_capacity(&self) -> usize {
+        self.resources
+            .unwrap_or((u32::MAX as usize).min(tokio::sync::Semaphore::MAX_PERMITS))
+    }
 }
 impl Default for Limits {
     fn default() -> Self {
@@ -37,8 +43,8 @@ impl Default for Limits {
             core_instances: 8,
             tables: 8,
             memories: 1,
-            resources: 1024,
-            pending_calls: 16,
+            resources: None,
+            pending_calls: None,
             artifact_bytes: 16 * 1024 * 1024,
         }
     }
@@ -82,12 +88,14 @@ fn result<T>(value: wasmtime::Result<std::result::Result<T, wit::Failure>>) -> R
 impl Module {
     pub fn compile(compiler: &Compiler, bytes: &[u8], limits: Limits) -> Result<Self> {
         if bytes.len() > limits.artifact_bytes
-            || limits.pending_calls == 0
-            || limits.pending_calls > tokio::sync::Semaphore::MAX_PERMITS
+            || limits.pending_calls == Some(0)
+            || limits
+                .pending_calls
+                .is_some_and(|n| n > tokio::sync::Semaphore::MAX_PERMITS)
             || limits.memory_bytes == 0
             || limits.fuel_on_admission == 0
             || limits.initialization_fuel == 0
-            || limits.resources == 0
+            || limits.resources == Some(0)
         {
             return Err(Error::InvalidInput(
                 "invalid limits or component too large".into(),

@@ -15,32 +15,22 @@ use std::{
 };
 use tokio::sync::{Semaphore, watch};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ManagedLimits {
-    pub sequences: usize,
-    pub steps: usize,
-    pub scopes: usize,
-    pub scope_runs: usize,
-    pub tasks: usize,
-    pub active_sequences: usize,
-    pub active_tasks: usize,
-}
-impl Default for ManagedLimits {
-    fn default() -> Self {
-        Self {
-            sequences: 256,
-            steps: 4096,
-            scopes: 256,
-            scope_runs: 4096,
-            tasks: 4096,
-            active_sequences: 16,
-            active_tasks: 16,
-        }
-    }
+    pub sequences: Option<usize>,
+    pub steps: Option<usize>,
+    pub scopes: Option<usize>,
+    pub scope_runs: Option<usize>,
+    pub tasks: Option<usize>,
+    pub active_sequences: Option<usize>,
+    pub active_tasks: Option<usize>,
 }
 impl ManagedLimits {
     pub(crate) fn validate(&self) -> Result<()> {
-        if self.steps > cordis_wire::MAX_INTEGER as usize {
+        if self
+            .steps
+            .is_some_and(|n| n > (cordis_wire::MAX_INTEGER as usize).min(Semaphore::MAX_PERMITS))
+        {
             return Err(Error::InvalidInput(
                 "step capacity exceeds portable integers".into(),
             ));
@@ -62,6 +52,9 @@ fn self_wait(operation: u32, callback: u64) -> Result<()> {
 }
 #[derive(Default)]
 struct Registry {
+    scopes_sweep: cordis_wire::retention::Sweep,
+    tasks_sweep: cordis_wire::retention::Sweep,
+    sequences_sweep: cordis_wire::retention::Sweep,
     sequences: BTreeMap<u64, Arc<Sequence>>,
     scopes: BTreeMap<u64, WeakScopeHandle>,
     tasks: BTreeMap<u64, Arc<Task>>,
@@ -104,6 +97,7 @@ impl Managed {
     }
 }
 struct Sequence {
+    step_sweep: cordis_wire::retention::Sweep,
     callback: u64,
     handle: OnceLock<WeakEffectSequence>,
     forward: watch::Sender<Option<Result<Value>>>,
@@ -205,7 +199,11 @@ impl Router {
         let mut entries = self.managed.entries.lock().unwrap();
         check_callback(&entries, callback)?;
         let limits = &self.capabilities.managed;
-        if entries.sequences.len() >= limits.sequences {
+        if entries.sequences_sweep.due(entries.sequences.len())
+            || limits
+                .sequences
+                .is_some_and(|limit| entries.sequences.len() >= limit)
+        {
             let retired: Vec<_> = entries
                 .sequences
                 .iter()
@@ -216,20 +214,31 @@ impl Router {
                 entries.sequences.remove(&id);
                 entries.callbacks.remove(&callback);
             }
+            entries.sequences_sweep.retained(entries.sequences.len());
         }
-        if entries.sequences.len() >= limits.sequences
-            || entries
-                .sequences
-                .values()
-                .filter(|e| e.forward.borrow().is_none())
-                .count()
-                >= limits.active_sequences.min(self.capabilities.max_contexts)
+        if limits
+            .sequences
+            .is_some_and(|limit| entries.sequences.len() >= limit)
+            || limits
+                .active_sequences
+                .into_iter()
+                .chain(self.capabilities.max_contexts)
+                .min()
+                .is_some_and(|limit| {
+                    entries
+                        .sequences
+                        .values()
+                        .filter(|e| e.forward.borrow().is_none())
+                        .count()
+                        >= limit
+                })
         {
             return Err(Error::Overloaded);
         }
         let id = next_id()?;
         let (forward, _) = watch::channel(None);
         let entry = Arc::new(Sequence {
+            step_sweep: Default::default(),
             callback,
             handle: OnceLock::new(),
             forward,
@@ -369,10 +378,22 @@ impl Router {
     fn scope_create(&self, grant: u64, label: String) -> Result<u64> {
         let ctx = self.context(grant)?;
         let mut entries = self.managed.entries.lock().unwrap();
-        if entries.scopes.len() >= self.capabilities.managed.scopes {
+        if entries.scopes_sweep.due(entries.scopes.len())
+            || self
+                .capabilities
+                .managed
+                .scopes
+                .is_some_and(|limit| entries.scopes.len() >= limit)
+        {
             entries.scopes.retain(|_, e| !e.is_retired());
+            entries.scopes_sweep.retained(entries.scopes.len());
         }
-        if entries.scopes.len() >= self.capabilities.managed.scopes {
+        if self
+            .capabilities
+            .managed
+            .scopes
+            .is_some_and(|limit| entries.scopes.len() >= limit)
+        {
             return Err(Error::Overloaded);
         }
         let id = next_id()?;
@@ -435,7 +456,12 @@ impl Router {
             {
                 let mut entries = self.managed.entries.lock().unwrap();
                 check_callback(&entries, callback)?;
-                if entries.runs.len() >= self.capabilities.managed.scope_runs {
+                if self
+                    .capabilities
+                    .managed
+                    .scope_runs
+                    .is_some_and(|limit| entries.runs.len() >= limit)
+                {
                     return Err(Error::Overloaded);
                 }
                 entries.callbacks.insert(callback);
@@ -485,7 +511,11 @@ impl Router {
         let mut entries = self.managed.entries.lock().unwrap();
         check_callback(&entries, callback)?;
         let limits = &self.capabilities.managed;
-        if entries.tasks.len() >= limits.tasks {
+        if entries.tasks_sweep.due(entries.tasks.len())
+            || limits
+                .tasks
+                .is_some_and(|limit| entries.tasks.len() >= limit)
+        {
             let retired: Vec<_> = entries
                 .tasks
                 .iter()
@@ -501,14 +531,24 @@ impl Router {
                 entries.tasks.remove(&id);
                 entries.callbacks.remove(&callback);
             }
+            entries.tasks_sweep.retained(entries.tasks.len());
         }
-        if entries.tasks.len() >= limits.tasks
-            || entries
-                .tasks
-                .values()
-                .filter(|e| e.outcome.lock().unwrap().is_none())
-                .count()
-                >= limits.active_tasks.min(self.capabilities.max_contexts)
+        if limits
+            .tasks
+            .is_some_and(|limit| entries.tasks.len() >= limit)
+            || limits
+                .active_tasks
+                .into_iter()
+                .chain(self.capabilities.max_contexts)
+                .min()
+                .is_some_and(|limit| {
+                    entries
+                        .tasks
+                        .values()
+                        .filter(|e| e.outcome.lock().unwrap().is_none())
+                        .count()
+                        >= limit
+                })
         {
             return Err(Error::Overloaded);
         }
@@ -581,7 +621,7 @@ impl Sequence {
         ctx: Context,
         instance: Arc<Instance>,
         total: Arc<tokio::sync::Semaphore>,
-        limit: usize,
+        limit: Option<usize>,
     ) -> EffectStep {
         let permit = match total.try_acquire_owned() {
             Ok(permit) => permit,
@@ -605,13 +645,14 @@ impl Sequence {
         };
         let ticket = {
             let mut steps = self.steps.lock().unwrap();
-            if steps.len() >= limit {
+            if self.step_sweep.due(steps.len()) || limit.is_some_and(|n| steps.len() >= n) {
                 steps.retain(|t| {
                     matches!(
                         *t.state.lock().unwrap(),
                         "pending" | "owned" | "unknown" | "failed"
                     )
                 });
+                self.step_sweep.retained(steps.len());
             }
             let ticket = Arc::new(StepTicket {
                 number,

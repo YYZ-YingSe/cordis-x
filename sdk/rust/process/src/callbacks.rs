@@ -121,6 +121,8 @@ pub struct Sequence {
     steps: RefCell<BTreeMap<String, Rc<Entry>>>,
 }
 pub struct Registry {
+    entry_sweep: cordis_wire::retention::Sweep,
+    sequence_sweep: cordis_wire::retention::Sweep,
     next: Cell<u64>,
     pub entries: RefCell<BTreeMap<String, Rc<Entry>>>,
     sequences: RefCell<BTreeMap<String, Rc<Sequence>>>,
@@ -130,6 +132,8 @@ pub struct Registry {
 impl Default for Registry {
     fn default() -> Self {
         Self {
+            entry_sweep: Default::default(),
+            sequence_sweep: Default::default(),
             next: Cell::new(0),
             entries: RefCell::default(),
             sequences: RefCell::default(),
@@ -143,6 +147,10 @@ impl Default for Registry {
     }
 }
 impl Registry {
+    pub fn configure(&self, capacity: usize) -> Result<()> {
+        self.event_calls.grow(capacity).map_err(unknown)?;
+        self.middleware_calls.grow(2 * capacity).map_err(unknown)
+    }
     pub fn id(&self, prefix: char) -> Result<String> {
         self.next.set(
             self.next
@@ -156,13 +164,11 @@ impl Registry {
         self.insert_payload(prefix, control_callback(callback))
     }
     pub fn insert_payload(&self, prefix: char, callback: WireCallback) -> Result<String> {
-        if self.entries.borrow().len() >= 4096 {
+        if self.entry_sweep.due(self.entries.borrow().len()) {
             self.entries
                 .borrow_mut()
                 .retain(|_, e| e.callback.borrow().is_some() || e.running.get() != 0);
-        }
-        if self.entries.borrow().len() >= 4096 {
-            return Err(refused("overloaded", "callback capacity reached"));
+            self.entry_sweep.retained(self.entries.borrow().len());
         }
         let id = self.id(prefix)?;
         self.entries
@@ -206,13 +212,11 @@ impl Registry {
             .ok_or_else(|| refused("duplicate_operation", call))
     }
     pub fn sequence(&self, producer: Producer) -> Result<String> {
-        if self.sequences.borrow().len() >= 256 {
+        if self.sequence_sweep.due(self.sequences.borrow().len()) {
             self.sequences
                 .borrow_mut()
                 .retain(|_, e| e.producer.borrow().is_some() || e.running.get());
-        }
-        if self.sequences.borrow().len() >= 256 {
-            return Err(refused("overloaded", "sequence capacity reached"));
+            self.sequence_sweep.retained(self.sequences.borrow().len());
         }
         let id = self.id('s')?;
         self.sequences.borrow_mut().insert(
@@ -272,16 +276,19 @@ impl Registry {
         {
             return Err(refused("invalid_step", "sequence order or state mismatch"));
         }
-        if sequence.steps.borrow().len() >= 4096 {
-            return Err(refused("exhausted", "sequence steps exhausted"));
-        }
         let producer = sequence
             .producer
             .borrow()
             .clone()
             .ok_or_else(|| refused("closed", "producer absent"))?;
+        sequence.next.set(
+            sequence
+                .next
+                .get()
+                .checked_add(1)
+                .ok_or_else(|| refused("exhausted", "step identity exhausted"))?,
+        );
         sequence.running.set(true);
-        sequence.next.set(sequence.next.get() + 1);
         let result = std::panic::AssertUnwindSafe(async { producer(ctx).await })
             .catch_unwind()
             .await

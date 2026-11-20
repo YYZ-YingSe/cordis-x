@@ -608,20 +608,29 @@ impl PluginHandle {
                 // Report a failed dependent instead of hanging forever behind its cleanup lease.
                 if snapshot.state == Lifecycle::Unloading {
                     let retained = self.inner.retained.lock().unwrap();
-                    let reachable = retention_waits(&state, &retained, self.id);
-                    for pin in retained.iter().filter_map(Weak::upgrade) {
-                        if pin.live()
-                            && reachable.contains(&pin.provider.fiber)
-                            && let Some(error) = pin.failure.lock().unwrap().clone()
+                    let mut failures = retained
+                        .iter()
+                        .filter_map(Weak::upgrade)
+                        .filter_map(|pin| {
+                            if !pin.live() {
+                                return None;
+                            }
+                            let error = pin.failure.lock().unwrap().clone()?;
+                            Some((pin.provider.fiber, pin.owner.fiber, error.to_string()))
+                        })
+                        .chain(
+                            state
+                                .kernel
+                                .cleanup_failures()
+                                .map(|(id, message)| (id, id, message.to_owned())),
+                        )
+                        .peekable();
+                    if failures.peek().is_some() {
+                        let reachable = retention_waits(&state, &retained, self.id);
+                        if let Some((_, id, message)) =
+                            failures.find(|(blocker, _, _)| reachable.contains(blocker))
                         {
-                            return Err(Error::CleanupBlocked(pin.owner.fiber, error.to_string()));
-                        }
-                    }
-                    for other in state.kernel.snapshots() {
-                        if let Some(Outcome::CleanupFailed(message)) = other.outcome
-                            && reachable.contains(&other.id)
-                        {
-                            return Err(Error::CleanupBlocked(other.id, message));
+                            return Err(Error::CleanupBlocked(id, message));
                         }
                     }
                 }
@@ -657,24 +666,11 @@ pub(crate) fn retention_waits(
     pins: &[Weak<crate::retention::Pin>],
     start: FiberId,
 ) -> BTreeSet<FiberId> {
-    let snapshots = state.kernel.snapshots();
-    let mut found = BTreeSet::from([start]);
-    loop {
-        let previous = found.clone();
-        for current in &previous {
-            for snapshot in &snapshots {
-                if state.kernel.recovery_waits_for(*current, snapshot.id) {
-                    found.insert(snapshot.id);
-                }
-            }
-            for pin in pins.iter().filter_map(Weak::upgrade) {
-                if pin.live() && pin.provider.fiber == *current {
-                    found.insert(pin.owner.fiber);
-                }
-            }
-        }
-        if found == previous {
-            return found;
-        }
-    }
+    state.kernel.recovery_blockers(
+        start,
+        pins.iter()
+            .filter_map(Weak::upgrade)
+            .filter(|pin| pin.live())
+            .map(|pin| (pin.provider.fiber, pin.owner.fiber)),
+    )
 }

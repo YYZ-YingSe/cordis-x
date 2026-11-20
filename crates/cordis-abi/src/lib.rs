@@ -347,7 +347,7 @@ struct Instance {
 impl Instance {
     fn new(module: Arc<Module>, capabilities: Arc<Capabilities>) -> Result<Arc<Self>> {
         let host_id = context::Router::allocate_id()?;
-        let max_inflight = capabilities.max_inflight;
+        let max_inflight = capabilities.max_inflight.unwrap_or(Semaphore::MAX_PERMITS);
         Ok(Arc::new_cyclic(|weak| Self {
             descriptor: module
                 .descriptor

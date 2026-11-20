@@ -10,6 +10,7 @@ use std::{
 use tokio::sync::Semaphore;
 
 pub(crate) struct Resources {
+    sweep: cordis_wire::retention::Sweep,
     entries: Mutex<BTreeMap<u64, Arc<OnceLock<cordis_host::WeakResource>>>>,
     calls: Semaphore,
     cleanup: Semaphore,
@@ -18,6 +19,7 @@ pub(crate) struct Resources {
 impl Resources {
     pub fn new(capacity: usize) -> Self {
         Self {
+            sweep: Default::default(),
             entries: Mutex::default(),
             calls: Semaphore::new(capacity),
             cleanup: Semaphore::new(capacity),
@@ -26,11 +28,9 @@ impl Resources {
     }
     fn reserve(&self) -> Result<(u64, Arc<OnceLock<cordis_host::WeakResource>>)> {
         let mut entries = self.entries.lock().unwrap();
-        if entries.len() >= 4096 {
+        if self.sweep.due(entries.len()) {
             entries.retain(|_, e| !e.get().is_some_and(cordis_host::WeakResource::is_released));
-        }
-        if entries.len() >= 4096 {
-            return Err(Error::Overloaded);
+            self.sweep.retained(entries.len());
         }
         let id = next_id()?;
         let entry = Arc::new(OnceLock::new());

@@ -348,7 +348,7 @@ async fn dynamic_intercepts_are_pinned_through_real_wasm_callbacks_and_cleanup()
 }
 #[tokio::test]
 async fn context_dependencies_effects_and_expiring_authority() {
-    let app = app_with(|capabilities| capabilities.max_calls = 8192).await;
+    let app = app_with(|capabilities| capabilities.max_calls = Some(8192)).await;
     assert_eq!(app.call("echo", json!(42)).await.unwrap(), json!(42.0));
     let info = app.call("info", json!({})).await.unwrap();
     assert_ne!(info["owner"], info["definition"]);
@@ -688,7 +688,7 @@ fn invalid_execution_and_lifecycle_deadlines_fail_before_compilation() {
 }
 #[tokio::test]
 async fn effect_admission_limit_does_not_fault_healthy_instance() {
-    let app = app_with(|caps| caps.max_handles = 1).await;
+    let app = app_with(|caps| caps.max_handles = Some(1)).await;
     for _ in 0..100 {
         app.call("subscribe", json!("one")).await.unwrap();
         assert!(app.call("subscribe", json!("two")).await.is_err());
@@ -701,7 +701,7 @@ async fn effect_admission_limit_does_not_fault_healthy_instance() {
 
 #[tokio::test]
 async fn failed_registration_returns_reserved_capacity() {
-    let app = app_with(|caps| caps.max_handles = 1).await;
+    let app = app_with(|caps| caps.max_handles = Some(1)).await;
     for _ in 0..3 {
         assert!(app.call("invalid-registration", json!({})).await.is_err());
     }

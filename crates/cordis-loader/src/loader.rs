@@ -197,7 +197,7 @@ enum Command {
 /// empty Configuration or shut down the owning Runtime explicitly.
 #[derive(Clone)]
 pub struct Loader {
-    commands: mpsc::Sender<Command>,
+    commands: mpsc::UnboundedSender<Command>,
     state: Arc<Mutex<State>>,
     runtime: Runtime,
     changed: watch::Sender<()>,
@@ -221,7 +221,7 @@ impl LoaderChanges {
 impl Loader {
     pub fn new(runtime: Runtime, registry: Registry) -> Self {
         let state = Arc::new(Mutex::new(State::default()));
-        let (commands, mut receiver) = mpsc::channel(16);
+        let (commands, mut receiver) = mpsc::unbounded_channel();
         let (changed, _) = watch::channel(());
         let mut worker = Worker {
             runtime: runtime.clone(),
@@ -345,12 +345,7 @@ impl Loader {
     }
 
     fn send(&self, command: Command) -> Result<()> {
-        self.commands
-            .try_send(command)
-            .map_err(|error| match error {
-                mpsc::error::TrySendError::Full(_) => Error::QueueFull,
-                mpsc::error::TrySendError::Closed(_) => Error::Stopped,
-            })
+        self.commands.send(command).map_err(|_| Error::Stopped)
     }
 }
 

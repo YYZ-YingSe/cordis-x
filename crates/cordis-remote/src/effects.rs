@@ -9,6 +9,7 @@ use std::{
 // themselves own the process. Terminal results remain as bounded tombstones.
 #[derive(Default)]
 pub(crate) struct Effects {
+    sweep: cordis_wire::retention::Sweep,
     entries: Mutex<BTreeMap<String, Arc<Entry>>>,
 }
 struct Entry {
@@ -32,11 +33,9 @@ impl Effects {
         if entries.contains_key(&id) {
             return Err(Error::InvalidInput("duplicate effect ID".into()));
         }
-        if entries.len() >= 4096 {
+        if self.sweep.due(entries.len()) {
             entries.retain(|_, e| !e.handle.get().is_some_and(WeakEffectHandle::is_released));
-        }
-        if entries.len() >= 4096 {
-            return Err(Error::Overloaded);
+            self.sweep.retained(entries.len());
         }
         let mut random = [0u8; 16];
         getrandom::fill(&mut random).map_err(|e| Error::Io(e.to_string()))?;

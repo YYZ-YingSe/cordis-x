@@ -578,7 +578,7 @@ async fn configured_hotspot_accepts_one_hundred_callers_over_both_transports() {
         for endpoint in [Endpoint::Ipc, Endpoint::Http] {
             let runtime = Runtime::new();
             let mut spec = backend.spec("calculator");
-            spec.session.max_inflight = 100;
+            spec.session.max_inflight = Some(100);
             spec.session.endpoint = endpoint;
             let provider = runtime
                 .install(spec.plugin("hotspot", &calculator()))

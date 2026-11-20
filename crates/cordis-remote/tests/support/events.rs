@@ -463,9 +463,9 @@ async fn full_event_callback_capacity_can_drain_dependencies_and_close() {
         let log = Log::new();
         *log.block.lock().unwrap() = Some("first.enter".into());
         rt.install(log_plugin(log.clone())).unwrap();
-        let provider = rt
-            .install(spec(backend, Endpoint::Ipc, &tick()).plugin("events", &events()))
-            .unwrap();
+        let mut binding = spec(backend, Endpoint::Ipc, &tick());
+        binding.session.max_inflight = Some(16);
+        let provider = rt.install(binding.plugin("events", &events())).unwrap();
         bounded(provider.ready()).await.unwrap();
         let (owner, handle, ctx) = consumer(&rt).await;
         invoke_json(

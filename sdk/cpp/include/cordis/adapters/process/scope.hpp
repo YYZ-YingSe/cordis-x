@@ -1,4 +1,5 @@
 #pragma once
+#include <cordis/core/retention.hpp>
 #include <cordis/core/observation.hpp>
 #include "context.hpp"
 
@@ -50,6 +51,7 @@ class ScopeRegistry : public std::enable_shared_from_this<ScopeRegistry> {
   std::mutex mutex;
   std::uint64_t next_scope = 0, next_run = 0;
   std::map<std::string, std::shared_ptr<Run>> runs;
+  cordis::detail::RetiredSweep sweep;
 
 public:
   Async<Scope> add(std::shared_ptr<DependencyChannel> channel,
@@ -82,8 +84,8 @@ public:
     {
       std::lock_guard lock(mutex);
       if (next_run == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
-      if (runs.size() >= 4096) std::erase_if(runs, [](const auto &item) { return !item.second->callback && !item.second->running; });
-      if (runs.size() >= 4096) throw Refusal("overloaded", "live capacity reached");
+      sweep.collect(runs, [](const auto &item) { return !item.second->callback && !item.second->running; });
+
       run = "u" + std::to_string(++next_run);
       runs.emplace(run, entry);
     }

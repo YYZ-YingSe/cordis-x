@@ -1,5 +1,5 @@
 import { utf8Length } from '../../core/encoding.ts';
-import { Identities, makeRoom, Completion } from './retention.ts';
+import { Identities, sweepRetired, Completion } from './retention.ts';
 import { Refusal } from '../../core/error.ts';
 import { RpcError } from './context.ts';
 import type { Context, DependencyChannel } from './context.ts';
@@ -66,7 +66,7 @@ export class ScopeRegistry {
     grant: string,
     callback: ScopeCallback,
   ): Promise<Value> {
-    makeRoom(this.runs, 4096, (e) => !e.callback && !e.running);
+    sweepRetired(this.runs, (e) => !e.callback && !e.running);
     const run = this.nextRun.next('u');
     const entry: Run = { scope, callback, started: false, running: false };
     this.runs.set(run, entry);

@@ -8,7 +8,7 @@ import type { Request, Response, CancelObservation } from '../src/protocols/sess
 function setup() {
   const sent: (Request | Response | CancelObservation)[] = [];
   const channel = new DependencyChannel();
-  channel.configure('a'.repeat(32), { incarnation: '1', fiber: '2', epoch: '3' }, async bytes => {
+  channel.configure(16, 'a'.repeat(32), { incarnation: '1', fiber: '2', epoch: '3' }, async bytes => {
     sent.push(decodeFrame(bytes));
   });
   const requests = () => sent.filter((f): f is Request => 'command' in f);

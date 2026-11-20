@@ -46,6 +46,14 @@ impl Pin {
     }
 }
 
+fn register_pin(registry: &mut Vec<Weak<Pin>>, pin: &Arc<Pin>) {
+    if registry.len() == registry.capacity() {
+        registry.retain(|pin| pin.upgrade().is_some_and(|pin| pin.live()));
+        registry.reserve(registry.len().max(1));
+    }
+    registry.push(Arc::downgrade(pin));
+}
+
 pub(crate) struct Pins(pub Vec<Arc<Pin>>);
 impl Drop for Pins {
     fn drop(&mut self) {
@@ -65,8 +73,7 @@ impl Context {
         // Same ordering as lifecycle diagnostics: coordinator, then pin registry.
         let state = inner.state.lock().unwrap();
         let mut registry = inner.retained.lock().unwrap();
-        registry.retain(|pin| pin.upgrade().is_some_and(|pin| pin.live()));
-        if durable {
+        if durable && self.dynamic.iter().any(|pin| !pin.durable) {
             // A lifetime edge must not introduce a recovery cycle. Calls themselves
             // are transient; arbitrary synchronous application wait cycles remain
             // the application's responsibility.
@@ -84,7 +91,7 @@ impl Context {
             let lease = previous.enter()?;
             let source = previous.source.upgrade().ok_or(Error::Closed)?;
             let pin = Pin::new(self, &source, lease, durable || previous.durable);
-            registry.push(Arc::downgrade(&pin));
+            register_pin(&mut registry, &pin);
             pins.0.push(pin);
         }
         let mut context = self.clone();
@@ -101,8 +108,7 @@ impl Context {
         let inner = self.inner.upgrade().ok_or(Error::RuntimeStopped)?;
         let pin = Pin::new(self, source, lease, false);
         let mut registry = inner.retained.lock().unwrap();
-        registry.retain(|pin| pin.upgrade().is_some_and(|pin| pin.live()));
-        registry.push(Arc::downgrade(&pin));
+        register_pin(&mut registry, &pin);
         self.dynamic.push(pin.clone());
         pins.0.push(pin);
         Ok(())

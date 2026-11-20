@@ -94,8 +94,8 @@ async fn cleanup_rejects_recursive_disposal_and_new_effect_registration() {
 async fn saturated_ordinary_callbacks_do_not_starve_inverse_callbacks() {
     let files = Files::new("cordis_abi_context");
     let mut capabilities = caps();
-    capabilities.max_callbacks = 1;
-    capabilities.max_contexts = 2; // held ordinary call + disposal caller fill it
+    capabilities.max_callbacks = Some(1);
+    capabilities.max_contexts = Some(2); // held ordinary call + disposal caller fill it
     let rig = rig(&files, cordis_wire::json!({}), capabilities).await;
     let effect = invoke_json(&rig.handle, "subscribe", json!("manual"))
         .await
@@ -251,7 +251,7 @@ async fn cancelled_reverse_wait_drains_before_instance_cleanup() {
 async fn cancelled_manual_disposal_keeps_cleanup_and_its_callback_capacity() {
     let files = Files::new("cordis_abi_context");
     let mut capabilities = caps();
-    capabilities.max_callbacks = 1;
+    capabilities.max_callbacks = Some(1);
     let rig = rig(&files, cordis_wire::json!({}), capabilities).await;
     let effect = invoke_json(&rig.handle, "subscribe", json!("hold"))
         .await
@@ -331,7 +331,7 @@ async fn failed_inverse_caches_error_and_never_destroys_or_unloads_live_callback
 async fn released_effects_return_capacity_without_stranding_cpp_callback() {
     let files = Files::new("cordis_abi_context");
     let mut capabilities = caps();
-    capabilities.max_effects = 1;
+    capabilities.max_effects = Some(1);
     let rig = rig(&files, cordis_wire::json!({}), capabilities).await;
     for n in 0..100 {
         let effect = invoke_json(&rig.handle, "subscribe", json!(format!("turn-{n}")))

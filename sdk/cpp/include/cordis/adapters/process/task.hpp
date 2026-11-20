@@ -1,4 +1,5 @@
 #pragma once
+#include <cordis/core/retention.hpp>
 #include <cordis/core/observation.hpp>
 #include "context.hpp"
 
@@ -44,6 +45,7 @@ class TaskRegistry {
   std::mutex mutex;
   std::uint64_t next = 0;
   std::map<std::string, std::shared_ptr<Entry>> entries;
+  cordis::detail::RetiredSweep sweep;
 
 public:
   Async<Task> add(std::shared_ptr<DependencyChannel> channel,
@@ -57,8 +59,8 @@ public:
     {
       std::lock_guard lock(mutex);
       if (next == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
-      if (entries.size() >= 4096) std::erase_if(entries, [](const auto &item) { return item.second->started && !item.second->running; });
-      if (entries.size() >= 4096) throw Refusal("overloaded", "live capacity reached");
+      sweep.collect(entries, [](const auto &item) { return item.second->started && !item.second->running; });
+
       id = "t" + std::to_string(++next);
       // Store before registration: execution/cancellation can precede its
       // reply.

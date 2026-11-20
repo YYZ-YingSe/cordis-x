@@ -6,7 +6,7 @@ import type { Message } from '../../core/message.ts';
 import { Refusal, RpcError } from '../../core/error.ts';
 import { checkBinary } from '../../core/protobuf.ts';
 import { checked } from '../../core/typed.ts';
-import { Identities, makeRoom } from './retention.ts';
+import { Identities, sweepRetired } from './retention.ts';
 import { ResourceRecord } from './resources.ts';
 
 /** Adapter-owned implementations share the existing resource drain barrier.
@@ -18,7 +18,7 @@ export class ReferenceRegistry {
   get released(): boolean { return [...this.entries.values()].every(e => e.released); }
   async export(descriptor: Interface, object: ReferenceObject,
     publish: (id: string, descriptor: Interface) => Promise<string>): Promise<string> {
-    makeRoom(this.entries, 4096, e => e.released);
+    sweepRetired(this.entries, e => e.released);
     const contract = normalizeInterface(descriptor);
     const entry = new ResourceRecord('', {
       async invoke(method, args, call) {

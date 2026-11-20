@@ -175,8 +175,10 @@ async fn concurrent_owned_cleanup_waits_for_capacity_without_losing_effects() {
         let log = Log::new();
         log.block_releases.store(true, Ordering::SeqCst);
         rt.install(lifecycle_log_plugin(log.clone())).unwrap();
+        let mut binding = spec(backend, Endpoint::Ipc, true);
+        binding.session.max_inflight = Some(16);
         let provider = rt
-            .install(spec(backend, Endpoint::Ipc, true).plugin("subscriptions", &subscriptions()))
+            .install(binding.plugin("subscriptions", &subscriptions()))
             .unwrap();
         bounded(provider.ready()).await.unwrap();
         let mut owners = Vec::new();

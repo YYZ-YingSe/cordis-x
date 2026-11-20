@@ -1,4 +1,5 @@
 #pragma once
+#include <cordis/core/retention.hpp>
 #include <cordis/core/observation.hpp>
 #include "context.hpp"
 
@@ -90,6 +91,7 @@ class EventRegistry {
   };
   std::mutex mutex;
   std::map<std::string, std::shared_ptr<Entry>> entries;
+  cordis::detail::RetiredSweep sweep;
   OperationInbox seen{reserved_capacity};
   std::uint64_t next_listener = 0, next_dispatch = 0;
   Json declarations;
@@ -108,6 +110,7 @@ class EventRegistry {
   }
 
 public:
+  void capacity(std::size_t count) { seen.grow(count); }
   explicit EventRegistry(Json declarations)
       : declarations(std::move(declarations)) {}
   Async<Subscription> add(std::shared_ptr<DependencyChannel> channel,
@@ -118,8 +121,8 @@ public:
     {
       std::lock_guard lock(mutex);
       if (next_listener == UINT64_MAX) throw Refusal("exhausted", "identity space exhausted");
-      if (entries.size() >= 4096) std::erase_if(entries, [](const auto &item) { return !item.second->callback && !item.second->running; });
-      if (entries.size() >= 4096) throw Refusal("overloaded", "live capacity reached");
+      sweep.collect(entries, [](const auto &item) { return !item.second->callback && !item.second->running; });
+
       id = "l" + std::to_string(++next_listener);
       entries.emplace(id,
                       std::make_shared<Entry>(Entry{std::move(callback), 0}));

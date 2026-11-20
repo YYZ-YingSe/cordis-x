@@ -11,7 +11,7 @@ function setup() {
   const withdrawn: string[] = [];
   const channel = new DependencyChannel();
   const identity = { incarnation: '1', fiber: '2', epoch: '3' };
-  channel.configure('a'.repeat(32), identity, async (value) => {
+  channel.configure(16, 'a'.repeat(32), identity, async (value) => {
     const frame = decodeFrame(value);
     if ('cancelObservation' in frame) { withdrawn.push(frame.operation); return; }
     sent.push(request(value));

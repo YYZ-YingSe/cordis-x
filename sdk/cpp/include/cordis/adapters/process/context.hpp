@@ -1,4 +1,5 @@
 #pragma once
+#include <cordis/core/retention.hpp>
 #include "wire.hpp"
 #include <algorithm>
 #include <cordis/core/error.hpp>
@@ -51,7 +52,7 @@ private:
 public:
   std::string insert(Callback callback) {
     std::lock_guard lock(mutex);
-    if (entries.size() >= 4096 || next == UINT64_MAX)
+    if (next == UINT64_MAX)
       throw Refusal("overloaded", "reference capacity reached");
     auto id = "i" + std::to_string(++next);
     entries.emplace(id, std::make_shared<Callback>(std::move(callback)));
@@ -482,6 +483,7 @@ class EffectRegistry {
   };
   std::mutex mutex;
   std::map<std::string, std::shared_ptr<Entry>> entries;
+  cordis::detail::RetiredSweep sweep;
   std::uint64_t next = 0;
 
 public:
@@ -497,13 +499,11 @@ public:
       std::lock_guard lock(mutex);
       if (next == UINT64_MAX)
         throw Refusal("exhausted", "identity space exhausted");
-      if (entries.size() >= 4096)
-        std::erase_if(entries, [](const auto &item) {
+      sweep.collect(entries, [](const auto &item) {
           std::lock_guard lock(item.second->mutex);
           return item.second->finished && !item.second->failure;
         });
-      if (entries.size() >= 4096)
-        throw Refusal("overloaded", "live capacity reached");
+
       id = "e" + std::to_string(++next);
       entries.emplace(id, entry);
     }
@@ -555,7 +555,7 @@ public:
 class SequenceRegistry {
   struct Step {
     std::optional<Inverse> inverse;
-    std::shared_ptr<std::atomic<std::size_t>> budget;
+
     bool started = false, finished = false;
     std::exception_ptr failure;
     std::mutex mutex;
@@ -584,7 +584,6 @@ class SequenceRegistry {
       failure = error;
       if (!error) {
         inverse.reset();
-        --*budget;
       }
       finished = true;
       lock.unlock();
@@ -606,9 +605,8 @@ class SequenceRegistry {
   };
   std::mutex mutex;
   std::map<std::string, std::shared_ptr<Entry>> entries;
+  cordis::detail::RetiredSweep sweep;
   std::uint64_t next_id = 0;
-  std::shared_ptr<std::atomic<std::size_t>> total_steps =
-      std::make_shared<std::atomic<std::size_t>>(0);
   std::shared_ptr<Entry> get(std::string id) {
     std::lock_guard lock(mutex);
     auto found = entries.find(id);
@@ -630,13 +628,11 @@ public:
       std::lock_guard lock(mutex);
       if (next_id == UINT64_MAX)
         throw Refusal("exhausted", "identity space exhausted");
-      if (entries.size() >= 256)
-        std::erase_if(entries, [](const auto &item) {
+      sweep.collect(entries, [](const auto &item) {
           std::lock_guard lock(item.second->mutex);
           return item.second->released;
         });
-      if (entries.size() >= 256)
-        throw Refusal("overloaded", "live capacity reached");
+
       id = "s" + std::to_string(++next_id);
       entries.emplace(id, entry);
     }
@@ -668,11 +664,7 @@ public:
         throw Refusal("closed", "sequence cannot advance");
       if (number != std::to_string(entry->next))
         throw Refusal("invalid_step", "step order mismatch");
-      auto occupied = total_steps->load();
-      do {
-        if (occupied >= 4096)
-          throw Refusal("overloaded", "unrecovered step capacity reached");
-      } while (!total_steps->compare_exchange_weak(occupied, occupied + 1));
+      if (entry->next == UINT64_MAX) throw Refusal("exhausted", "step identity exhausted");
       ++entry->next;
       entry->running = true;
     }
@@ -699,13 +691,10 @@ public:
     }
     auto step = std::make_shared<Step>();
     step->inverse = std::move(result.inverse);
-    step->budget = total_steps;
     {
       std::lock_guard lock(entry->mutex);
       if (step->inverse)
         entry->steps.emplace(number, step);
-      else
-        --*total_steps;
       entry->ended = result.done;
     }
     if ((step->inverse && step->inverse->label.size() > 1024) ||

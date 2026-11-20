@@ -39,7 +39,7 @@ impl Setup {
 
         spec.session.endpoint = endpoint;
         spec.session.execution_timeout = Some(timeout);
-        spec.session.max_inflight = 257;
+        spec.session.max_inflight = Some(257);
         spec.args = vec![
             "--test-hooks".into(),
             "--trace".into(),

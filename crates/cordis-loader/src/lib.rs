@@ -36,7 +36,6 @@ pub enum Error {
     Preparation(String),
     Runtime(cordis_runtime::Error),
     Apply(Vec<Failure>),
-    QueueFull,
     Stopped,
 }
 impl std::fmt::Display for Error {

@@ -6,12 +6,13 @@ use tokio::sync::Notify;
 
 #[derive(Default)]
 pub struct Resources {
+    entry_sweep: cordis_wire::retention::Sweep,
     entries: RefCell<BTreeMap<u64, Rc<Entry>>>,
     next: Cell<u64>,
 }
 impl Resources {
     pub fn reserve(&self, contract: cordis_sdk_core::ResourceContract) -> Result<(u64, Rc<Entry>)> {
-        if self.entries.borrow().len() >= 4096 {
+        if self.entry_sweep.due(self.entries.borrow().len()) {
             self.entries.borrow_mut().retain(|_, e| {
                 !e.completion
                     .borrow()
@@ -19,9 +20,7 @@ impl Resources {
                     .and_then(|f| f.peek())
                     .is_some_and(Result::is_ok)
             });
-        }
-        if self.entries.borrow().len() >= 4096 {
-            return Err(refused("overloaded", "live resource capacity reached"));
+            self.entry_sweep.retained(self.entries.borrow().len());
         }
         let next = self
             .next

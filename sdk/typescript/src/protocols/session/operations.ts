@@ -1,15 +1,16 @@
 import { Refusal } from '../../core/error.ts';
 
 export const RESERVED_CAPACITY = 16;
-export const REVERSE_LANES = Array<number>(14).fill(RESERVED_CAPACITY);
 export function operationLayout(ordinary: number) {
-  const forward = [ordinary, ...Array<number>(8).fill(RESERVED_CAPACITY)];
-  const incoming = ordinary + 8 * RESERVED_CAPACITY;
-  const output = incoming + REVERSE_LANES.reduce((sum, size) => sum + size, 0);
-  const connections = 2 * (ordinary + RESERVED_CAPACITY);
+  const auxiliary = Math.max(ordinary, RESERVED_CAPACITY);
+  const forward = [ordinary, ...Array<number>(8).fill(auxiliary)];
+  const reverse = Array<number>(14).fill(auxiliary);
+  const incoming = ordinary + 8 * auxiliary;
+  const output = incoming + reverse.reduce((sum, size) => sum + size, 0);
+  const connections = 2 * (ordinary + auxiliary);
   if (!Number.isSafeInteger(ordinary) || ordinary < 1 || output > 0xffffffff || connections > 0xffffffff)
     throw new Refusal('invalid_argument', 'max_inflight must be positive and representable');
-  return { forward, incoming, output, connections };
+  return { forward, reverse, incoming, output, connections };
 }
 const MAX_GENERATION = (1n << 64n) - 1n;
 type Slot = { generation: bigint; active: boolean };
@@ -21,46 +22,59 @@ export function parseOperation(value: string): { slot: number; generation: bigin
   return { slot, generation };
 }
 export class OperationOutbox {
-  private slots: Slot[];
-  private lanes: { start: number; end: number }[];
+  private lanes: { start: number; size: number; entries: Slot[]; free: number[] }[];
   constructor(capacity: number | number[]) {
     let end = 0;
     this.lanes = (typeof capacity === 'number' ? [capacity] : capacity).map(size => {
-      const start = end; end += size; return { start, end };
+      const start = end;
+      end += size;
+      return { start, size, entries: [], free: [] };
     });
-    this.slots = Array.from({ length: end }, () => ({ generation: 0n, active: false }));
   }
   allocate(lane?: number): string {
-    const { start, end } = lane === undefined ? { start: 0, end: this.slots.length } : this.lanes[lane];
-    const slot = this.slots.findIndex((s, i) => i >= start && i < end && !s.active && s.generation < MAX_GENERATION);
-    if (slot < 0) throw new Refusal('overloaded', 'request slots full');
-    const entry = this.slots[slot];
+    const pool = lane === undefined
+      ? this.lanes.find(value => value.free.length || value.entries.length < value.size)
+      : this.lanes[lane];
+    if (!pool) throw new Refusal('overloaded', 'request slots full');
+    let index = pool.free.pop();
+    if (index === undefined) {
+      index = pool.entries.length;
+      if (index >= pool.size) throw new Refusal('overloaded', 'request slots full');
+      pool.entries.push({ generation: 0n, active: false });
+    }
+    const entry = pool.entries[index];
     entry.active = true;
-    return `${slot}:${++entry.generation}`;
+    return `${pool.start + index}:${++entry.generation}`;
   }
   complete(value: string): boolean {
-    const id = parseOperation(value), entry = id && this.slots[id.slot];
-    if (!entry || !entry.active || entry.generation !== id!.generation) return false;
+    const id = parseOperation(value);
+    if (!id) return false;
+    const pool = this.lanes.find(lane => id.slot >= lane.start && id.slot < lane.start + lane.size);
+    if (!pool) return false;
+    const index = id.slot - pool.start, entry = pool.entries[index];
+    if (!entry || !entry.active || entry.generation !== id.generation) return false;
     entry.active = false;
+    if (entry.generation < MAX_GENERATION) pool.free.push(index);
     return true;
   }
 }
 export class OperationInbox {
-  private slots: Slot[];
-  constructor(capacity: number) {
-    this.slots = Array.from({ length: capacity }, () => ({ generation: 0n, active: false }));
-  }
+  private slots = new Map<number, Slot>();
+  private capacity: number;
+  constructor(capacity: number) { this.capacity = capacity; }
   grow(capacity: number) {
-    if (capacity < this.slots.length) throw new Error('operation table cannot shrink');
-    while (this.slots.length < capacity) this.slots.push({ generation: 0n, active: false });
+    if (capacity < this.capacity) throw new Error('operation table cannot shrink');
+    this.capacity = capacity;
   }
   admit(value: string): () => void {
-    const id = parseOperation(value), entry = id && this.slots[id.slot];
-    if (!entry || entry.active || id!.generation <= entry.generation)
-      throw new Refusal('duplicate_operation', 'invalid, active or retired request identity');
-    entry.generation = id!.generation;
+    const id = parseOperation(value);
+    if (!id || id.slot >= this.capacity) throw new Refusal('duplicate_operation', 'invalid request identity');
+    const entry = this.slots.get(id.slot) ?? { generation: 0n, active: false };
+    if (entry.active || id.generation <= entry.generation)
+      throw new Refusal('duplicate_operation', 'active or retired request identity');
+    entry.generation = id.generation;
     entry.active = true;
-    let completed = false;
-    return () => { if (!completed) { completed = true; entry.active = false; } };
+    this.slots.set(id.slot, entry);
+    return () => { if (entry.generation === id.generation) entry.active = false; };
   }
 }

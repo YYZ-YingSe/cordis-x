@@ -10,17 +10,13 @@ use std::{
 };
 
 use cordis_host::{Body, Factory, FactoryBinding, ProvisionBinding};
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct CompositionLimits {
-    pub children: usize,
-}
-impl Default for CompositionLimits {
-    fn default() -> Self {
-        Self { children: 1024 }
-    }
+    pub children: Option<usize>,
 }
 
 pub(crate) struct Composition {
+    sweep: cordis_wire::retention::Sweep,
     factories: BTreeMap<String, Arc<Factory>>,
     provisions: BTreeMap<String, Service<Body>>,
     limits: CompositionLimits,
@@ -67,6 +63,7 @@ impl Composition {
             factories: bound_factories,
             provisions: bound_provisions,
             limits,
+            sweep: Default::default(),
             entries: Mutex::default(),
         }))
     }
@@ -101,10 +98,13 @@ impl Composition {
         let grant = token()?;
         {
             let mut entries = self.entries.lock().unwrap();
-            if entries.len() >= self.limits.children {
+            if self.sweep.due(entries.len())
+                || self.limits.children.is_some_and(|n| entries.len() >= n)
+            {
                 entries.retain(|_, e| !e.as_ref().is_some_and(|e| e.child.is_retired()));
+                self.sweep.retained(entries.len());
             }
-            if entries.len() >= self.limits.children {
+            if self.limits.children.is_some_and(|n| entries.len() >= n) {
                 return Err(Error::Overloaded);
             }
             if entries.contains_key(&id) {

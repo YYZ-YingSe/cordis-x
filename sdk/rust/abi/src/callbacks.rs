@@ -118,6 +118,8 @@ pub struct Sequence {
 }
 #[derive(Default)]
 pub struct Registry {
+    entry_sweep: cordis_wire::retention::Sweep,
+    sequence_sweep: cordis_wire::retention::Sweep,
     next: Cell<u64>,
     pub entries: RefCell<BTreeMap<String, Rc<Entry>>>,
     sequences: RefCell<BTreeMap<String, Rc<Sequence>>>,
@@ -133,13 +135,11 @@ impl Registry {
         Ok(format!("{prefix}{}", self.next.get()))
     }
     pub fn insert(&self, prefix: char, callback: Callback) -> Result<String> {
-        if self.entries.borrow().len() >= 4096 {
+        if self.entry_sweep.due(self.entries.borrow().len()) {
             self.entries
                 .borrow_mut()
                 .retain(|_, e| e.callback.borrow().is_some() || e.running.get() != 0);
-        }
-        if self.entries.borrow().len() >= 4096 {
-            return Err(refused("overloaded", "callback capacity reached"));
+            self.entry_sweep.retained(self.entries.borrow().len());
         }
         let id = self.id(prefix)?;
         self.entries
@@ -148,13 +148,11 @@ impl Registry {
         Ok(id)
     }
     pub fn insert_payload(&self, prefix: char, callback: WireCallback) -> Result<String> {
-        if self.entries.borrow().len() >= 4096 {
+        if self.entry_sweep.due(self.entries.borrow().len()) {
             self.entries
                 .borrow_mut()
                 .retain(|_, e| e.callback.borrow().is_some() || e.running.get() != 0);
-        }
-        if self.entries.borrow().len() >= 4096 {
-            return Err(refused("overloaded", "callback capacity reached"));
+            self.entry_sweep.retained(self.entries.borrow().len());
         }
         let id = self.id(prefix)?;
         self.entries
@@ -183,13 +181,11 @@ impl Registry {
         Ok(())
     }
     pub fn sequence(&self, producer: Producer) -> Result<String> {
-        if self.sequences.borrow().len() >= 256 {
+        if self.sequence_sweep.due(self.sequences.borrow().len()) {
             self.sequences
                 .borrow_mut()
                 .retain(|_, e| e.producer.borrow().is_some() || e.running.get());
-        }
-        if self.sequences.borrow().len() >= 256 {
-            return Err(refused("overloaded", "sequence capacity reached"));
+            self.sequence_sweep.retained(self.sequences.borrow().len());
         }
         let id = self.id('s')?;
         self.sequences.borrow_mut().insert(
@@ -249,16 +245,19 @@ impl Registry {
         {
             return Err(refused("invalid_step", "sequence order or state mismatch"));
         }
-        if sequence.steps.borrow().len() >= 4096 {
-            return Err(refused("exhausted", "sequence steps exhausted"));
-        }
         let producer = sequence
             .producer
             .borrow()
             .clone()
             .ok_or_else(|| refused("closed", "producer absent"))?;
+        sequence.next.set(
+            sequence
+                .next
+                .get()
+                .checked_add(1)
+                .ok_or_else(|| refused("exhausted", "step identity exhausted"))?,
+        );
         sequence.running.set(true);
-        sequence.next.set(sequence.next.get() + 1);
         let result = std::panic::AssertUnwindSafe(async { producer(ctx).await })
             .catch_unwind()
             .await
